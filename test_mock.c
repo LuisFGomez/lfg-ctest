@@ -458,6 +458,80 @@ static int test_mock_pointer_vs_memory(void)
 }
 
 /*============================================================================
+ *  Test: Verify max calls succeeds (boundary test)
+ *==========================================================================*/
+
+static int test_mock_max_calls_void(void)
+{
+    size_t i;
+
+    simple_void_func__mock_reset();
+
+    /* Call exactly MOCK_CALL_STORAGE_MAX times - should succeed */
+    for (i = 0; i < MOCK_CALL_STORAGE_MAX; i++)
+    {
+        simple_void_func__mock();
+    }
+    ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, simple_void_func__call_count);
+
+    simple_void_func__mock_reset();
+    return lft_current_test_return();
+}
+
+static int test_mock_max_calls_returning(void)
+{
+    size_t i;
+
+    get_value__mock_reset();
+
+    /* Call exactly MOCK_CALL_STORAGE_MAX times - should succeed */
+    for (i = 0; i < MOCK_CALL_STORAGE_MAX; i++)
+    {
+        (void)get_value__mock();
+    }
+    ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, get_value__call_count);
+
+    get_value__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Verify overflow aborts (subprocess test)
+ *==========================================================================*/
+
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
+
+static int test_mock_overflow_aborts(void)
+{
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid == 0)
+    {
+        /* Child: trigger overflow and abort */
+        size_t i;
+        simple_void_func__mock_reset();
+        for (i = 0; i <= MOCK_CALL_STORAGE_MAX; i++)
+        {
+            simple_void_func__mock();
+        }
+        /* Should not reach here */
+        _exit(0);
+    }
+
+    /* Parent: wait and check child was killed by signal */
+    waitpid(pid, &status, 0);
+
+    ASSERT_TRUE(WIFSIGNALED(status));
+    ASSERT_INT_EQUAL(SIGABRT, WTERMSIG(status));
+
+    return lft_current_test_return();
+}
+
+/*============================================================================
  *  Test: Verify reset clears everything
  *==========================================================================*/
 
@@ -690,6 +764,14 @@ static int suite_mock_param_actions(void)
     return 0;
 }
 
+static int suite_mock_overflow(void)
+{
+    lfgtest(test_mock_max_calls_void);
+    lfgtest(test_mock_max_calls_returning);
+    lfgtest(test_mock_overflow_aborts);
+    return 0;
+}
+
 /*============================================================================
  *  Main
  *==========================================================================*/
@@ -711,6 +793,9 @@ int main(void)
 
     printf("\n--- SUITE 3: Parameter Actions ---\n");
     lft_suite(suite_mock_param_actions);
+
+    printf("\n--- SUITE 4: Storage Limits ---\n");
+    lft_suite(suite_mock_overflow);
 
     printf("\n");
     lft_print_summary();

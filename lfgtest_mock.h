@@ -17,11 +17,13 @@
  *  Includes
  *==========================================================================*/
 
-#include <stdbool.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
+
+#include "lfgtest.h"
 
 /*============================================================================
  *  Defines/Typedefs
@@ -171,19 +173,16 @@ void mock_param_destroy(mock_param_action_t action);
         _func##__param_actions = NULL;                                         \
     }
 
-/* Overflow check */
-#define _MOCK_OVERFLOW_CHECK_V(_func)                                          \
+/* Overflow check - aborts immediately if call limit exceeded */
+#define _MOCK_OVERFLOW_CHECK(_func)                                            \
     if (i >= MOCK_CALL_STORAGE_MAX) {                                          \
-        printf("fatal: %s max calls exceeded\r\n", #_func);                    \
-        return;                                                                \
+        fprintf(stderr, "MOCK OVERFLOW: %s exceeded %d calls\n",               \
+                #_func, MOCK_CALL_STORAGE_MAX);                                \
+        assert(0 && "mock call storage exceeded");                             \
     }
 
-#define _MOCK_OVERFLOW_CHECK_R(_func, _rtype)                                  \
-    if (i >= MOCK_CALL_STORAGE_MAX) {                                          \
-        _rtype _zero = {0};                                                    \
-        printf("fatal: %s max calls exceeded\r\n", #_func);                    \
-        return _zero;                                                          \
-    }
+#define _MOCK_OVERFLOW_CHECK_V(_func)  _MOCK_OVERFLOW_CHECK(_func)
+#define _MOCK_OVERFLOW_CHECK_R(_func, _rtype)  _MOCK_OVERFLOW_CHECK(_func)
 
 /*============================================================================
  *  Void Return, No Parameters (V_V)
@@ -196,7 +195,11 @@ void mock_param_destroy(mock_param_action_t action);
 
 #define DEFINE_MOCK_V_V(_func) \
     size_t _func##__call_count = 0; \
-    void _func##__mock(void) { _func##__call_count++; } \
+    void _func##__mock(void) { \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_V(_func) \
+        _func##__call_count++; \
+    } \
     void _func##__mock_reset(void) { _func##__call_count = 0; }
 
 /*============================================================================
@@ -213,6 +216,8 @@ void mock_param_destroy(mock_param_action_t action);
     size_t _func##__call_count = 0; \
     _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
     _rtype _func##__mock(void) { \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         return _func##__return_queue[_func##__call_count++]; \
     } \
     void _func##__mock_reset(void) { \
