@@ -39,6 +39,39 @@ DECLARE_MOCK_V_3(configure, int, int, int);
 DECLARE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t);
 
 /*============================================================================
+ *  Struct-by-value Mock Declarations
+ *  Note: param actions (mock_param_mem_read/write) don't work with struct
+ *  params, but param_history and return_queue work fine.
+ *==========================================================================*/
+
+struct point
+{
+    int x;
+    int y;
+};
+
+struct rect
+{
+    struct point origin;
+    struct point size;
+};
+
+/* V_1_S with struct param (struct-safe, no param actions) */
+DECLARE_MOCK_V_1_S(draw_point, struct point);
+
+/* V_2_S with struct param and primitive */
+DECLARE_MOCK_V_2_S(draw_rect, struct rect, int);
+
+/* R_V_S returning a struct */
+DECLARE_MOCK_R_V_S(get_origin, struct point);
+
+/* R_1_S with struct param and struct return */
+DECLARE_MOCK_R_1_S(transform_point, struct point, struct point);
+
+/* V_3_S with multiple struct params */
+DECLARE_MOCK_V_3_S(draw_line, struct point, struct point, int);
+
+/*============================================================================
  *  Mock Definitions (in .c file, typically)
  *==========================================================================*/
 
@@ -51,6 +84,13 @@ DEFINE_MOCK_R_2(add_numbers, int, int, int)
 DEFINE_MOCK_R_3(read_buffer, int, uint8_t*, size_t, size_t*)
 DEFINE_MOCK_V_3(configure, int, int, int)
 DEFINE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t)
+
+/* Struct-by-value mock definitions (using _S variants) */
+DEFINE_MOCK_V_1_S(draw_point, struct point)
+DEFINE_MOCK_V_2_S(draw_rect, struct rect, int)
+DEFINE_MOCK_R_V_S(get_origin, struct point)
+DEFINE_MOCK_R_1_S(transform_point, struct point, struct point)
+DEFINE_MOCK_V_3_S(draw_line, struct point, struct point, int)
 
 /*============================================================================
  *  Test: V_V - void return, no params
@@ -448,6 +488,170 @@ static int test_mock_reset_clears_all(void)
 }
 
 /*============================================================================
+ *  Test: Struct-by-value parameter capture
+ *==========================================================================*/
+
+static int test_mock_struct_param(void)
+{
+    struct point p = {10, 20};
+
+    draw_point__mock_reset();
+
+    draw_point__mock(p);
+
+    ASSERT_INT_EQUAL(1, draw_point__call_count);
+    ASSERT_INT_EQUAL(10, draw_point__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(20, draw_point__param_history[0].p0.y);
+
+    /* Modify original - captured copy should be unaffected */
+    p.x = 999;
+    ASSERT_INT_EQUAL(10, draw_point__param_history[0].p0.x);
+
+    draw_point__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Nested struct-by-value parameter
+ *==========================================================================*/
+
+static int test_mock_nested_struct_param(void)
+{
+    struct rect r;
+
+    draw_rect__mock_reset();
+
+    r.origin.x = 10;
+    r.origin.y = 20;
+    r.size.x = 100;
+    r.size.y = 200;
+
+    draw_rect__mock(r, 0xFF);
+
+    ASSERT_INT_EQUAL(1, draw_rect__call_count);
+    ASSERT_INT_EQUAL(10, draw_rect__param_history[0].p0.origin.x);
+    ASSERT_INT_EQUAL(20, draw_rect__param_history[0].p0.origin.y);
+    ASSERT_INT_EQUAL(100, draw_rect__param_history[0].p0.size.x);
+    ASSERT_INT_EQUAL(200, draw_rect__param_history[0].p0.size.y);
+    ASSERT_INT_EQUAL(0xFF, draw_rect__param_history[0].p1);
+
+    draw_rect__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Struct return value (no params)
+ *==========================================================================*/
+
+static int test_mock_struct_return(void)
+{
+    struct point result;
+
+    get_origin__mock_reset();
+
+    /* Set up return value */
+    get_origin__return_queue[0].x = 42;
+    get_origin__return_queue[0].y = 84;
+
+    result = get_origin__mock();
+
+    ASSERT_INT_EQUAL(1, get_origin__call_count);
+    ASSERT_INT_EQUAL(42, result.x);
+    ASSERT_INT_EQUAL(84, result.y);
+
+    get_origin__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Struct param and struct return
+ *==========================================================================*/
+
+static int test_mock_struct_param_and_return(void)
+{
+    struct point input = {10, 20};
+    struct point output;
+
+    transform_point__mock_reset();
+
+    /* Set up return value */
+    transform_point__return_queue[0].x = 100;
+    transform_point__return_queue[0].y = 200;
+
+    output = transform_point__mock(input);
+
+    /* Verify param captured */
+    ASSERT_INT_EQUAL(1, transform_point__call_count);
+    ASSERT_INT_EQUAL(10, transform_point__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(20, transform_point__param_history[0].p0.y);
+
+    /* Verify return value */
+    ASSERT_INT_EQUAL(100, output.x);
+    ASSERT_INT_EQUAL(200, output.y);
+
+    transform_point__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Multiple struct params
+ *==========================================================================*/
+
+static int test_mock_multiple_struct_params(void)
+{
+    struct point p1 = {0, 0};
+    struct point p2 = {100, 100};
+
+    draw_line__mock_reset();
+
+    draw_line__mock(p1, p2, 3);
+
+    ASSERT_INT_EQUAL(1, draw_line__call_count);
+    ASSERT_INT_EQUAL(0, draw_line__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(0, draw_line__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(100, draw_line__param_history[0].p1.x);
+    ASSERT_INT_EQUAL(100, draw_line__param_history[0].p1.y);
+    ASSERT_INT_EQUAL(3, draw_line__param_history[0].p2);
+
+    draw_line__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
+ *  Test: Multiple calls with struct returns
+ *==========================================================================*/
+
+static int test_mock_struct_return_queue(void)
+{
+    struct point r1, r2, r3;
+
+    get_origin__mock_reset();
+
+    /* Queue up multiple return values */
+    get_origin__return_queue[0].x = 1;
+    get_origin__return_queue[0].y = 2;
+    get_origin__return_queue[1].x = 10;
+    get_origin__return_queue[1].y = 20;
+    get_origin__return_queue[2].x = 100;
+    get_origin__return_queue[2].y = 200;
+
+    r1 = get_origin__mock();
+    r2 = get_origin__mock();
+    r3 = get_origin__mock();
+
+    ASSERT_INT_EQUAL(3, get_origin__call_count);
+    ASSERT_INT_EQUAL(1, r1.x);
+    ASSERT_INT_EQUAL(2, r1.y);
+    ASSERT_INT_EQUAL(10, r2.x);
+    ASSERT_INT_EQUAL(20, r2.y);
+    ASSERT_INT_EQUAL(100, r3.x);
+    ASSERT_INT_EQUAL(200, r3.y);
+
+    get_origin__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
  *  Test Suite
  *==========================================================================*/
 
@@ -461,6 +665,17 @@ static int suite_mock_basic(void)
     lfgtest(test_mock_r_2);
     lfgtest(test_mock_v_3);
     lfgtest(test_mock_r_4);
+    return 0;
+}
+
+static int suite_mock_struct_by_value(void)
+{
+    lfgtest(test_mock_struct_param);
+    lfgtest(test_mock_nested_struct_param);
+    lfgtest(test_mock_struct_return);
+    lfgtest(test_mock_struct_param_and_return);
+    lfgtest(test_mock_multiple_struct_params);
+    lfgtest(test_mock_struct_return_queue);
     return 0;
 }
 
@@ -491,7 +706,10 @@ int main(void)
     printf("--- SUITE 1: Basic Mock Operations ---\n");
     lft_suite(suite_mock_basic);
 
-    printf("\n--- SUITE 2: Parameter Actions ---\n");
+    printf("\n--- SUITE 2: Struct-by-Value ---\n");
+    lft_suite(suite_mock_struct_by_value);
+
+    printf("\n--- SUITE 3: Parameter Actions ---\n");
     lft_suite(suite_mock_param_actions);
 
     printf("\n");
