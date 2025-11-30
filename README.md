@@ -77,51 +77,74 @@ int main(int argc, char *argv[])
 
 ### Assertion Reference
 
-See [ASSERTIONS.md](ASSERTIONS.md) for the complete assertion API (49 assertions).
+**49 assertions** covering all common C testing scenarios.
 
-**Common assertions:**
+#### Pointer Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_PTR_EQUAL(expected, actual)` | Pointers are equal |
+| `ASSERT_PTR_NOT_EQUAL(expected, actual)` | Pointers are not equal |
+| `ASSERT_PTR_NULL(ptr)` | Pointer is NULL |
+| `ASSERT_PTR_NOT_NULL(ptr)` | Pointer is not NULL |
+| `ASSERT_NULL(ptr)` | Alias for `PTR_NULL` |
+| `ASSERT_NOT_NULL(ptr)` | Alias for `PTR_NOT_NULL` |
 
-```c
-// Boolean
-ASSERT_TRUE(condition);
-ASSERT_FALSE(condition);
+#### Boolean Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_TRUE(condition)` | Condition is true |
+| `ASSERT_FALSE(condition)` | Condition is false |
 
-// Integer equality (with terse aliases)
-ASSERT_INT_EQUAL(expected, actual);   // or ASSERT_EQ
-ASSERT_INT_NOT_EQUAL(expected, actual); // or ASSERT_NE
+#### Integer Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_INT_EQUAL(expected, actual)` | Integers are equal |
+| `ASSERT_INT_NOT_EQUAL(expected, actual)` | Integers are not equal |
+| `ASSERT_EQ(expected, actual)` | Alias for `INT_EQUAL` |
+| `ASSERT_NE(expected, actual)` | Alias for `INT_NOT_EQUAL` |
+| `ASSERT_UINT_EQUAL(expected, actual)` | Unsigned integers are equal |
+| `ASSERT_UINT_NOT_EQUAL(expected, actual)` | Unsigned integers are not equal |
 
-// Fixed-width integers
-ASSERT_UINT8_EQUAL(expected, actual);
-ASSERT_INT32_EQUAL(expected, actual);
-ASSERT_UINT64_EQUAL(expected, actual);
-// ... and all other int8/16/32/64 signed/unsigned variants
+Fixed-width variants: `ASSERT_{INT|UINT}{8|16|32|64}_{EQUAL|NOT_EQUAL}`
 
-// Pointers
-ASSERT_PTR_EQUAL(expected, actual);
-ASSERT_PTR_NOT_NULL(ptr);  // or ASSERT_NOT_NULL
-ASSERT_PTR_NULL(ptr);      // or ASSERT_NULL
+#### String Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_STR_EQUAL(expected, actual)` | Strings are equal (strcmp) |
+| `ASSERT_STR_NOT_EQUAL(expected, actual)` | Strings are not equal |
+| `ASSERT_STRN_EQUAL(expected, actual, n)` | First n chars are equal (strncmp) |
 
-// Strings and memory
-ASSERT_STR_EQUAL(expected, actual);
-ASSERT_STRN_EQUAL(expected, actual, n);
-ASSERT_MEM_EQUAL(expected, actual, n);
+#### Memory Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_MEM_EQUAL(expected, actual, n)` | n bytes are equal (memcmp) |
+| `ASSERT_MEM_NOT_EQUAL(expected, actual, n)` | n bytes are not equal |
 
-// Comparisons (with terse aliases)
-ASSERT_GREATER_THAN(a, b);     // or ASSERT_GT
-ASSERT_LESS_THAN(a, b);        // or ASSERT_LT
-ASSERT_GREATER_OR_EQUAL(a, b); // or ASSERT_GE
-ASSERT_LESS_OR_EQUAL(a, b);    // or ASSERT_LE
-ASSERT_IN_RANGE(val, min, max);
+#### Comparison Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_GREATER_THAN(a, b)` | a > b |
+| `ASSERT_LESS_THAN(a, b)` | a < b |
+| `ASSERT_GREATER_OR_EQUAL(a, b)` | a >= b |
+| `ASSERT_LESS_OR_EQUAL(a, b)` | a <= b |
+| `ASSERT_GT(a, b)` | Alias for `GREATER_THAN` |
+| `ASSERT_LT(a, b)` | Alias for `LESS_THAN` |
+| `ASSERT_GE(a, b)` | Alias for `GREATER_OR_EQUAL` |
+| `ASSERT_LE(a, b)` | Alias for `LESS_OR_EQUAL` |
+| `ASSERT_IN_RANGE(val, min, max)` | val is within [min, max] inclusive |
 
-// Bit operations
-ASSERT_BIT_SET(val, bit);
-ASSERT_BIT_CLEAR(val, bit);
-ASSERT_BITS_SET(val, mask);
-ASSERT_BITS_CLEAR(val, mask);
+#### Bit/Flag Assertions
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_BIT_SET(val, bit)` | Specific bit is set |
+| `ASSERT_BIT_CLEAR(val, bit)` | Specific bit is clear |
+| `ASSERT_BITS_SET(val, mask)` | All bits in mask are set |
+| `ASSERT_BITS_CLEAR(val, mask)` | All bits in mask are clear |
 
-// Explicit failure
-ASSERT_FAIL("error message");
-```
+#### Explicit Failure
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_FAIL(message)` | Unconditional failure with message |
 
 ---
 
