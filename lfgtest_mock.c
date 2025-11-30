@@ -28,7 +28,7 @@
  *==========================================================================*/
 
 mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned callidx,
-                                    unsigned paramidx, void *buffer, size_t buf_size)
+                                        unsigned paramidx, void *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -45,12 +45,13 @@ mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned cal
             p0 = p0->next;
         }
         p0->next = p;
+        return action; /* return head of list */
     }
-    return p;
+    return p; /* new head */
 }
 
 mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned callidx,
-                                     unsigned paramidx, void *buffer, size_t buf_size)
+                                         unsigned paramidx, void *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -67,8 +68,9 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
             p0 = p0->next;
         }
         p0->next = p;
+        return action; /* return head of list */
     }
-    return p;
+    return p; /* new head */
 }
 
 void mock_param_destroy(mock_param_action_t action)
