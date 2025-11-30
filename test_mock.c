@@ -378,6 +378,46 @@ static int test_mock_r_3_output_param(void)
 }
 
 /*============================================================================
+ *  Test: Pointer address vs dereferenced memory capture
+ *  Demonstrates the difference between:
+ *  - param_history: captures the pointer VALUE (address)
+ *  - mock_param_mem_read: captures the CONTENTS at that address
+ *==========================================================================*/
+
+static int test_mock_pointer_vs_memory(void)
+{
+    uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    uint8_t captured_contents[4] = {0};
+    void *captured_address;
+    mock_param_action_t action;
+
+    copy_data__mock_reset();
+
+    /* Set up to capture memory contents from param 0 */
+    action = mock_param_mem_read(NULL, 0, 0, captured_contents, 4);
+    copy_data__param_actions = action;
+
+    /* Call mock */
+    copy_data__mock(data, sizeof(data));
+
+    /* param_history captures the POINTER (address) */
+    captured_address = copy_data__param_history[0].p0;
+    ASSERT_PTR_EQUAL(data, captured_address);
+
+    /* mock_param_mem_read captures the CONTENTS (dereferenced) */
+    ASSERT_MEM_EQUAL(data, captured_contents, 4);
+
+    /* They are fundamentally different:
+     * - captured_address == &data[0] (where the data lives)
+     * - captured_contents == {0xDE, 0xAD, 0xBE, 0xEF} (copy of the data)
+     */
+    ASSERT_PTR_NOT_EQUAL(captured_address, captured_contents);
+
+    copy_data__mock_reset();
+    return lft_current_test_return();
+}
+
+/*============================================================================
  *  Test: Verify reset clears everything
  *==========================================================================*/
 
@@ -430,6 +470,7 @@ static int suite_mock_param_actions(void)
     lfgtest(test_mock_param_action_write);
     lfgtest(test_mock_param_action_multi_call);
     lfgtest(test_mock_r_3_output_param);
+    lfgtest(test_mock_pointer_vs_memory);
     lfgtest(test_mock_reset_clears_all);
     return 0;
 }
