@@ -74,16 +74,14 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
 void mock_param_destroy(mock_param_action_t action)
 {
     struct _mock_param_action *p = action;
-    if (!p) return;
 
-    /* traverse the linked-list and free each pointer */
-    while(p->next)
+    /* traverse the linked-list and free each node */
+    while (p)
     {
-        struct _mock_param_action *copy = p->next;
+        struct _mock_param_action *next = p->next;
         free(p);
-        p = copy;
+        p = next;
     }
-    free(action); /* free top-level list item */
 }
 
 /*============================================================================

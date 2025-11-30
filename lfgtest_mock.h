@@ -132,6 +132,7 @@ void mock_param_destroy(mock_param_action_t action);
         while (action) {                                                   \
             void *pparam;                                                  \
             if (action->call_index != _func##__call_count) {               \
+                action = action->next;                                     \
                 continue;                                                  \
             }                                                              \
             switch (action->parameter_index) {                             \
@@ -145,7 +146,7 @@ void mock_param_destroy(mock_param_action_t action);
             } else {                                                       \
                 assert(false); /* fatal error */                           \
             }                                                              \
-           action = action->next;                                          \
+            action = action->next;                                         \
         }                                                                  \
         _func##__call_count++; /* increment the call count */              \
         return;                                                            \
@@ -153,8 +154,8 @@ void mock_param_destroy(mock_param_action_t action);
     void _func##__mock_reset(void) {                                       \
         memset(_func##__param_history, 0, sizeof(_func##__param_history)); \
         _func##__call_count = 0;                                           \
-        mock_param_destroy(_func##__param_actions);                   \
-        _func##__param_actions = NULL;                                \
+        mock_param_destroy(_func##__param_actions);                        \
+        _func##__param_actions = NULL;                                     \
     }
 
 /** Declare a mocked function with no return value and 3 parameters.
@@ -203,6 +204,7 @@ void mock_param_destroy(mock_param_action_t action);
         while (action) {                                                   \
             void *pparam;                                                  \
             if (action->call_index != _func##__call_count) {               \
+                action = action->next;                                     \
                 continue;                                                  \
             }                                                              \
             switch (action->parameter_index) {                             \
@@ -217,7 +219,7 @@ void mock_param_destroy(mock_param_action_t action);
             } else {                                                       \
                 assert(false); /* fatal error */                           \
             }                                                              \
-           action = action->next;                                          \
+            action = action->next;                                         \
         }                                                                  \
         _func##__call_count++; /* increment the call count */              \
         return;                                                            \
@@ -288,6 +290,7 @@ void mock_param_destroy(mock_param_action_t action);
         while (action) {                                                   \
             void *pparam;                                                  \
             if (action->call_index != _func##__call_count) {               \
+                action = action->next;                                     \
                 continue;                                                  \
             }                                                              \
             switch (action->parameter_index) {                             \
@@ -306,7 +309,7 @@ void mock_param_destroy(mock_param_action_t action);
             } else {                                                       \
                 assert(false); /* fatal error */                           \
             }                                                              \
-           action = action->next;                                          \
+            action = action->next;                                         \
         }                                                                  \
         _func##__call_count++; /* increment the call count */              \
         return ret;                                                        \
