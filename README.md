@@ -631,18 +631,66 @@ int main(void)
 }
 ```
 
+### File Summary
+
+| File | Purpose | Included in |
+|------|---------|-------------|
+| `led_driver.h` | Production API | Production + Test |
+| `led_driver.c` | Production implementation | Production + Test |
+| `i2c_mock.h` | Mock declaration (reusable) | Test only |
+| `i2c_mock.c` | Mock definition (reusable) | Test only |
+| `led_driver_test.h` | Test wiring for this module | Test only |
+| `led_driver_test.c` | Test implementation | Test only |
+
+### Building a Reusable Mock Library
+
+As your project grows, organize mocks into a shared directory. Each mock can be reused by any module that depends on that interface:
+
+```
+project/
+├── src/
+│   ├── drivers/
+│   │   ├── led_driver.c      # production (has #if UNITTEST block)
+│   │   ├── led_driver.h
+│   │   ├── temp_sensor.c     # production (has #if UNITTEST block)
+│   │   └── temp_sensor.h
+│   └── hal/
+│       ├── i2c.c             # production - real implementation
+│       ├── i2c.h
+│       ├── gpio.c
+│       └── gpio.h
+├── test/
+│   ├── mock/                 # <-- reusable mock library
+│   │   ├── i2c_mock.h        # used by led_driver, temp_sensor, etc.
+│   │   ├── i2c_mock.c
+│   │   ├── gpio_mock.h       # used by any module needing GPIO
+│   │   └── gpio_mock.c
+│   ├── led_driver_test.h     # test wiring (module-specific)
+│   ├── led_driver_test.c
+│   ├── temp_sensor_test.h
+│   └── temp_sensor_test.c
+└── Makefile
+```
+
+The mock files (`i2c_mock.*`, `gpio_mock.*`) are written once and reused across all tests. Only the `*_test.h` wiring header is module-specific—it selects which mocks to activate via `#define XXX_MOCK_REPLACE`.
+
 ### Build Configuration
 
 Compile tests with `-DUNITTEST` to activate conditional includes:
 
 ```bash
 # Test build
-gcc -DUNITTEST -o led_test \
-    led_driver.c led_driver_test.c i2c_mock.c \
+gcc -DUNITTEST -Itest/mock -o led_test \
+    src/drivers/led_driver.c \
+    test/led_driver_test.c \
+    test/mock/i2c_mock.c \
     lfg_ctest.c lfg_ctest_mock.c
 
-# Production build (links real i2c.c)
-gcc -o firmware led_driver.c i2c.c main.c
+# Production build (links real HAL)
+gcc -o firmware \
+    src/drivers/led_driver.c \
+    src/hal/i2c.c \
+    main.c
 ```
 
 ---
