@@ -20,17 +20,18 @@ Copy `lfg_ctest.h` (and `lfg_ctest_mock.h` if using mocking) into your project's
 
 ### Basic Test Structure
 
+Tests are just `void` functions. The framework tracks pass/fail automatically.
+
 ```c
 #include <lfg_ctest.h>
 
-int test_example(void)
+void test_example(void)
 {
     ASSERT_TRUE(1 == 1);
     ASSERT_EQ(42, some_function());
-    return lfg_ct_current_test_return();
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
     lfg_ct_start();
     lfg_ctest(test_example);
@@ -41,18 +42,17 @@ int main(int argc, char *argv[])
 
 ### Test Suites
 
-Group related tests into suites for better organization:
+Suites are also `void` functions that group related tests:
 
 ```c
-int math_suite(void)
+void math_suite(void)
 {
     lfg_ctest(test_addition);
     lfg_ctest(test_subtraction);
     lfg_ctest(test_multiplication);
-    return lfg_ct_current_suite_return();
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
     lfg_ct_start();
     lfg_ct_suite(math_suite);
@@ -68,12 +68,10 @@ int main(int argc, char *argv[])
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ctest(fn)` | Execute a single test function |
-| `lfg_ct_suite(fn)` | Execute a test suite |
+| `lfg_ctest(fn)` | Execute a single test function (`void fn(void)`) |
+| `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`) |
 | `lfg_ct_print_summary()` | Print pass/fail summary |
 | `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
-| `lfg_ct_current_test_return()` | Get current test's return code |
-| `lfg_ct_current_suite_return()` | Get current suite's return code |
 
 ### Assertion Reference
 
@@ -270,7 +268,7 @@ typedef struct { int p0; int p1; int p2; } add_params;
 
 **Basic usage - verify call count and parameters:**
 ```c
-int test_function_calls_dependency(void)
+void test_function_calls_dependency(void)
 {
     // Setup: queue return values
     get_value__return_queue[0] = 42;
@@ -286,7 +284,6 @@ int test_function_calls_dependency(void)
     ASSERT_EQ(100, result);
 
     get_value__mock_reset();
-    return lfg_ct_current_test_return();
 }
 ```
 
@@ -295,7 +292,7 @@ int test_function_calls_dependency(void)
 // Given: void register_callback(int id, void (*cb)(int), void *ctx);
 DECLARE_MOCK_V_3(register_callback, int, void (*)(int), void *);
 
-int test_callback_registration(void)
+void test_callback_registration(void)
 {
     function_under_test();  // calls register_callback internally
 
@@ -306,7 +303,6 @@ int test_callback_registration(void)
     captured_cb(99);  // simulate callback invocation
 
     register_callback__mock_reset();
-    return lfg_ct_current_test_return();
 }
 ```
 
@@ -322,7 +318,7 @@ For pointer parameters, capture or inject data using parameter actions:
 
 **Capture data from a pointer parameter:**
 ```c
-int test_capture_buffer_contents(void)
+void test_capture_buffer_contents(void)
 {
     uint8_t captured_data[16] = {0};
 
@@ -342,13 +338,12 @@ int test_capture_buffer_contents(void)
     ASSERT_UINT8_EQUAL(0x80, captured_data[1]);
 
     i2c_write__mock_reset();
-    return lfg_ct_current_test_return();
 }
 ```
 
 **Inject data into a pointer parameter:**
 ```c
-int test_inject_read_data(void)
+void test_inject_read_data(void)
 {
     uint8_t inject_data[] = {0xDE, 0xAD, 0xBE, 0xEF};
 
@@ -364,7 +359,6 @@ int test_inject_read_data(void)
     function_under_test();  // calls i2c_read, receives injected data
 
     i2c_read__mock_reset();
-    return lfg_ct_current_test_return();
 }
 ```
 
@@ -391,7 +385,7 @@ DECLARE_MOCK_R_1_S(calculate_distance, float, point_t);
 DEFINE_MOCK_R_1_S(calculate_distance, float, point_t)
 
 // Test
-int test_with_struct_param(void)
+void test_with_struct_param(void)
 {
     calculate_distance__return_queue[0] = 5.0f;
 
@@ -402,7 +396,6 @@ int test_with_struct_param(void)
     ASSERT_EQ(4, calculate_distance__param_history[0].p0.y);
 
     calculate_distance__mock_reset();
-    return lfg_ct_current_test_return();
 }
 ```
 
@@ -529,7 +522,7 @@ DEFINE_MOCK_R_5(i2c_write, int, uint8_t, uint8_t *, size_t, i2c_callback_t, void
 #include "led_driver.h"
 
 /* Test suite entry point */
-int led_driver_suite(void);
+void led_driver_suite(void);
 
 #endif /* LED_DRIVER_TEST_H_ */
 ```
@@ -557,7 +550,7 @@ static void _teardown(void)
 }
 
 /* Test: led_reset sends correct I2C command */
-static int test_led_reset_sends_correct_command(void)
+static void test_led_reset_sends_correct_command(void)
 {
     uint8_t captured_buf[4] = {0};
     int dummy_ctx = 42;
@@ -591,11 +584,10 @@ static int test_led_reset_sends_correct_command(void)
     ASSERT_PTR_EQUAL(&dummy_ctx, _callback_ctx);
 
     _teardown();
-    return lfg_ct_current_test_return();
 }
 
 /* Test: led_set_brightness sends correct I2C command */
-static int test_led_set_brightness(void)
+static void test_led_set_brightness(void)
 {
     uint8_t captured_buf[4] = {0};
 
@@ -610,15 +602,13 @@ static int test_led_set_brightness(void)
     ASSERT_UINT8_EQUAL(0x0A, captured_buf[2]);  /* brightness high byte */
 
     _teardown();
-    return lfg_ct_current_test_return();
 }
 
 /* Test suite */
-int led_driver_suite(void)
+void led_driver_suite(void)
 {
     lfg_ctest(test_led_reset_sends_correct_command);
     lfg_ctest(test_led_set_brightness);
-    return lfg_ct_current_suite_return();
 }
 
 /* Test runner */

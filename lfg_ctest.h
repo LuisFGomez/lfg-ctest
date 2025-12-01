@@ -264,27 +264,15 @@ void lfg_ct_end(void);
 
 /** Execute a suite of tests.
  */
-int lfg_ct_suite_impl(int (*fn)(void), const char *name);
+void lfg_ct_suite_impl(void (*fn)(void), const char *name);
 
-/** Execute a single unit test
+/** Execute a single unit test.
  */
-int lfg_ct_impl(int (*fn)(void), const char *name);
+void lfg_ct_impl(void (*fn)(void), const char *name);
 
+/** Print test summary.
+ */
 void lfg_ct_print_summary(void);
-
-/** Retrieve the return code for the currently executing test. This gets reset
- * for every new test run. It is intended to be called by individual test
- * functions like:
- *  return lfg_ct_current_test_return();
- */
-int lfg_ct_current_test_return(void);
-
-/** Retrieve the return code for the currently executing suite. This gets reset
- * for every new suite run. It is intended to be called by individual suite
- * functions like:
- *  return lfg_ct_current_suite_return();
- */
-int lfg_ct_current_suite_return(void);
 
 /** Retrieve the return code for the main unittest function. This is intended
  * to be called by the main() function such as:

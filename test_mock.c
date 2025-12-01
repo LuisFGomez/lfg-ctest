@@ -96,7 +96,7 @@ DEFINE_MOCK_V_3_S(draw_line, struct point, struct point, int)
  *  Test: V_V - void return, no params
  *==========================================================================*/
 
-static int test_mock_v_v(void)
+static void test_mock_v_v(void)
 {
     simple_void_func__mock_reset();
 
@@ -111,14 +111,13 @@ static int test_mock_v_v(void)
 
     simple_void_func__mock_reset();
     ASSERT_INT_EQUAL(0, simple_void_func__call_count);
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: R_V - returns value, no params
  *==========================================================================*/
 
-static int test_mock_r_v(void)
+static void test_mock_r_v(void)
 {
     int result;
 
@@ -143,14 +142,13 @@ static int test_mock_r_v(void)
 
     get_value__mock_reset();
     ASSERT_INT_EQUAL(0, get_value__call_count);
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: V_1 - void return, 1 param
  *==========================================================================*/
 
-static int test_mock_v_1(void)
+static void test_mock_v_1(void)
 {
     set_value__mock_reset();
 
@@ -165,14 +163,13 @@ static int test_mock_v_1(void)
 
     set_value__mock_reset();
     ASSERT_INT_EQUAL(0, set_value__call_count);
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: R_1 - returns value, 1 param
  *==========================================================================*/
 
-static int test_mock_r_1(void)
+static void test_mock_r_1(void)
 {
     int result;
 
@@ -192,14 +189,13 @@ static int test_mock_r_1(void)
     ASSERT_INT_EQUAL(2, increment__call_count);
 
     increment__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: V_2 - void return, 2 params
  *==========================================================================*/
 
-static int test_mock_v_2(void)
+static void test_mock_v_2(void)
 {
     char buf1[] = "hello";
     char buf2[] = "world";
@@ -216,14 +212,13 @@ static int test_mock_v_2(void)
     ASSERT_INT_EQUAL(sizeof(buf2), copy_data__param_history[1].p1);
 
     copy_data__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: R_2 - returns value, 2 params
  *==========================================================================*/
 
-static int test_mock_r_2(void)
+static void test_mock_r_2(void)
 {
     int result;
 
@@ -243,14 +238,13 @@ static int test_mock_r_2(void)
     ASSERT_INT_EQUAL(10, add_numbers__param_history[1].p1);
 
     add_numbers__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: V_3 - void return, 3 params
  *==========================================================================*/
 
-static int test_mock_v_3(void)
+static void test_mock_v_3(void)
 {
     configure__mock_reset();
 
@@ -268,14 +262,13 @@ static int test_mock_v_3(void)
     ASSERT_INT_EQUAL(30, configure__param_history[1].p2);
 
     configure__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: R_4 - returns value, 4 params
  *==========================================================================*/
 
-static int test_mock_r_4(void)
+static void test_mock_r_4(void)
 {
     char src[] = "source";
     char dst[16];
@@ -297,14 +290,13 @@ static int test_mock_r_4(void)
     ASSERT_INT_EQUAL(-1, result);
 
     transfer__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: param action - mem_read (capture data from param)
  *==========================================================================*/
 
-static int test_mock_param_action_read(void)
+static void test_mock_param_action_read(void)
 {
     uint8_t captured_buf[8] = {0};
     uint8_t test_data[] = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -323,14 +315,13 @@ static int test_mock_param_action_read(void)
     ASSERT_MEM_EQUAL(test_data, captured_buf, 4);
 
     copy_data__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: param action - mem_write (inject data into param)
  *==========================================================================*/
 
-static int test_mock_param_action_write(void)
+static void test_mock_param_action_write(void)
 {
     uint8_t output_buf[8] = {0};
     uint8_t inject_data[] = {0xCA, 0xFE, 0xBA, 0xBE};
@@ -349,14 +340,13 @@ static int test_mock_param_action_write(void)
     ASSERT_MEM_EQUAL(inject_data, output_buf, 4);
 
     copy_data__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: param action - multiple calls with different actions
  *==========================================================================*/
 
-static int test_mock_param_action_multi_call(void)
+static void test_mock_param_action_multi_call(void)
 {
     uint8_t captured1[4] = {0};
     uint8_t captured2[4] = {0};
@@ -380,14 +370,13 @@ static int test_mock_param_action_multi_call(void)
     ASSERT_MEM_EQUAL(data2, captured2, 4);
 
     copy_data__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: R_3 with output parameter simulation
  *==========================================================================*/
 
-static int test_mock_r_3_output_param(void)
+static void test_mock_r_3_output_param(void)
 {
     uint8_t buffer[16];
     size_t bytes_read = 0;
@@ -414,7 +403,6 @@ static int test_mock_r_3_output_param(void)
     ASSERT_INT_EQUAL(sizeof(buffer), read_buffer__param_history[0].p1);
 
     read_buffer__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -424,7 +412,7 @@ static int test_mock_r_3_output_param(void)
  *  - mock_param_mem_read: captures the CONTENTS at that address
  *==========================================================================*/
 
-static int test_mock_pointer_vs_memory(void)
+static void test_mock_pointer_vs_memory(void)
 {
     uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF};
     uint8_t captured_contents[4] = {0};
@@ -454,14 +442,13 @@ static int test_mock_pointer_vs_memory(void)
     ASSERT_PTR_NOT_EQUAL(captured_address, captured_contents);
 
     copy_data__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Verify max calls succeeds (boundary test)
  *==========================================================================*/
 
-static int test_mock_max_calls_void(void)
+static void test_mock_max_calls_void(void)
 {
     size_t i;
 
@@ -475,10 +462,9 @@ static int test_mock_max_calls_void(void)
     ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, simple_void_func__call_count);
 
     simple_void_func__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
-static int test_mock_max_calls_returning(void)
+static void test_mock_max_calls_returning(void)
 {
     size_t i;
 
@@ -492,7 +478,6 @@ static int test_mock_max_calls_returning(void)
     ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, get_value__call_count);
 
     get_value__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -503,7 +488,7 @@ static int test_mock_max_calls_returning(void)
 #include <unistd.h>
 #include <signal.h>
 
-static int test_mock_overflow_aborts(void)
+static void test_mock_overflow_aborts(void)
 {
     pid_t pid;
     int status;
@@ -528,14 +513,13 @@ static int test_mock_overflow_aborts(void)
     ASSERT_TRUE(WIFSIGNALED(status));
     ASSERT_INT_EQUAL(SIGABRT, WTERMSIG(status));
 
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Verify reset clears everything
  *==========================================================================*/
 
-static int test_mock_reset_clears_all(void)
+static void test_mock_reset_clears_all(void)
 {
     mock_param_action_t action;
 
@@ -558,14 +542,13 @@ static int test_mock_reset_clears_all(void)
     ASSERT_INT_EQUAL(0, add_numbers__return_queue[0]);
     ASSERT_INT_EQUAL(0, add_numbers__param_history[0].p0);
     ASSERT_NULL(add_numbers__param_actions);
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Struct-by-value parameter capture
  *==========================================================================*/
 
-static int test_mock_struct_param(void)
+static void test_mock_struct_param(void)
 {
     struct point p = {10, 20};
 
@@ -582,14 +565,13 @@ static int test_mock_struct_param(void)
     ASSERT_INT_EQUAL(10, draw_point__param_history[0].p0.x);
 
     draw_point__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Nested struct-by-value parameter
  *==========================================================================*/
 
-static int test_mock_nested_struct_param(void)
+static void test_mock_nested_struct_param(void)
 {
     struct rect r;
 
@@ -610,14 +592,13 @@ static int test_mock_nested_struct_param(void)
     ASSERT_INT_EQUAL(0xFF, draw_rect__param_history[0].p1);
 
     draw_rect__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Struct return value (no params)
  *==========================================================================*/
 
-static int test_mock_struct_return(void)
+static void test_mock_struct_return(void)
 {
     struct point result;
 
@@ -634,14 +615,13 @@ static int test_mock_struct_return(void)
     ASSERT_INT_EQUAL(84, result.y);
 
     get_origin__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Struct param and struct return
  *==========================================================================*/
 
-static int test_mock_struct_param_and_return(void)
+static void test_mock_struct_param_and_return(void)
 {
     struct point input = {10, 20};
     struct point output;
@@ -664,14 +644,13 @@ static int test_mock_struct_param_and_return(void)
     ASSERT_INT_EQUAL(200, output.y);
 
     transform_point__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Multiple struct params
  *==========================================================================*/
 
-static int test_mock_multiple_struct_params(void)
+static void test_mock_multiple_struct_params(void)
 {
     struct point p1 = {0, 0};
     struct point p2 = {100, 100};
@@ -688,14 +667,13 @@ static int test_mock_multiple_struct_params(void)
     ASSERT_INT_EQUAL(3, draw_line__param_history[0].p2);
 
     draw_line__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test: Multiple calls with struct returns
  *==========================================================================*/
 
-static int test_mock_struct_return_queue(void)
+static void test_mock_struct_return_queue(void)
 {
     struct point r1, r2, r3;
 
@@ -722,14 +700,13 @@ static int test_mock_struct_return_queue(void)
     ASSERT_INT_EQUAL(200, r3.y);
 
     get_origin__mock_reset();
-    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
  *  Test Suite
  *==========================================================================*/
 
-static int suite_mock_basic(void)
+static void suite_mock_basic(void)
 {
     lfg_ctest(test_mock_v_v);
     lfg_ctest(test_mock_r_v);
@@ -739,10 +716,9 @@ static int suite_mock_basic(void)
     lfg_ctest(test_mock_r_2);
     lfg_ctest(test_mock_v_3);
     lfg_ctest(test_mock_r_4);
-    return 0;
 }
 
-static int suite_mock_struct_by_value(void)
+static void suite_mock_struct_by_value(void)
 {
     lfg_ctest(test_mock_struct_param);
     lfg_ctest(test_mock_nested_struct_param);
@@ -750,10 +726,9 @@ static int suite_mock_struct_by_value(void)
     lfg_ctest(test_mock_struct_param_and_return);
     lfg_ctest(test_mock_multiple_struct_params);
     lfg_ctest(test_mock_struct_return_queue);
-    return 0;
 }
 
-static int suite_mock_param_actions(void)
+static void suite_mock_param_actions(void)
 {
     lfg_ctest(test_mock_param_action_read);
     lfg_ctest(test_mock_param_action_write);
@@ -761,15 +736,13 @@ static int suite_mock_param_actions(void)
     lfg_ctest(test_mock_r_3_output_param);
     lfg_ctest(test_mock_pointer_vs_memory);
     lfg_ctest(test_mock_reset_clears_all);
-    return 0;
 }
 
-static int suite_mock_overflow(void)
+static void suite_mock_overflow(void)
 {
     lfg_ctest(test_mock_max_calls_void);
     lfg_ctest(test_mock_max_calls_returning);
     lfg_ctest(test_mock_overflow_aborts);
-    return 0;
 }
 
 /*============================================================================
