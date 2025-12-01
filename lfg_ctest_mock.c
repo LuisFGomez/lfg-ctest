@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief       LFG Mocking API.
+ * @brief       lfg-ctest mocking API.
  */
 
 /*============================================================================
@@ -9,7 +9,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
-#include "lfgtest_mock.h"
+#include "lfg_ctest_mock.h"
 
 /*============================================================================
  *  Defines/Typedefs

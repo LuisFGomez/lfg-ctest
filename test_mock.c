@@ -1,10 +1,10 @@
 /**
  * @file
- * @brief       Test suite for LFG mocking framework
+ * @brief       Test suite for lfg-ctest mocking framework
  */
 
-#include "lfgtest.h"
-#include "lfgtest_mock.h"
+#include "lfg_ctest.h"
+#include "lfg_ctest_mock.h"
 #include <stdint.h>
 
 /*============================================================================
@@ -111,7 +111,7 @@ static int test_mock_v_v(void)
 
     simple_void_func__mock_reset();
     ASSERT_INT_EQUAL(0, simple_void_func__call_count);
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -143,7 +143,7 @@ static int test_mock_r_v(void)
 
     get_value__mock_reset();
     ASSERT_INT_EQUAL(0, get_value__call_count);
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -165,7 +165,7 @@ static int test_mock_v_1(void)
 
     set_value__mock_reset();
     ASSERT_INT_EQUAL(0, set_value__call_count);
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -192,7 +192,7 @@ static int test_mock_r_1(void)
     ASSERT_INT_EQUAL(2, increment__call_count);
 
     increment__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -216,7 +216,7 @@ static int test_mock_v_2(void)
     ASSERT_INT_EQUAL(sizeof(buf2), copy_data__param_history[1].p1);
 
     copy_data__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -243,7 +243,7 @@ static int test_mock_r_2(void)
     ASSERT_INT_EQUAL(10, add_numbers__param_history[1].p1);
 
     add_numbers__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -268,7 +268,7 @@ static int test_mock_v_3(void)
     ASSERT_INT_EQUAL(30, configure__param_history[1].p2);
 
     configure__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -297,7 +297,7 @@ static int test_mock_r_4(void)
     ASSERT_INT_EQUAL(-1, result);
 
     transfer__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -323,7 +323,7 @@ static int test_mock_param_action_read(void)
     ASSERT_MEM_EQUAL(test_data, captured_buf, 4);
 
     copy_data__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -349,7 +349,7 @@ static int test_mock_param_action_write(void)
     ASSERT_MEM_EQUAL(inject_data, output_buf, 4);
 
     copy_data__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -380,7 +380,7 @@ static int test_mock_param_action_multi_call(void)
     ASSERT_MEM_EQUAL(data2, captured2, 4);
 
     copy_data__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -414,7 +414,7 @@ static int test_mock_r_3_output_param(void)
     ASSERT_INT_EQUAL(sizeof(buffer), read_buffer__param_history[0].p1);
 
     read_buffer__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -454,7 +454,7 @@ static int test_mock_pointer_vs_memory(void)
     ASSERT_PTR_NOT_EQUAL(captured_address, captured_contents);
 
     copy_data__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -475,7 +475,7 @@ static int test_mock_max_calls_void(void)
     ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, simple_void_func__call_count);
 
     simple_void_func__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 static int test_mock_max_calls_returning(void)
@@ -492,7 +492,7 @@ static int test_mock_max_calls_returning(void)
     ASSERT_INT_EQUAL(MOCK_CALL_STORAGE_MAX, get_value__call_count);
 
     get_value__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -528,7 +528,7 @@ static int test_mock_overflow_aborts(void)
     ASSERT_TRUE(WIFSIGNALED(status));
     ASSERT_INT_EQUAL(SIGABRT, WTERMSIG(status));
 
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -558,7 +558,7 @@ static int test_mock_reset_clears_all(void)
     ASSERT_INT_EQUAL(0, add_numbers__return_queue[0]);
     ASSERT_INT_EQUAL(0, add_numbers__param_history[0].p0);
     ASSERT_NULL(add_numbers__param_actions);
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -582,7 +582,7 @@ static int test_mock_struct_param(void)
     ASSERT_INT_EQUAL(10, draw_point__param_history[0].p0.x);
 
     draw_point__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -610,7 +610,7 @@ static int test_mock_nested_struct_param(void)
     ASSERT_INT_EQUAL(0xFF, draw_rect__param_history[0].p1);
 
     draw_rect__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -634,7 +634,7 @@ static int test_mock_struct_return(void)
     ASSERT_INT_EQUAL(84, result.y);
 
     get_origin__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -664,7 +664,7 @@ static int test_mock_struct_param_and_return(void)
     ASSERT_INT_EQUAL(200, output.y);
 
     transform_point__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -688,7 +688,7 @@ static int test_mock_multiple_struct_params(void)
     ASSERT_INT_EQUAL(3, draw_line__param_history[0].p2);
 
     draw_line__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -722,7 +722,7 @@ static int test_mock_struct_return_queue(void)
     ASSERT_INT_EQUAL(200, r3.y);
 
     get_origin__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 /*============================================================================
@@ -731,44 +731,44 @@ static int test_mock_struct_return_queue(void)
 
 static int suite_mock_basic(void)
 {
-    lfgtest(test_mock_v_v);
-    lfgtest(test_mock_r_v);
-    lfgtest(test_mock_v_1);
-    lfgtest(test_mock_r_1);
-    lfgtest(test_mock_v_2);
-    lfgtest(test_mock_r_2);
-    lfgtest(test_mock_v_3);
-    lfgtest(test_mock_r_4);
+    lfg_ctest(test_mock_v_v);
+    lfg_ctest(test_mock_r_v);
+    lfg_ctest(test_mock_v_1);
+    lfg_ctest(test_mock_r_1);
+    lfg_ctest(test_mock_v_2);
+    lfg_ctest(test_mock_r_2);
+    lfg_ctest(test_mock_v_3);
+    lfg_ctest(test_mock_r_4);
     return 0;
 }
 
 static int suite_mock_struct_by_value(void)
 {
-    lfgtest(test_mock_struct_param);
-    lfgtest(test_mock_nested_struct_param);
-    lfgtest(test_mock_struct_return);
-    lfgtest(test_mock_struct_param_and_return);
-    lfgtest(test_mock_multiple_struct_params);
-    lfgtest(test_mock_struct_return_queue);
+    lfg_ctest(test_mock_struct_param);
+    lfg_ctest(test_mock_nested_struct_param);
+    lfg_ctest(test_mock_struct_return);
+    lfg_ctest(test_mock_struct_param_and_return);
+    lfg_ctest(test_mock_multiple_struct_params);
+    lfg_ctest(test_mock_struct_return_queue);
     return 0;
 }
 
 static int suite_mock_param_actions(void)
 {
-    lfgtest(test_mock_param_action_read);
-    lfgtest(test_mock_param_action_write);
-    lfgtest(test_mock_param_action_multi_call);
-    lfgtest(test_mock_r_3_output_param);
-    lfgtest(test_mock_pointer_vs_memory);
-    lfgtest(test_mock_reset_clears_all);
+    lfg_ctest(test_mock_param_action_read);
+    lfg_ctest(test_mock_param_action_write);
+    lfg_ctest(test_mock_param_action_multi_call);
+    lfg_ctest(test_mock_r_3_output_param);
+    lfg_ctest(test_mock_pointer_vs_memory);
+    lfg_ctest(test_mock_reset_clears_all);
     return 0;
 }
 
 static int suite_mock_overflow(void)
 {
-    lfgtest(test_mock_max_calls_void);
-    lfgtest(test_mock_max_calls_returning);
-    lfgtest(test_mock_overflow_aborts);
+    lfg_ctest(test_mock_max_calls_void);
+    lfg_ctest(test_mock_max_calls_returning);
+    lfg_ctest(test_mock_overflow_aborts);
     return 0;
 }
 
@@ -778,27 +778,27 @@ static int suite_mock_overflow(void)
 
 int main(void)
 {
-    lft_start();
+    lfg_ct_start();
 
     printf("\n");
     printf("================================================================================\n");
-    printf("                    LFG MOCK FRAMEWORK TEST SUITE\n");
+    printf("                    lfg-ctest MOCK FRAMEWORK TEST SUITE\n");
     printf("================================================================================\n\n");
 
     printf("--- SUITE 1: Basic Mock Operations ---\n");
-    lft_suite(suite_mock_basic);
+    lfg_ct_suite(suite_mock_basic);
 
     printf("\n--- SUITE 2: Struct-by-Value ---\n");
-    lft_suite(suite_mock_struct_by_value);
+    lfg_ct_suite(suite_mock_struct_by_value);
 
     printf("\n--- SUITE 3: Parameter Actions ---\n");
-    lft_suite(suite_mock_param_actions);
+    lfg_ct_suite(suite_mock_param_actions);
 
     printf("\n--- SUITE 4: Storage Limits ---\n");
-    lft_suite(suite_mock_overflow);
+    lfg_ct_suite(suite_mock_overflow);
 
     printf("\n");
-    lft_print_summary();
+    lfg_ct_print_summary();
 
-    return lft_return();
+    return lfg_ct_return();
 }

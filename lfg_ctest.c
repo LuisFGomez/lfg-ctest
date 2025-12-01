@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief       LFG UnitTest API.
+ * @brief       lfg-ctest unit testing API.
  */
 
 /*============================================================================
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
-#include "lfgtest.h"
+#include "lfg_ctest.h"
 
 /*============================================================================
  *  Defines/Typedefs
@@ -37,7 +37,7 @@ static int _current_suite_failures = 0;
  *  Public API
  *==========================================================================*/
 
-void lft_start(void)
+void lfg_ct_start(void)
 {
     unsigned rand_seed = time(NULL) % 1000;
     printf("*** begin unit test\r\n");
@@ -45,11 +45,11 @@ void lft_start(void)
     srand(rand_seed);
 }
 
-void lft_end(void)
+void lfg_ct_end(void)
 {
 }
 
-int lft_suite_impl(int (*fn)(void), const char *name)
+int lfg_ct_suite_impl(int (*fn)(void), const char *name)
 {
     _current_suite_failures = 0;
     if (fn())
@@ -59,7 +59,7 @@ int lft_suite_impl(int (*fn)(void), const char *name)
     return -_current_suite_failures;
 }
 
-int lft_impl(int (*fn)(void), const char *name)
+int lfg_ct_impl(int (*fn)(void), const char *name)
 {
     _tests_executed++;
     _current_test_failures = 0;
@@ -75,7 +75,7 @@ int lft_impl(int (*fn)(void), const char *name)
     return -_current_test_failures;
 }
 
-void lft_print_summary(void)
+void lfg_ct_print_summary(void)
 {
     printf("*** Executed %d assertions in %d tests. Failures: %u\r\n"
            "*** Testing complete. Result: %s\r\n",
@@ -83,22 +83,22 @@ void lft_print_summary(void)
            _tests_failed ? "FAIL" : "PASS");
 }
 
-int lft_current_test_return(void)
+int lfg_ct_current_test_return(void)
 {
     return -_current_test_failures;
 }
 
-int lft_current_suite_return(void)
+int lfg_ct_current_suite_return(void)
 {
     return -_current_suite_failures;
 }
 
-int lft_return(void)
+int lfg_ct_return(void)
 {
     return -_tests_failed;
 }
 
-int lft_assert_false_impl(bool condition,
+int lfg_ct_assert_false_impl(bool condition,
                                  char *filename,
                                  int line_no,
                                  const char *function,
@@ -117,7 +117,7 @@ int lft_assert_false_impl(bool condition,
     return 0;
 }
 
-int lft_assert_true_impl(bool condition,
+int lfg_ct_assert_true_impl(bool condition,
                                 char *filename,
                                 int line_no,
                                 const char *function,
@@ -136,7 +136,7 @@ int lft_assert_true_impl(bool condition,
     return 0;
 }
 
-int lft_assert_int_equal_impl(int expected,
+int lfg_ct_assert_int_equal_impl(int expected,
                                      int actual,
                                      char *filename,
                                      int line_no,
@@ -156,7 +156,7 @@ int lft_assert_int_equal_impl(int expected,
     return 0;
 }
 
-int lft_assert_int_not_equal_impl(int expected,
+int lfg_ct_assert_int_not_equal_impl(int expected,
                                          int actual,
                                          char *filename,
                                          int line_no,
@@ -176,7 +176,7 @@ int lft_assert_int_not_equal_impl(int expected,
     return 0;
 }
 
-int lft_assert_uint_equal_impl(unsigned expected,
+int lfg_ct_assert_uint_equal_impl(unsigned expected,
                                       unsigned actual,
                                       char *filename,
                                       int line_no,
@@ -196,7 +196,7 @@ int lft_assert_uint_equal_impl(unsigned expected,
     return 0;
 }
 
-int lft_assert_uint_not_equal_impl(unsigned expected,
+int lfg_ct_assert_uint_not_equal_impl(unsigned expected,
                                               unsigned actual,
                                               char *filename,
                                               int line_no,
@@ -216,7 +216,7 @@ int lft_assert_uint_not_equal_impl(unsigned expected,
     return 0;
 }
 
-int lft_assert_uint8_equal_impl(uint8_t expected,
+int lfg_ct_assert_uint8_equal_impl(uint8_t expected,
                                        uint8_t actual,
                                        char *filename,
                                        int line_no,
@@ -236,7 +236,7 @@ int lft_assert_uint8_equal_impl(uint8_t expected,
     return 0;
 }
 
-int lft_assert_uint8_not_equal_impl(uint8_t expected,
+int lfg_ct_assert_uint8_not_equal_impl(uint8_t expected,
                                            uint8_t actual,
                                            char *filename,
                                            int line_no,
@@ -256,7 +256,7 @@ int lft_assert_uint8_not_equal_impl(uint8_t expected,
     return 0;
 }
 
-int lft_assert_uint16_equal_impl(uint16_t expected,
+int lfg_ct_assert_uint16_equal_impl(uint16_t expected,
                                         uint16_t actual,
                                         char *filename,
                                         int line_no,
@@ -277,7 +277,7 @@ int lft_assert_uint16_equal_impl(uint16_t expected,
 }
 
 
-int lft_assert_uint16_not_equal_impl(uint16_t expected,
+int lfg_ct_assert_uint16_not_equal_impl(uint16_t expected,
                                             uint16_t actual,
                                             char *filename,
                                             int line_no,
@@ -297,7 +297,7 @@ int lft_assert_uint16_not_equal_impl(uint16_t expected,
     return 0;
 }
 
-int lft_assert_uint32_equal_impl(uint32_t expected,
+int lfg_ct_assert_uint32_equal_impl(uint32_t expected,
                                         uint32_t actual,
                                         char *filename,
                                         int line_no,
@@ -317,7 +317,7 @@ int lft_assert_uint32_equal_impl(uint32_t expected,
     return 0;
 }
 
-int lft_assert_uint32_not_equal_impl(uint32_t expected,
+int lfg_ct_assert_uint32_not_equal_impl(uint32_t expected,
                                             uint32_t actual,
                                             char *filename,
                                             int line_no,
@@ -337,7 +337,7 @@ int lft_assert_uint32_not_equal_impl(uint32_t expected,
     return 0;
 }
 
-int lft_assert_ptr_equal_impl(void *expected,
+int lfg_ct_assert_ptr_equal_impl(void *expected,
                                      void *actual,
                                      const char *filename,
                                      int line_no,
@@ -357,7 +357,7 @@ int lft_assert_ptr_equal_impl(void *expected,
     return 0;
 }
 
-int lft_assert_ptr_not_equal_impl(void *expected,
+int lfg_ct_assert_ptr_not_equal_impl(void *expected,
                                          void *actual,
                                          const char *filename,
                                          int line_no,
@@ -377,7 +377,7 @@ int lft_assert_ptr_not_equal_impl(void *expected,
     return 0;
 }
 
-int lft_assert_ptr_not_null(void *actual,
+int lfg_ct_assert_ptr_not_null(void *actual,
                                    const char *filename,
                                    int line_no,
                                    const char *function,
@@ -397,7 +397,7 @@ int lft_assert_ptr_not_null(void *actual,
 }
 
 
-int lft_assert_ptr_null(void *actual,
+int lfg_ct_assert_ptr_null(void *actual,
                        const char *filename,
                        int line_no,
                        const char *function,
@@ -416,7 +416,7 @@ int lft_assert_ptr_null(void *actual,
     return 0;
 }
 
-int lft_assert_int8_equal_impl(int8_t expected,
+int lfg_ct_assert_int8_equal_impl(int8_t expected,
                                int8_t actual,
                                char *filename,
                                int line_no,
@@ -436,7 +436,7 @@ int lft_assert_int8_equal_impl(int8_t expected,
     return 0;
 }
 
-int lft_assert_int8_not_equal_impl(int8_t expected,
+int lfg_ct_assert_int8_not_equal_impl(int8_t expected,
                                    int8_t actual,
                                    char *filename,
                                    int line_no,
@@ -456,7 +456,7 @@ int lft_assert_int8_not_equal_impl(int8_t expected,
     return 0;
 }
 
-int lft_assert_int16_equal_impl(int16_t expected,
+int lfg_ct_assert_int16_equal_impl(int16_t expected,
                                 int16_t actual,
                                 char *filename,
                                 int line_no,
@@ -476,7 +476,7 @@ int lft_assert_int16_equal_impl(int16_t expected,
     return 0;
 }
 
-int lft_assert_int16_not_equal_impl(int16_t expected,
+int lfg_ct_assert_int16_not_equal_impl(int16_t expected,
                                     int16_t actual,
                                     char *filename,
                                     int line_no,
@@ -496,7 +496,7 @@ int lft_assert_int16_not_equal_impl(int16_t expected,
     return 0;
 }
 
-int lft_assert_int32_equal_impl(int32_t expected,
+int lfg_ct_assert_int32_equal_impl(int32_t expected,
                                 int32_t actual,
                                 char *filename,
                                 int line_no,
@@ -516,7 +516,7 @@ int lft_assert_int32_equal_impl(int32_t expected,
     return 0;
 }
 
-int lft_assert_int32_not_equal_impl(int32_t expected,
+int lfg_ct_assert_int32_not_equal_impl(int32_t expected,
                                     int32_t actual,
                                     char *filename,
                                     int line_no,
@@ -536,7 +536,7 @@ int lft_assert_int32_not_equal_impl(int32_t expected,
     return 0;
 }
 
-int lft_assert_int64_equal_impl(int64_t expected,
+int lfg_ct_assert_int64_equal_impl(int64_t expected,
                                 int64_t actual,
                                 char *filename,
                                 int line_no,
@@ -557,7 +557,7 @@ int lft_assert_int64_equal_impl(int64_t expected,
     return 0;
 }
 
-int lft_assert_int64_not_equal_impl(int64_t expected,
+int lfg_ct_assert_int64_not_equal_impl(int64_t expected,
                                     int64_t actual,
                                     char *filename,
                                     int line_no,
@@ -577,7 +577,7 @@ int lft_assert_int64_not_equal_impl(int64_t expected,
     return 0;
 }
 
-int lft_assert_uint64_equal_impl(uint64_t expected,
+int lfg_ct_assert_uint64_equal_impl(uint64_t expected,
                                  uint64_t actual,
                                  char *filename,
                                  int line_no,
@@ -598,7 +598,7 @@ int lft_assert_uint64_equal_impl(uint64_t expected,
     return 0;
 }
 
-int lft_assert_uint64_not_equal_impl(uint64_t expected,
+int lfg_ct_assert_uint64_not_equal_impl(uint64_t expected,
                                      uint64_t actual,
                                      char *filename,
                                      int line_no,
@@ -619,7 +619,7 @@ int lft_assert_uint64_not_equal_impl(uint64_t expected,
     return 0;
 }
 
-int lft_assert_str_equal_impl(const char *expected,
+int lfg_ct_assert_str_equal_impl(const char *expected,
                               const char *actual,
                               char *filename,
                               int line_no,
@@ -651,7 +651,7 @@ int lft_assert_str_equal_impl(const char *expected,
     return 0;
 }
 
-int lft_assert_str_not_equal_impl(const char *expected,
+int lfg_ct_assert_str_not_equal_impl(const char *expected,
                                   const char *actual,
                                   char *filename,
                                   int line_no,
@@ -673,7 +673,7 @@ int lft_assert_str_not_equal_impl(const char *expected,
     return 0;
 }
 
-int lft_assert_strn_equal_impl(const char *expected,
+int lfg_ct_assert_strn_equal_impl(const char *expected,
                                const char *actual,
                                size_t n,
                                char *filename,
@@ -706,7 +706,7 @@ int lft_assert_strn_equal_impl(const char *expected,
     return 0;
 }
 
-int lft_assert_mem_equal_impl(const void *expected,
+int lfg_ct_assert_mem_equal_impl(const void *expected,
                               const void *actual,
                               size_t n,
                               char *filename,
@@ -738,7 +738,7 @@ int lft_assert_mem_equal_impl(const void *expected,
     return 0;
 }
 
-int lft_assert_mem_not_equal_impl(const void *expected,
+int lfg_ct_assert_mem_not_equal_impl(const void *expected,
                                   const void *actual,
                                   size_t n,
                                   char *filename,
@@ -760,7 +760,7 @@ int lft_assert_mem_not_equal_impl(const void *expected,
     return 0;
 }
 
-int lft_assert_greater_than_impl(int a,
+int lfg_ct_assert_greater_than_impl(int a,
                                  int b,
                                  char *filename,
                                  int line_no,
@@ -781,7 +781,7 @@ int lft_assert_greater_than_impl(int a,
     return 0;
 }
 
-int lft_assert_less_than_impl(int a,
+int lfg_ct_assert_less_than_impl(int a,
                               int b,
                               char *filename,
                               int line_no,
@@ -802,7 +802,7 @@ int lft_assert_less_than_impl(int a,
     return 0;
 }
 
-int lft_assert_greater_or_equal_impl(int a,
+int lfg_ct_assert_greater_or_equal_impl(int a,
                                      int b,
                                      char *filename,
                                      int line_no,
@@ -823,7 +823,7 @@ int lft_assert_greater_or_equal_impl(int a,
     return 0;
 }
 
-int lft_assert_less_or_equal_impl(int a,
+int lfg_ct_assert_less_or_equal_impl(int a,
                                   int b,
                                   char *filename,
                                   int line_no,
@@ -844,7 +844,7 @@ int lft_assert_less_or_equal_impl(int a,
     return 0;
 }
 
-int lft_assert_in_range_impl(int val,
+int lfg_ct_assert_in_range_impl(int val,
                              int min,
                              int max,
                              char *filename,
@@ -865,7 +865,7 @@ int lft_assert_in_range_impl(int val,
     return 0;
 }
 
-int lft_assert_bit_set_impl(unsigned val,
+int lfg_ct_assert_bit_set_impl(unsigned val,
                             unsigned bit,
                             char *filename,
                             int line_no,
@@ -886,7 +886,7 @@ int lft_assert_bit_set_impl(unsigned val,
     return 0;
 }
 
-int lft_assert_bit_clear_impl(unsigned val,
+int lfg_ct_assert_bit_clear_impl(unsigned val,
                               unsigned bit,
                               char *filename,
                               int line_no,
@@ -907,7 +907,7 @@ int lft_assert_bit_clear_impl(unsigned val,
     return 0;
 }
 
-int lft_assert_bits_set_impl(unsigned val,
+int lfg_ct_assert_bits_set_impl(unsigned val,
                              unsigned mask,
                              char *filename,
                              int line_no,
@@ -928,7 +928,7 @@ int lft_assert_bits_set_impl(unsigned val,
     return 0;
 }
 
-int lft_assert_bits_clear_impl(unsigned val,
+int lfg_ct_assert_bits_clear_impl(unsigned val,
                                unsigned mask,
                                char *filename,
                                int line_no,
@@ -949,7 +949,7 @@ int lft_assert_bits_clear_impl(unsigned val,
     return 0;
 }
 
-int lft_assert_fail_impl(char *filename,
+int lfg_ct_assert_fail_impl(char *filename,
                         int line_no,
                         const char *function,
                         const char *message)

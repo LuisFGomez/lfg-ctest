@@ -1,11 +1,11 @@
 /*
- * Unified Test Suite for LFG Test Framework
+ * Unified Test Suite for lfg-ctest
  *
  * This suite exercises ALL 49 assertion macros with both passing and failing tests
  * to verify complete functionality of the testing framework.
  */
 
-#include "lfgtest.h"
+#include "lfg_ctest.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -263,27 +263,27 @@ static void test_explicit_fail(void)
 
 static void suite_passing_tests(void)
 {
-    lfgtest(test_pointer_assertions_pass);
-    lfgtest(test_boolean_assertions_pass);
-    lfgtest(test_integer_assertions_pass);
-    lfgtest(test_string_assertions_pass);
-    lfgtest(test_memory_assertions_pass);
-    lfgtest(test_comparison_assertions_pass);
-    lfgtest(test_range_assertion_pass);
-    lfgtest(test_bit_assertions_pass);
+    lfg_ctest(test_pointer_assertions_pass);
+    lfg_ctest(test_boolean_assertions_pass);
+    lfg_ctest(test_integer_assertions_pass);
+    lfg_ctest(test_string_assertions_pass);
+    lfg_ctest(test_memory_assertions_pass);
+    lfg_ctest(test_comparison_assertions_pass);
+    lfg_ctest(test_range_assertion_pass);
+    lfg_ctest(test_bit_assertions_pass);
 }
 
 static void suite_failing_tests(void)
 {
-    lfgtest(test_pointer_assertions_fail);
-    lfgtest(test_boolean_assertions_fail);
-    lfgtest(test_integer_assertions_fail);
-    lfgtest(test_string_assertions_fail);
-    lfgtest(test_memory_assertions_fail);
-    lfgtest(test_comparison_assertions_fail);
-    lfgtest(test_range_assertion_fail);
-    lfgtest(test_bit_assertions_fail);
-    lfgtest(test_explicit_fail);
+    lfg_ctest(test_pointer_assertions_fail);
+    lfg_ctest(test_boolean_assertions_fail);
+    lfg_ctest(test_integer_assertions_fail);
+    lfg_ctest(test_string_assertions_fail);
+    lfg_ctest(test_memory_assertions_fail);
+    lfg_ctest(test_comparison_assertions_fail);
+    lfg_ctest(test_range_assertion_fail);
+    lfg_ctest(test_bit_assertions_fail);
+    lfg_ctest(test_explicit_fail);
 }
 
 /* ============================================================================
@@ -292,27 +292,27 @@ static void suite_failing_tests(void)
 
 int main(void)
 {
-    lft_start();
+    lfg_ct_start();
 
     printf("\n");
     printf("================================================================================\n");
-    printf("                    LFG TEST UNIFIED TEST SUITE\n");
+    printf("                    lfg-ctest UNIFIED TEST SUITE\n");
     printf("================================================================================\n");
     printf("\n");
     printf("This suite exercises all 49 assertions with both passing and failing tests.\n");
     printf("\n");
 
     printf("--- SUITE 1: PASSING TESTS (All assertions should PASS) ---\n");
-    lft_suite(suite_passing_tests);
+    lfg_ct_suite(suite_passing_tests);
 
     printf("\n--- SUITE 2: FAILING TESTS (All assertions should FAIL) ---\n");
-    lft_suite(suite_failing_tests);
+    lfg_ct_suite(suite_failing_tests);
 
     printf("\n");
     printf("================================================================================\n");
     printf("                         FINAL TEST SUMMARY\n");
     printf("================================================================================\n");
-    lft_print_summary();
+    lfg_ct_print_summary();
 
     printf("\n");
     printf("EXPECTED RESULTS:\n");
@@ -321,5 +321,5 @@ int main(void)
     printf("  - Total: 17 tests, 8 pass, 9 fail, 117 total assertions\n");
     printf("\n");
 
-    return lft_return();
+    return lfg_ct_return();
 }

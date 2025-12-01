@@ -1,4 +1,4 @@
-# LFG Test - C99-Compatible Test and Mocking Framework
+# lfg-ctest - C99-Compatible Test and Mocking Framework
 
 A comprehensive, easy-to-use, zero-dependency, C99-compatible test framework with mocking built in.
 
@@ -12,7 +12,7 @@ A comprehensive, easy-to-use, zero-dependency, C99-compatible test framework wit
 
 ## Installation
 
-Copy `lfgtest.h` (and `lfgtest_mock.h` if using mocking) into your project's include path.
+Copy `lfg_ctest.h` (and `lfg_ctest_mock.h` if using mocking) into your project's include path.
 
 ---
 
@@ -21,21 +21,21 @@ Copy `lfgtest.h` (and `lfgtest_mock.h` if using mocking) into your project's inc
 ### Basic Test Structure
 
 ```c
-#include <lfgtest.h>
+#include <lfg_ctest.h>
 
 int test_example(void)
 {
     ASSERT_TRUE(1 == 1);
     ASSERT_EQ(42, some_function());
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 int main(int argc, char *argv[])
 {
-    lft_start();
-    lfgtest(test_example);
-    lft_print_summary();
-    return lft_return();
+    lfg_ct_start();
+    lfg_ctest(test_example);
+    lfg_ct_print_summary();
+    return lfg_ct_return();
 }
 ```
 
@@ -46,19 +46,19 @@ Group related tests into suites for better organization:
 ```c
 int math_suite(void)
 {
-    lfgtest(test_addition);
-    lfgtest(test_subtraction);
-    lfgtest(test_multiplication);
-    return lft_current_suite_return();
+    lfg_ctest(test_addition);
+    lfg_ctest(test_subtraction);
+    lfg_ctest(test_multiplication);
+    return lfg_ct_current_suite_return();
 }
 
 int main(int argc, char *argv[])
 {
-    lft_start();
-    lft_suite(math_suite);
-    lft_suite(string_suite);
-    lft_print_summary();
-    return lft_return();
+    lfg_ct_start();
+    lfg_ct_suite(math_suite);
+    lfg_ct_suite(string_suite);
+    lfg_ct_print_summary();
+    return lfg_ct_return();
 }
 ```
 
@@ -66,14 +66,14 @@ int main(int argc, char *argv[])
 
 | Function | Description |
 |----------|-------------|
-| `lft_start()` | Initialize test framework (call before any tests) |
-| `lft_end()` | Finalize test framework |
-| `lfgtest(fn)` | Execute a single test function |
-| `lft_suite(fn)` | Execute a test suite |
-| `lft_print_summary()` | Print pass/fail summary |
-| `lft_return()` | Get overall return code (0=pass, non-zero=fail) |
-| `lft_current_test_return()` | Get current test's return code |
-| `lft_current_suite_return()` | Get current suite's return code |
+| `lfg_ct_start()` | Initialize test framework (call before any tests) |
+| `lfg_ct_end()` | Finalize test framework |
+| `lfg_ctest(fn)` | Execute a single test function |
+| `lfg_ct_suite(fn)` | Execute a test suite |
+| `lfg_ct_print_summary()` | Print pass/fail summary |
+| `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
+| `lfg_ct_current_test_return()` | Get current test's return code |
+| `lfg_ct_current_suite_return()` | Get current suite's return code |
 
 ### Assertion Reference
 
@@ -172,7 +172,7 @@ The mocking framework provides macro-based mock generation for C functions.
 
 **Header file (my_module_mock.h):**
 ```c
-#include <lfgtest_mock.h>
+#include <lfg_ctest_mock.h>
 
 // Mock a function: int get_value(int id, const char *name);
 DECLARE_MOCK_R_2(get_value, int, int, const char *);
@@ -224,7 +224,7 @@ int test_function_calls_dependency(void)
     ASSERT_EQ(100, result);
 
     get_value__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 ```
 
@@ -244,7 +244,7 @@ int test_callback_registration(void)
     captured_cb(99);  // simulate callback invocation
 
     register_callback__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 ```
 
@@ -274,7 +274,7 @@ int test_capture_buffer_contents(void)
     ASSERT_UINT8_EQUAL(0x80, captured_data[1]);
 
     i2c_write__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 ```
 
@@ -296,7 +296,7 @@ int test_inject_read_data(void)
     function_under_test();  // calls i2c_read, receives injected data
 
     i2c_read__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 ```
 
@@ -334,7 +334,7 @@ int test_with_struct_param(void)
     ASSERT_EQ(4, calculate_distance__param_history[0].p0.y);
 
     calculate_distance__mock_reset();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 ```
 
@@ -352,7 +352,7 @@ int test_with_struct_param(void)
 
 ```c
 // i2c_driver_mock.h
-#include <lfgtest_mock.h>
+#include <lfg_ctest_mock.h>
 
 DECLARE_MOCK_R_3(i2c_write, int, uint8_t, uint8_t *, size_t);
 
@@ -366,7 +366,7 @@ DEFINE_MOCK_R_3(i2c_write, int, uint8_t, uint8_t *, size_t)
 
 // test_my_device.c
 #define I2C_DRIVER_MOCK_REPLACE
-#include <lfgtest.h>
+#include <lfg_ctest.h>
 #include "i2c_driver_mock.h"
 #include "my_device.h"
 
@@ -392,15 +392,15 @@ static int test_device_init(void)
     ASSERT_UINT8_EQUAL(0x80, captured_buf[1]);  // value
 
     teardown();
-    return lft_current_test_return();
+    return lfg_ct_current_test_return();
 }
 
 int main(int argc, char *argv[])
 {
-    lft_start();
-    lfgtest(test_device_init);
-    lft_print_summary();
-    return lft_return();
+    lfg_ct_start();
+    lfg_ctest(test_device_init);
+    lfg_ct_print_summary();
+    return lfg_ct_return();
 }
 ```
 

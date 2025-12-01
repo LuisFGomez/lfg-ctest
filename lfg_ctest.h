@@ -1,10 +1,10 @@
 /**
  * @file
- * @brief       LFG Unit Testing helpers.
+ * @brief       lfg-ctest unit testing helpers.
  */
 
-#ifndef LFGTEST_H_
-#define LFGTEST_H_
+#ifndef LFG_CTEST_H_
+#define LFG_CTEST_H_
 
 /*============================================================================
  *  Includes
@@ -31,207 +31,207 @@
 /** Execute a test or suite of tests.
  */
 #define ASSERT_FALSE(_cond)                          \
-    lft_assert_false_impl((_cond),            \
+    lfg_ct_assert_false_impl((_cond),            \
                          __FILE__, __LINE__, \
                          __FUNCTION__, STR(_cond))
 
 #define ASSERT_TRUE(_cond)                          \
-    lft_assert_true_impl((_cond),            \
+    lfg_ct_assert_true_impl((_cond),            \
                         __FILE__, __LINE__, \
                         __FUNCTION__, STR(_cond))
 
 #define ASSERT_INT_EQUAL(_e, _a)                           \
-    lft_assert_int_equal_impl((int)(_e), (int)(_a), \
+    lfg_ct_assert_int_equal_impl((int)(_e), (int)(_a), \
                              __FILE__, __LINE__,   \
                              __FUNCTION__, STR(_a))
 
 #define ASSERT_INT_NOT_EQUAL(_e, _a)                           \
-    lft_assert_int_not_equal_impl((int)(_e), (int)(_a), \
+    lfg_ct_assert_int_not_equal_impl((int)(_e), (int)(_a), \
                                  __FILE__, __LINE__,   \
                                  __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT_EQUAL(_e, _a)                                     \
-    lft_assert_uint_equal_impl((unsigned)(_e), (unsigned)(_a), \
+    lfg_ct_assert_uint_equal_impl((unsigned)(_e), (unsigned)(_a), \
                               __FILE__, __LINE__,              \
                               __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_uint_not_equal_impl((unsigned)(_e), (unsigned)(_a), \
+    lfg_ct_assert_uint_not_equal_impl((unsigned)(_e), (unsigned)(_a), \
                                   __FILE__, __LINE__,              \
                                   __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT8_EQUAL(_e, _a)                                   \
-    lft_assert_uint8_equal_impl((uint8_t)(_e), (uint8_t)(_a), \
+    lfg_ct_assert_uint8_equal_impl((uint8_t)(_e), (uint8_t)(_a), \
                                __FILE__, __LINE__,           \
                                __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT8_NOT_EQUAL(_e, _a)                                   \
-    lft_assert_uint8_not_equal_impl((uint8_t)(_e), (uint8_t)(_a), \
+    lfg_ct_assert_uint8_not_equal_impl((uint8_t)(_e), (uint8_t)(_a), \
                                    __FILE__, __LINE__,               \
                                    __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT16_EQUAL(_e, _a)                                     \
-    lft_assert_uint16_equal_impl((uint16_t)(_e), (uint16_t)(_a), \
+    lfg_ct_assert_uint16_equal_impl((uint16_t)(_e), (uint16_t)(_a), \
                                 __FILE__, __LINE__,              \
                                 __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT16_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_uint16_not_equal_impl((uint16_t)(_e), (uint16_t)(_a), \
+    lfg_ct_assert_uint16_not_equal_impl((uint16_t)(_e), (uint16_t)(_a), \
                                     __FILE__, __LINE__,                  \
                                     __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT32_EQUAL(_e, _a)                                     \
-    lft_assert_uint32_equal_impl((uint32_t)(_e), (uint32_t)(_a), \
+    lfg_ct_assert_uint32_equal_impl((uint32_t)(_e), (uint32_t)(_a), \
                                 __FILE__, __LINE__,              \
                                 __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT32_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_uint32_not_equal_impl((uint32_t)(_e), (uint32_t)(_a), \
+    lfg_ct_assert_uint32_not_equal_impl((uint32_t)(_e), (uint32_t)(_a), \
                                     __FILE__, __LINE__,                  \
                                     __FUNCTION__, STR(_a))
 
 #define ASSERT_PTR_EQUAL(_e, _a)                               \
-    lft_assert_ptr_equal_impl((void*)(_e), (void*)(_a), \
+    lfg_ct_assert_ptr_equal_impl((void*)(_e), (void*)(_a), \
                              __FILE__, __LINE__,     \
                              __FUNCTION__, STR(_a))
 
 #define ASSERT_PTR_NOT_EQUAL(_e, _a)                               \
-    lft_assert_ptr_not_equal_impl((void*)(_e), (void*)(_a), \
+    lfg_ct_assert_ptr_not_equal_impl((void*)(_e), (void*)(_a), \
                                  __FILE__, __LINE__,         \
                                  __FUNCTION__, STR(_a))
 
 #define ASSERT_PTR_NOT_NULL(_a)                        \
-    lft_assert_ptr_not_null((void*)(_a),        \
+    lfg_ct_assert_ptr_not_null((void*)(_a),        \
                            __FILE__, __LINE__, \
                            __FUNCTION__, STR(_a))
 
 #define ASSERT_PTR_NULL(_a)                        \
-    lft_assert_ptr_null((void*)(_a),        \
+    lfg_ct_assert_ptr_null((void*)(_a),        \
                        __FILE__, __LINE__, \
                        __FUNCTION__, STR(_a))
 
 #define ASSERT_INT8_EQUAL(_e, _a)                                   \
-    lft_assert_int8_equal_impl((int8_t)(_e), (int8_t)(_a), \
+    lfg_ct_assert_int8_equal_impl((int8_t)(_e), (int8_t)(_a), \
                                __FILE__, __LINE__,           \
                                __FUNCTION__, STR(_a))
 
 #define ASSERT_INT8_NOT_EQUAL(_e, _a)                                   \
-    lft_assert_int8_not_equal_impl((int8_t)(_e), (int8_t)(_a), \
+    lfg_ct_assert_int8_not_equal_impl((int8_t)(_e), (int8_t)(_a), \
                                    __FILE__, __LINE__,               \
                                    __FUNCTION__, STR(_a))
 
 #define ASSERT_INT16_EQUAL(_e, _a)                                     \
-    lft_assert_int16_equal_impl((int16_t)(_e), (int16_t)(_a), \
+    lfg_ct_assert_int16_equal_impl((int16_t)(_e), (int16_t)(_a), \
                                 __FILE__, __LINE__,              \
                                 __FUNCTION__, STR(_a))
 
 #define ASSERT_INT16_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_int16_not_equal_impl((int16_t)(_e), (int16_t)(_a), \
+    lfg_ct_assert_int16_not_equal_impl((int16_t)(_e), (int16_t)(_a), \
                                     __FILE__, __LINE__,                  \
                                     __FUNCTION__, STR(_a))
 
 #define ASSERT_INT32_EQUAL(_e, _a)                                     \
-    lft_assert_int32_equal_impl((int32_t)(_e), (int32_t)(_a), \
+    lfg_ct_assert_int32_equal_impl((int32_t)(_e), (int32_t)(_a), \
                                 __FILE__, __LINE__,              \
                                 __FUNCTION__, STR(_a))
 
 #define ASSERT_INT32_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_int32_not_equal_impl((int32_t)(_e), (int32_t)(_a), \
+    lfg_ct_assert_int32_not_equal_impl((int32_t)(_e), (int32_t)(_a), \
                                     __FILE__, __LINE__,                  \
                                     __FUNCTION__, STR(_a))
 
 #define ASSERT_INT64_EQUAL(_e, _a)                                     \
-    lft_assert_int64_equal_impl((int64_t)(_e), (int64_t)(_a), \
+    lfg_ct_assert_int64_equal_impl((int64_t)(_e), (int64_t)(_a), \
                                 __FILE__, __LINE__,              \
                                 __FUNCTION__, STR(_a))
 
 #define ASSERT_INT64_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_int64_not_equal_impl((int64_t)(_e), (int64_t)(_a), \
+    lfg_ct_assert_int64_not_equal_impl((int64_t)(_e), (int64_t)(_a), \
                                     __FILE__, __LINE__,                  \
                                     __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT64_EQUAL(_e, _a)                                     \
-    lft_assert_uint64_equal_impl((uint64_t)(_e), (uint64_t)(_a), \
+    lfg_ct_assert_uint64_equal_impl((uint64_t)(_e), (uint64_t)(_a), \
                                  __FILE__, __LINE__,              \
                                  __FUNCTION__, STR(_a))
 
 #define ASSERT_UINT64_NOT_EQUAL(_e, _a)                                     \
-    lft_assert_uint64_not_equal_impl((uint64_t)(_e), (uint64_t)(_a), \
+    lfg_ct_assert_uint64_not_equal_impl((uint64_t)(_e), (uint64_t)(_a), \
                                      __FILE__, __LINE__,                  \
                                      __FUNCTION__, STR(_a))
 
 #define ASSERT_STR_EQUAL(_e, _a)                           \
-    lft_assert_str_equal_impl((_e), (_a), \
+    lfg_ct_assert_str_equal_impl((_e), (_a), \
                               __FILE__, __LINE__,   \
                               __FUNCTION__, STR(_a))
 
 #define ASSERT_STR_NOT_EQUAL(_e, _a)                           \
-    lft_assert_str_not_equal_impl((_e), (_a), \
+    lfg_ct_assert_str_not_equal_impl((_e), (_a), \
                                   __FILE__, __LINE__,   \
                                   __FUNCTION__, STR(_a))
 
 #define ASSERT_STRN_EQUAL(_e, _a, _n)                           \
-    lft_assert_strn_equal_impl((_e), (_a), (_n), \
+    lfg_ct_assert_strn_equal_impl((_e), (_a), (_n), \
                                __FILE__, __LINE__,   \
                                __FUNCTION__, STR(_a))
 
 #define ASSERT_MEM_EQUAL(_e, _a, _n)                           \
-    lft_assert_mem_equal_impl((_e), (_a), (_n), \
+    lfg_ct_assert_mem_equal_impl((_e), (_a), (_n), \
                               __FILE__, __LINE__,   \
                               __FUNCTION__, STR(_a))
 
 #define ASSERT_MEM_NOT_EQUAL(_e, _a, _n)                           \
-    lft_assert_mem_not_equal_impl((_e), (_a), (_n), \
+    lfg_ct_assert_mem_not_equal_impl((_e), (_a), (_n), \
                                   __FILE__, __LINE__,   \
                                   __FUNCTION__, STR(_a))
 
 #define ASSERT_GREATER_THAN(_a, _b)                           \
-    lft_assert_greater_than_impl((int)(_a), (int)(_b), \
+    lfg_ct_assert_greater_than_impl((int)(_a), (int)(_b), \
                                  __FILE__, __LINE__,   \
                                  __FUNCTION__, STR(_a), STR(_b))
 
 #define ASSERT_LESS_THAN(_a, _b)                           \
-    lft_assert_less_than_impl((int)(_a), (int)(_b), \
+    lfg_ct_assert_less_than_impl((int)(_a), (int)(_b), \
                               __FILE__, __LINE__,   \
                               __FUNCTION__, STR(_a), STR(_b))
 
 #define ASSERT_GREATER_OR_EQUAL(_a, _b)                           \
-    lft_assert_greater_or_equal_impl((int)(_a), (int)(_b), \
+    lfg_ct_assert_greater_or_equal_impl((int)(_a), (int)(_b), \
                                      __FILE__, __LINE__,   \
                                      __FUNCTION__, STR(_a), STR(_b))
 
 #define ASSERT_LESS_OR_EQUAL(_a, _b)                           \
-    lft_assert_less_or_equal_impl((int)(_a), (int)(_b), \
+    lfg_ct_assert_less_or_equal_impl((int)(_a), (int)(_b), \
                                   __FILE__, __LINE__,   \
                                   __FUNCTION__, STR(_a), STR(_b))
 
 #define ASSERT_IN_RANGE(_val, _min, _max)                           \
-    lft_assert_in_range_impl((int)(_val), (int)(_min), (int)(_max), \
+    lfg_ct_assert_in_range_impl((int)(_val), (int)(_min), (int)(_max), \
                              __FILE__, __LINE__,   \
                              __FUNCTION__, STR(_val))
 
 #define ASSERT_BIT_SET(_val, _bit)                           \
-    lft_assert_bit_set_impl((unsigned)(_val), (_bit), \
+    lfg_ct_assert_bit_set_impl((unsigned)(_val), (_bit), \
                             __FILE__, __LINE__,   \
                             __FUNCTION__, STR(_val), (_bit))
 
 #define ASSERT_BIT_CLEAR(_val, _bit)                           \
-    lft_assert_bit_clear_impl((unsigned)(_val), (_bit), \
+    lfg_ct_assert_bit_clear_impl((unsigned)(_val), (_bit), \
                               __FILE__, __LINE__,   \
                               __FUNCTION__, STR(_val), (_bit))
 
 #define ASSERT_BITS_SET(_val, _mask)                           \
-    lft_assert_bits_set_impl((unsigned)(_val), (_mask), \
+    lfg_ct_assert_bits_set_impl((unsigned)(_val), (_mask), \
                              __FILE__, __LINE__,   \
                              __FUNCTION__, STR(_val), (_mask))
 
 #define ASSERT_BITS_CLEAR(_val, _mask)                           \
-    lft_assert_bits_clear_impl((unsigned)(_val), (_mask), \
+    lfg_ct_assert_bits_clear_impl((unsigned)(_val), (_mask), \
                                __FILE__, __LINE__,   \
                                __FUNCTION__, STR(_val), (_mask))
 
 #define ASSERT_FAIL(_msg)                           \
-    lft_assert_fail_impl(__FILE__, __LINE__,   \
+    lfg_ct_assert_fail_impl(__FILE__, __LINE__,   \
                          __FUNCTION__, (_msg))
 
 /* Less verbose aliases */
@@ -244,11 +244,11 @@
 #define ASSERT_NULL(_a)           ASSERT_PTR_NULL(_a)
 #define ASSERT_NOT_NULL(_a)       ASSERT_PTR_NOT_NULL(_a)
 
-#define lft_suite(_suite) \
-    lft_suite_impl(_suite, #_suite)
+#define lfg_ct_suite(_suite) \
+    lfg_ct_suite_impl(_suite, #_suite)
 
-#define lfgtest(_test)        \
-    lft_impl(_test, #_test)
+#define lfg_ctest(_test)        \
+    lfg_ct_impl(_test, #_test)
 
 /*============================================================================
  *  Public API
@@ -256,238 +256,238 @@
 
 /** Mark the beginning of unit testing.
  */
-void lft_start(void);
+void lfg_ct_start(void);
 
 /** Mark the end of unit testing.
  */
-void lft_end(void);
+void lfg_ct_end(void);
 
 /** Execute a suite of tests.
  */
-int lft_suite_impl(int (*fn)(void), const char *name);
+int lfg_ct_suite_impl(int (*fn)(void), const char *name);
 
 /** Execute a single unit test
  */
-int lft_impl(int (*fn)(void), const char *name);
+int lfg_ct_impl(int (*fn)(void), const char *name);
 
-void lft_print_summary(void);
+void lfg_ct_print_summary(void);
 
 /** Retrieve the return code for the currently executing test. This gets reset
  * for every new test run. It is intended to be called by individual test
  * functions like:
- *  return lft_current_test_return();
+ *  return lfg_ct_current_test_return();
  */
-int lft_current_test_return(void);
+int lfg_ct_current_test_return(void);
 
 /** Retrieve the return code for the currently executing suite. This gets reset
  * for every new suite run. It is intended to be called by individual suite
  * functions like:
- *  return lft_current_suite_return();
+ *  return lfg_ct_current_suite_return();
  */
-int lft_current_suite_return(void);
+int lfg_ct_current_suite_return(void);
 
 /** Retrieve the return code for the main unittest function. This is intended
  * to be called by the main() function such as:
  *      int main(int argc, char *argv[]) {
  *          // ... <execute suites or tests> ...
- *          return lft_return();
+ *          return lfg_ct_return();
  *      }
  */
-int lft_return(void);
+int lfg_ct_return(void);
 
-int lft_assert_false_impl(bool condition,
+int lfg_ct_assert_false_impl(bool condition,
                          char *filename,
                          int line_no,
                          const char *function,
                          const char *condition_str);
 
-int lft_assert_true_impl(bool condition,
+int lfg_ct_assert_true_impl(bool condition,
                         char *filename,
                         int line_no,
                         const char *function,
                         const char *condition_str);
 
-int lft_assert_int_equal_impl(int expected,
+int lfg_ct_assert_int_equal_impl(int expected,
                              int actual,
                              char *filename,
                              int line_no,
                              const char *function,
                              const char *actual_expr_str);
 
-int lft_assert_int_not_equal_impl(int expected,
+int lfg_ct_assert_int_not_equal_impl(int expected,
                                  int actual,
                                  char *filename,
                                  int line_no,
                                  const char *function,
                                  const char *actual_expr_str);
 
-int lft_assert_uint_equal_impl(unsigned expected,
+int lfg_ct_assert_uint_equal_impl(unsigned expected,
                               unsigned actual,
                               char *filename,
                               int line_no,
                               const char *function,
                               const char *actual_expr_str);
 
-int lft_assert_uint_not_equal_impl(unsigned expected,
+int lfg_ct_assert_uint_not_equal_impl(unsigned expected,
                                   unsigned actual,
                                   char *filename,
                                   int line_no,
                                   const char *function,
                                   const char *actual_expr_str);
 
-int lft_assert_uint8_equal_impl(uint8_t expected,
+int lfg_ct_assert_uint8_equal_impl(uint8_t expected,
                                uint8_t actual,
                                char *filename,
                                int line_no,
                                const char *function,
                                const char *actual_expr_str);
 
-int lft_assert_uint8_not_equal_impl(uint8_t expected,
+int lfg_ct_assert_uint8_not_equal_impl(uint8_t expected,
                                    uint8_t actual,
                                    char *filename,
                                    int line_no,
                                    const char *function,
                                    const char *actual_expr_str);
 
-int lft_assert_uint16_equal_impl(uint16_t expected,
+int lfg_ct_assert_uint16_equal_impl(uint16_t expected,
                                 uint16_t actual,
                                 char *filename,
                                 int line_no,
                                 const char *function,
                                 const char *actual_expr_str);
 
-int lft_assert_uint16_not_equal_impl(uint16_t expected,
+int lfg_ct_assert_uint16_not_equal_impl(uint16_t expected,
                                     uint16_t actual,
                                     char *filename,
                                     int line_no,
                                     const char *function,
                                     const char *actual_expr_str);
 
-int lft_assert_uint32_equal_impl(uint32_t expected,
+int lfg_ct_assert_uint32_equal_impl(uint32_t expected,
                                 uint32_t actual,
                                 char *filename,
                                 int line_no,
                                 const char *function,
                                 const char *actual_expr_str);
 
-int lft_assert_uint32_not_equal_impl(uint32_t expected,
+int lfg_ct_assert_uint32_not_equal_impl(uint32_t expected,
                                     uint32_t actual,
                                     char *filename,
                                     int line_no,
                                     const char *function,
                                     const char *actual_expr_str);
 
-int lft_assert_ptr_equal_impl(void *expected,
+int lfg_ct_assert_ptr_equal_impl(void *expected,
                              void *actual,
                              const char *filename,
                              int line_no,
                              const char *function,
                              const char *actual_expr_str);
 
-int lft_assert_ptr_not_equal_impl(void *expected,
+int lfg_ct_assert_ptr_not_equal_impl(void *expected,
                                  void *actual,
                                  const char *filename,
                                  int line_no,
                                  const char *function,
                                  const char *actual_expr_str);
 
-int lft_assert_ptr_not_null(void *actual,
+int lfg_ct_assert_ptr_not_null(void *actual,
                            const char *filename,
                            int line_no,
                            const char *function,
                            const char *actual_expr_str);
 
-int lft_assert_ptr_null(void *actual,
+int lfg_ct_assert_ptr_null(void *actual,
                        const char *filename,
                        int line_no,
                        const char *function,
                        const char *actual_expr_str);
 
-int lft_assert_int8_equal_impl(int8_t expected,
+int lfg_ct_assert_int8_equal_impl(int8_t expected,
                                int8_t actual,
                                char *filename,
                                int line_no,
                                const char *function,
                                const char *actual_expr_str);
 
-int lft_assert_int8_not_equal_impl(int8_t expected,
+int lfg_ct_assert_int8_not_equal_impl(int8_t expected,
                                    int8_t actual,
                                    char *filename,
                                    int line_no,
                                    const char *function,
                                    const char *actual_expr_str);
 
-int lft_assert_int16_equal_impl(int16_t expected,
+int lfg_ct_assert_int16_equal_impl(int16_t expected,
                                 int16_t actual,
                                 char *filename,
                                 int line_no,
                                 const char *function,
                                 const char *actual_expr_str);
 
-int lft_assert_int16_not_equal_impl(int16_t expected,
+int lfg_ct_assert_int16_not_equal_impl(int16_t expected,
                                     int16_t actual,
                                     char *filename,
                                     int line_no,
                                     const char *function,
                                     const char *actual_expr_str);
 
-int lft_assert_int32_equal_impl(int32_t expected,
+int lfg_ct_assert_int32_equal_impl(int32_t expected,
                                 int32_t actual,
                                 char *filename,
                                 int line_no,
                                 const char *function,
                                 const char *actual_expr_str);
 
-int lft_assert_int32_not_equal_impl(int32_t expected,
+int lfg_ct_assert_int32_not_equal_impl(int32_t expected,
                                     int32_t actual,
                                     char *filename,
                                     int line_no,
                                     const char *function,
                                     const char *actual_expr_str);
 
-int lft_assert_int64_equal_impl(int64_t expected,
+int lfg_ct_assert_int64_equal_impl(int64_t expected,
                                 int64_t actual,
                                 char *filename,
                                 int line_no,
                                 const char *function,
                                 const char *actual_expr_str);
 
-int lft_assert_int64_not_equal_impl(int64_t expected,
+int lfg_ct_assert_int64_not_equal_impl(int64_t expected,
                                     int64_t actual,
                                     char *filename,
                                     int line_no,
                                     const char *function,
                                     const char *actual_expr_str);
 
-int lft_assert_uint64_equal_impl(uint64_t expected,
+int lfg_ct_assert_uint64_equal_impl(uint64_t expected,
                                  uint64_t actual,
                                  char *filename,
                                  int line_no,
                                  const char *function,
                                  const char *actual_expr_str);
 
-int lft_assert_uint64_not_equal_impl(uint64_t expected,
+int lfg_ct_assert_uint64_not_equal_impl(uint64_t expected,
                                      uint64_t actual,
                                      char *filename,
                                      int line_no,
                                      const char *function,
                                      const char *actual_expr_str);
 
-int lft_assert_str_equal_impl(const char *expected,
+int lfg_ct_assert_str_equal_impl(const char *expected,
                               const char *actual,
                               char *filename,
                               int line_no,
                               const char *function,
                               const char *actual_expr_str);
 
-int lft_assert_str_not_equal_impl(const char *expected,
+int lfg_ct_assert_str_not_equal_impl(const char *expected,
                                   const char *actual,
                                   char *filename,
                                   int line_no,
                                   const char *function,
                                   const char *actual_expr_str);
 
-int lft_assert_strn_equal_impl(const char *expected,
+int lfg_ct_assert_strn_equal_impl(const char *expected,
                                const char *actual,
                                size_t n,
                                char *filename,
@@ -495,7 +495,7 @@ int lft_assert_strn_equal_impl(const char *expected,
                                const char *function,
                                const char *actual_expr_str);
 
-int lft_assert_mem_equal_impl(const void *expected,
+int lfg_ct_assert_mem_equal_impl(const void *expected,
                               const void *actual,
                               size_t n,
                               char *filename,
@@ -503,7 +503,7 @@ int lft_assert_mem_equal_impl(const void *expected,
                               const char *function,
                               const char *actual_expr_str);
 
-int lft_assert_mem_not_equal_impl(const void *expected,
+int lfg_ct_assert_mem_not_equal_impl(const void *expected,
                                   const void *actual,
                                   size_t n,
                                   char *filename,
@@ -511,7 +511,7 @@ int lft_assert_mem_not_equal_impl(const void *expected,
                                   const char *function,
                                   const char *actual_expr_str);
 
-int lft_assert_greater_than_impl(int a,
+int lfg_ct_assert_greater_than_impl(int a,
                                  int b,
                                  char *filename,
                                  int line_no,
@@ -519,7 +519,7 @@ int lft_assert_greater_than_impl(int a,
                                  const char *a_expr_str,
                                  const char *b_expr_str);
 
-int lft_assert_less_than_impl(int a,
+int lfg_ct_assert_less_than_impl(int a,
                               int b,
                               char *filename,
                               int line_no,
@@ -527,7 +527,7 @@ int lft_assert_less_than_impl(int a,
                               const char *a_expr_str,
                               const char *b_expr_str);
 
-int lft_assert_greater_or_equal_impl(int a,
+int lfg_ct_assert_greater_or_equal_impl(int a,
                                      int b,
                                      char *filename,
                                      int line_no,
@@ -535,7 +535,7 @@ int lft_assert_greater_or_equal_impl(int a,
                                      const char *a_expr_str,
                                      const char *b_expr_str);
 
-int lft_assert_less_or_equal_impl(int a,
+int lfg_ct_assert_less_or_equal_impl(int a,
                                   int b,
                                   char *filename,
                                   int line_no,
@@ -543,7 +543,7 @@ int lft_assert_less_or_equal_impl(int a,
                                   const char *a_expr_str,
                                   const char *b_expr_str);
 
-int lft_assert_in_range_impl(int val,
+int lfg_ct_assert_in_range_impl(int val,
                              int min,
                              int max,
                              char *filename,
@@ -551,7 +551,7 @@ int lft_assert_in_range_impl(int val,
                              const char *function,
                              const char *val_expr_str);
 
-int lft_assert_bit_set_impl(unsigned val,
+int lfg_ct_assert_bit_set_impl(unsigned val,
                             unsigned bit,
                             char *filename,
                             int line_no,
@@ -559,7 +559,7 @@ int lft_assert_bit_set_impl(unsigned val,
                             const char *val_expr_str,
                             unsigned bit_num);
 
-int lft_assert_bit_clear_impl(unsigned val,
+int lfg_ct_assert_bit_clear_impl(unsigned val,
                               unsigned bit,
                               char *filename,
                               int line_no,
@@ -567,7 +567,7 @@ int lft_assert_bit_clear_impl(unsigned val,
                               const char *val_expr_str,
                               unsigned bit_num);
 
-int lft_assert_bits_set_impl(unsigned val,
+int lfg_ct_assert_bits_set_impl(unsigned val,
                              unsigned mask,
                              char *filename,
                              int line_no,
@@ -575,7 +575,7 @@ int lft_assert_bits_set_impl(unsigned val,
                              const char *val_expr_str,
                              unsigned mask_val);
 
-int lft_assert_bits_clear_impl(unsigned val,
+int lfg_ct_assert_bits_clear_impl(unsigned val,
                                unsigned mask,
                                char *filename,
                                int line_no,
@@ -583,10 +583,10 @@ int lft_assert_bits_clear_impl(unsigned val,
                                const char *val_expr_str,
                                unsigned mask_val);
 
-int lft_assert_fail_impl(char *filename,
+int lfg_ct_assert_fail_impl(char *filename,
                         int line_no,
                         const char *function,
                         const char *message);
 
-#endif /* LFGTEST_H_ */
+#endif /* LFG_CTEST_H_ */
 

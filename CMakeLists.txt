@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(lfgtest C)
+project(lfg_ctest C)
 
-# Set C standard to C99 (required by lfgtest)
+# Set C standard to C99 (required by lfg-ctest)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -10,14 +10,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic")
 
 # Library source files
-set(LFGTEST_SOURCES
-    lfgtest.c
-    lfgtest_mock.c
+set(LFG_CTEST_SOURCES
+    lfg_ctest.c
+    lfg_ctest_mock.c
 )
 
 # Create static library
-add_library(lfgtest STATIC ${LFGTEST_SOURCES})
-target_include_directories(lfgtest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(lfg_ctest STATIC ${LFG_CTEST_SOURCES})
+target_include_directories(lfg_ctest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Test executables
 set(TEST_TARGETS
@@ -28,7 +28,7 @@ set(TEST_TARGETS
 # Build each test executable
 foreach(TEST_TARGET ${TEST_TARGETS})
     add_executable(${TEST_TARGET} ${TEST_TARGET}.c)
-    target_link_libraries(${TEST_TARGET} lfgtest)
+    target_link_libraries(${TEST_TARGET} lfg_ctest)
 endforeach()
 
 # Enable testing
@@ -48,19 +48,19 @@ add_custom_target(run_all_tests
 )
 
 # Installation rules (optional)
-install(TARGETS lfgtest
+install(TARGETS lfg_ctest
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
 )
 
-install(FILES lfgtest.h lfgtest_mock.h
+install(FILES lfg_ctest.h lfg_ctest_mock.h
     DESTINATION include
 )
 
 # Print configuration summary
 message(STATUS "")
 message(STATUS "====================================")
-message(STATUS "LFG Test Framework Build Configuration")
+message(STATUS "lfg-ctest Build Configuration")
 message(STATUS "====================================")
 message(STATUS "C Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "C Standard: C${CMAKE_C_STANDARD}")

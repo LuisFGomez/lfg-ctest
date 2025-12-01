@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief       LFG mocking helpers.
+ * @brief       lfg-ctest mocking helpers.
  *
  * Macro naming convention: {R|V}_{V|N}
  *   First letter:  R = returns a value, V = void return
@@ -10,8 +10,8 @@
  *   DECLARE_MOCK_V_V = void return, no params
  */
 
-#ifndef LFGTEST_MOCK_H_
-#define LFGTEST_MOCK_H_
+#ifndef LFG_CTEST_MOCK_H_
+#define LFG_CTEST_MOCK_H_
 
 /*============================================================================
  *  Includes
@@ -23,7 +23,7 @@
 #include <string.h>
 #include <stddef.h>
 
-#include "lfgtest.h"
+#include "lfg_ctest.h"
 
 /*============================================================================
  *  Defines/Typedefs
@@ -844,4 +844,4 @@ void mock_param_destroy(mock_param_action_t action);
     } \
     _MOCK_RESET_R_SIMPLE(_func)
 
-#endif /* LFGTEST_MOCK_H_ */
+#endif /* LFG_CTEST_MOCK_H_ */
