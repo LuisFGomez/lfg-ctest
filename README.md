@@ -278,6 +278,12 @@ int test_callback_registration(void)
 
 For pointer parameters, capture or inject data using parameter actions:
 
+| Function | Description |
+|----------|-------------|
+| `mock_param_mem_read(action, call_idx, param_idx, buf, size)` | Capture `size` bytes from parameter into `buf` |
+| `mock_param_mem_write(action, call_idx, param_idx, buf, size)` | Inject `size` bytes from `buf` into parameter |
+| `mock_param_destroy(action)` | Free action chain (called automatically by `_reset`) |
+
 **Capture data from a pointer parameter:**
 ```c
 int test_capture_buffer_contents(void)
