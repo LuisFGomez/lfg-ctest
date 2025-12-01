@@ -73,6 +73,59 @@ int main(void)
 | `lfg_ct_print_summary()` | Print pass/fail summary |
 | `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
 
+### Setup and Teardown
+
+lfg-ctest does not impose any setup/teardown mechanism. They're just functions you call however you like:
+
+```c
+static void setup(void)
+{
+    // initialize test state
+    my_mock__mock_reset();
+    global_state = initial_value;
+}
+
+static void teardown(void)
+{
+    // cleanup after test
+    my_mock__mock_reset();
+    free(allocated_memory);
+}
+
+void test_something(void)
+{
+    setup();
+
+    // ... test logic ...
+    ASSERT_EQ(expected, actual);
+
+    teardown();
+}
+```
+
+Call them per-test, per-suite, or not at all—your choice:
+
+```c
+void my_suite(void)
+{
+    setup();  // once for the whole suite
+
+    lfg_ctest(test_case_1);
+    lfg_ctest(test_case_2);
+    lfg_ctest(test_case_3);
+
+    teardown();
+}
+
+// Or per-test if each needs isolation:
+void test_with_isolation(void)
+{
+    setup();
+    ASSERT_TRUE(condition);
+    teardown();
+}
+```
+
 ### Assertion Reference
 
 **49 assertions** covering all common C testing scenarios.
