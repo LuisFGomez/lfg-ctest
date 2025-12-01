@@ -105,7 +105,33 @@ int main(int argc, char *argv[])
 | `ASSERT_UINT_EQUAL(expected, actual)` | Unsigned integers are equal |
 | `ASSERT_UINT_NOT_EQUAL(expected, actual)` | Unsigned integers are not equal |
 
-Fixed-width variants: `ASSERT_{INT|UINT}{8|16|32|64}_{EQUAL|NOT_EQUAL}`
+#### Fixed-Width Integer Assertions
+
+Signed variants (output in decimal):
+
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_INT8_EQUAL(expected, actual)` | `int8_t` values are equal |
+| `ASSERT_INT8_NOT_EQUAL(expected, actual)` | `int8_t` values are not equal |
+| `ASSERT_INT16_EQUAL(expected, actual)` | `int16_t` values are equal |
+| `ASSERT_INT16_NOT_EQUAL(expected, actual)` | `int16_t` values are not equal |
+| `ASSERT_INT32_EQUAL(expected, actual)` | `int32_t` values are equal |
+| `ASSERT_INT32_NOT_EQUAL(expected, actual)` | `int32_t` values are not equal |
+| `ASSERT_INT64_EQUAL(expected, actual)` | `int64_t` values are equal |
+| `ASSERT_INT64_NOT_EQUAL(expected, actual)` | `int64_t` values are not equal |
+
+Unsigned variants (output in hex with appropriate width):
+
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_UINT8_EQUAL(expected, actual)` | `uint8_t` values are equal (hex 0x00) |
+| `ASSERT_UINT8_NOT_EQUAL(expected, actual)` | `uint8_t` values are not equal |
+| `ASSERT_UINT16_EQUAL(expected, actual)` | `uint16_t` values are equal (hex 0x0000) |
+| `ASSERT_UINT16_NOT_EQUAL(expected, actual)` | `uint16_t` values are not equal |
+| `ASSERT_UINT32_EQUAL(expected, actual)` | `uint32_t` values are equal (hex 0x00000000) |
+| `ASSERT_UINT32_NOT_EQUAL(expected, actual)` | `uint32_t` values are not equal |
+| `ASSERT_UINT64_EQUAL(expected, actual)` | `uint64_t` values are equal (hex 0x0000000000000000) |
+| `ASSERT_UINT64_NOT_EQUAL(expected, actual)` | `uint64_t` values are not equal |
 
 #### String Assertions
 | Assertion | Description |
