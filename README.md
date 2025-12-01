@@ -230,6 +230,42 @@ Each mock generates these symbols (using `get_value` as example):
 | `get_value__param_actions` | pointer | Parameter read/write actions |
 | `get_value_params` | typedef | Struct type for captured parameters |
 
+### Storage Limits
+
+Mock arrays are statically sized to `MOCK_CALL_STORAGE_MAX` (default 32). To increase:
+
+```c
+// Define before including the header
+#define MOCK_CALL_STORAGE_MAX 64
+#include <lfg_ctest_mock.h>
+```
+
+Exceeding the limit triggers `assert()` failure with a diagnostic message.
+
+### Parameter History
+
+Each call to a mock captures all parameters in `__param_history[]`. Parameters are accessed as `p0`, `p1`, `p2`, etc. (0-indexed):
+
+```c
+// For a mock: int add(int a, int b, int c);
+DECLARE_MOCK_R_3(add, int, int, int, int);
+
+// After calling: add__mock(10, 20, 30);
+add__param_history[0].p0  // first call, param 'a' = 10
+add__param_history[0].p1  // first call, param 'b' = 20
+add__param_history[0].p2  // first call, param 'c' = 30
+
+// After a second call: add__mock(1, 2, 3);
+add__param_history[1].p0  // second call, param 'a' = 1
+add__param_history[1].p1  // second call, param 'b' = 2
+add__param_history[1].p2  // second call, param 'c' = 3
+```
+
+The generated `_params` typedef shows the struct layout:
+```c
+typedef struct { int p0; int p1; int p2; } add_params;
+```
+
 ### Using Mocks in Tests
 
 **Basic usage - verify call count and parameters:**
@@ -374,9 +410,9 @@ int test_with_struct_param(void)
 
 ### Mock Limitations
 
-- Maximum 32 calls stored per mock (`MOCK_CALL_STORAGE_MAX`) - exceeding this aborts via `assert()`
 - Maximum 9 parameters per function
 - Standard mocks cast parameters to `void*` via `size_t` - use `_S` variants for struct-by-value
+- See [Storage Limits](#storage-limits) for call history size (default 32)
 
 ---
 
