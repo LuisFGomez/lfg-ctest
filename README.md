@@ -439,11 +439,14 @@ int led_set_brightness(uint8_t channel, uint16_t brightness);
 
 **led_driver.c** - Implementation with conditional includes:
 ```c
+/*
+ * This #if block is the ONLY modification needed in production code to enable
+ * full unit testing. The test header pulls in mocks that transparently replace
+ * real dependencies via macro substitution.
+ */
 #if defined(UNITTEST)
-/* Test build: include test header which pulls in mocks */
 #include "led_driver_test.h"
 #else
-/* Production build: include real dependencies */
 #include <stdint.h>
 #include <i2c.h>
 #include "led_driver.h"
