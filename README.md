@@ -740,4 +740,4 @@ gcc -o firmware \
 
 ## License
 
-[Add license information here]
+MIT License - see [LICENSE](LICENSE) for details.
