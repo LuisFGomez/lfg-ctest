@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#if defined(LFG_CTEST_HAS_FLOAT) || defined(LFG_CTEST_HAS_DOUBLE)
+#include <math.h>
+#endif
 #include "lfg_ctest.h"
 
 /*============================================================================
@@ -952,6 +955,224 @@ int lfg_ct_assert_fail_impl(char *filename,
     _assertions_failed++;
     return -1;
 }
+
+/*============================================================================
+ *  32-bit Float Assertions (optional)
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_FLOAT
+
+int lfg_ct_assert_float_equal_impl(float expected,
+                                   float actual,
+                                   float epsilon,
+                                   const char *filename,
+                                   int line_no,
+                                   const char *function,
+                                   const char *actual_expr_str)
+{
+    _assertions_executed++;
+    float diff = fabsf(expected - actual);
+    if (diff > epsilon)
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should equal %.6g "
+               "(diff=%.6g, eps=%.6g)\r\n",
+               filename, line_no, function, actual_expr_str, actual,
+               expected, diff, epsilon);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_not_equal_impl(float expected,
+                                       float actual,
+                                       float epsilon,
+                                       const char *filename,
+                                       int line_no,
+                                       const char *function,
+                                       const char *actual_expr_str)
+{
+    _assertions_executed++;
+    float diff = fabsf(expected - actual);
+    if (diff <= epsilon)
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should not equal %.6g "
+               "(diff=%.6g, eps=%.6g)\r\n",
+               filename, line_no, function, actual_expr_str, actual,
+               expected, diff, epsilon);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_greater_impl(float a,
+                                     float b,
+                                     const char *filename,
+                                     int line_no,
+                                     const char *function,
+                                     const char *a_expr_str,
+                                     const char *b_expr_str)
+{
+    _assertions_executed++;
+    if (!(a > b))
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be > %s (%.6g)\r\n",
+               filename, line_no, function, a_expr_str, a, b_expr_str, b);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_less_impl(float a,
+                                  float b,
+                                  const char *filename,
+                                  int line_no,
+                                  const char *function,
+                                  const char *a_expr_str,
+                                  const char *b_expr_str)
+{
+    _assertions_executed++;
+    if (!(a < b))
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be < %s (%.6g)\r\n",
+               filename, line_no, function, a_expr_str, a, b_expr_str, b);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_ge_impl(float a,
+                                float b,
+                                const char *filename,
+                                int line_no,
+                                const char *function,
+                                const char *a_expr_str,
+                                const char *b_expr_str)
+{
+    _assertions_executed++;
+    if (!(a >= b))
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be >= %s (%.6g)\r\n",
+               filename, line_no, function, a_expr_str, a, b_expr_str, b);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_le_impl(float a,
+                                float b,
+                                const char *filename,
+                                int line_no,
+                                const char *function,
+                                const char *a_expr_str,
+                                const char *b_expr_str)
+{
+    _assertions_executed++;
+    if (!(a <= b))
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be <= %s (%.6g)\r\n",
+               filename, line_no, function, a_expr_str, a, b_expr_str, b);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_float_in_range_impl(float val,
+                                      float min,
+                                      float max,
+                                      const char *filename,
+                                      int line_no,
+                                      const char *function,
+                                      const char *val_expr_str)
+{
+    _assertions_executed++;
+    if (!(val >= min && val <= max))
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be in range "
+               "[%.6g, %.6g]\r\n",
+               filename, line_no, function, val_expr_str, val, min, max);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+#endif /* LFG_CTEST_HAS_FLOAT */
+
+/*============================================================================
+ *  64-bit Double Assertions (optional)
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_DOUBLE
+
+int lfg_ct_assert_double_equal_impl(double expected,
+                                    double actual,
+                                    double epsilon,
+                                    const char *filename,
+                                    int line_no,
+                                    const char *function,
+                                    const char *actual_expr_str)
+{
+    _assertions_executed++;
+    double diff = fabs(expected - actual);
+    if (diff > epsilon)
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.10g) should equal %.10g "
+               "(diff=%.10g, eps=%.10g)\r\n",
+               filename, line_no, function, actual_expr_str, actual,
+               expected, diff, epsilon);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+int lfg_ct_assert_double_not_equal_impl(double expected,
+                                        double actual,
+                                        double epsilon,
+                                        const char *filename,
+                                        int line_no,
+                                        const char *function,
+                                        const char *actual_expr_str)
+{
+    _assertions_executed++;
+    double diff = fabs(expected - actual);
+    if (diff <= epsilon)
+    {
+        printf("*** %s: %u: FAILURE in %s(): %s (%.10g) should not equal %.10g "
+               "(diff=%.10g, eps=%.10g)\r\n",
+               filename, line_no, function, actual_expr_str, actual,
+               expected, diff, epsilon);
+        _current_test_failures++;
+        _assertions_failed++;
+        return -1;
+    }
+    _assertions_passed++;
+    return 0;
+}
+
+#endif /* LFG_CTEST_HAS_DOUBLE */
 
 /*============================================================================
  *  Private Functions

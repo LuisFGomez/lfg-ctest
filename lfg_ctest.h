@@ -234,6 +234,102 @@
     lfg_ct_assert_fail_impl(__FILE__, __LINE__,   \
                          __FUNCTION__, (_msg))
 
+/*============================================================================
+ *  32-bit Float Assertions (optional - requires LFG_CTEST_HAS_FLOAT)
+ *
+ *  These assertions require fabsf from math library.
+ *  On embedded platforms without FPU, disable with:
+ *    cmake -DLFG_CTEST_ENABLE_FLOAT=OFF
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_FLOAT
+
+/** Assert float values are equal within epsilon tolerance */
+#define ASSERT_FLOAT_EQUAL(_e, _a, _eps)                              \
+    lfg_ct_assert_float_equal_impl((float)(_e), (float)(_a),          \
+                                   (float)(_eps),                      \
+                                   __FILE__, __LINE__,                 \
+                                   __FUNCTION__, STR(_a))
+
+/** Assert float values are not equal (differ by more than epsilon) */
+#define ASSERT_FLOAT_NOT_EQUAL(_e, _a, _eps)                          \
+    lfg_ct_assert_float_not_equal_impl((float)(_e), (float)(_a),      \
+                                       (float)(_eps),                  \
+                                       __FILE__, __LINE__,             \
+                                       __FUNCTION__, STR(_a))
+
+/** Assert float a > b */
+#define ASSERT_FLOAT_GREATER_THAN(_a, _b)                             \
+    lfg_ct_assert_float_greater_impl((float)(_a), (float)(_b),        \
+                                     __FILE__, __LINE__,               \
+                                     __FUNCTION__, STR(_a), STR(_b))
+
+/** Assert float a < b */
+#define ASSERT_FLOAT_LESS_THAN(_a, _b)                                \
+    lfg_ct_assert_float_less_impl((float)(_a), (float)(_b),           \
+                                  __FILE__, __LINE__,                  \
+                                  __FUNCTION__, STR(_a), STR(_b))
+
+/** Assert float a >= b */
+#define ASSERT_FLOAT_GREATER_OR_EQUAL(_a, _b)                         \
+    lfg_ct_assert_float_ge_impl((float)(_a), (float)(_b),             \
+                                __FILE__, __LINE__,                    \
+                                __FUNCTION__, STR(_a), STR(_b))
+
+/** Assert float a <= b */
+#define ASSERT_FLOAT_LESS_OR_EQUAL(_a, _b)                            \
+    lfg_ct_assert_float_le_impl((float)(_a), (float)(_b),             \
+                                __FILE__, __LINE__,                    \
+                                __FUNCTION__, STR(_a), STR(_b))
+
+/** Assert float value is within range [min, max] */
+#define ASSERT_FLOAT_IN_RANGE(_val, _min, _max)                       \
+    lfg_ct_assert_float_in_range_impl((float)(_val), (float)(_min),   \
+                                      (float)(_max),                   \
+                                      __FILE__, __LINE__,              \
+                                      __FUNCTION__, STR(_val))
+
+/* Shorthand aliases for float assertions */
+#define ASSERT_FLT_EQ(_e, _a, _eps)     ASSERT_FLOAT_EQUAL(_e, _a, _eps)
+#define ASSERT_FLT_NE(_e, _a, _eps)     ASSERT_FLOAT_NOT_EQUAL(_e, _a, _eps)
+#define ASSERT_FLT_GT(_a, _b)           ASSERT_FLOAT_GREATER_THAN(_a, _b)
+#define ASSERT_FLT_LT(_a, _b)           ASSERT_FLOAT_LESS_THAN(_a, _b)
+#define ASSERT_FLT_GE(_a, _b)           ASSERT_FLOAT_GREATER_OR_EQUAL(_a, _b)
+#define ASSERT_FLT_LE(_a, _b)           ASSERT_FLOAT_LESS_OR_EQUAL(_a, _b)
+
+#endif /* LFG_CTEST_HAS_FLOAT */
+
+/*============================================================================
+ *  64-bit Double Assertions (optional - requires LFG_CTEST_HAS_DOUBLE)
+ *
+ *  These assertions require fabs from math library.
+ *  Some embedded platforms have hardware float but software-emulated double.
+ *  Disable double separately with:
+ *    cmake -DLFG_CTEST_ENABLE_DOUBLE=OFF
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_DOUBLE
+
+/** Assert double values are equal within epsilon tolerance */
+#define ASSERT_DOUBLE_EQUAL(_e, _a, _eps)                             \
+    lfg_ct_assert_double_equal_impl((double)(_e), (double)(_a),       \
+                                    (double)(_eps),                    \
+                                    __FILE__, __LINE__,                \
+                                    __FUNCTION__, STR(_a))
+
+/** Assert double values are not equal (differ by more than epsilon) */
+#define ASSERT_DOUBLE_NOT_EQUAL(_e, _a, _eps)                         \
+    lfg_ct_assert_double_not_equal_impl((double)(_e), (double)(_a),   \
+                                        (double)(_eps),                \
+                                        __FILE__, __LINE__,            \
+                                        __FUNCTION__, STR(_a))
+
+/* Shorthand aliases for double assertions */
+#define ASSERT_DBL_EQ(_e, _a, _eps)     ASSERT_DOUBLE_EQUAL(_e, _a, _eps)
+#define ASSERT_DBL_NE(_e, _a, _eps)     ASSERT_DOUBLE_NOT_EQUAL(_e, _a, _eps)
+
+#endif /* LFG_CTEST_HAS_DOUBLE */
+
 /* Less verbose aliases */
 #define ASSERT_EQ(_e, _a)         ASSERT_INT_EQUAL(_e, _a)
 #define ASSERT_NE(_e, _a)         ASSERT_INT_NOT_EQUAL(_e, _a)
@@ -575,6 +671,94 @@ int lfg_ct_assert_fail_impl(char *filename,
                         int line_no,
                         const char *function,
                         const char *message);
+
+/*============================================================================
+ *  32-bit Float Assertion Implementations (optional)
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_FLOAT
+
+int lfg_ct_assert_float_equal_impl(float expected,
+                                   float actual,
+                                   float epsilon,
+                                   const char *filename,
+                                   int line_no,
+                                   const char *function,
+                                   const char *actual_expr_str);
+
+int lfg_ct_assert_float_not_equal_impl(float expected,
+                                       float actual,
+                                       float epsilon,
+                                       const char *filename,
+                                       int line_no,
+                                       const char *function,
+                                       const char *actual_expr_str);
+
+int lfg_ct_assert_float_greater_impl(float a,
+                                     float b,
+                                     const char *filename,
+                                     int line_no,
+                                     const char *function,
+                                     const char *a_expr_str,
+                                     const char *b_expr_str);
+
+int lfg_ct_assert_float_less_impl(float a,
+                                  float b,
+                                  const char *filename,
+                                  int line_no,
+                                  const char *function,
+                                  const char *a_expr_str,
+                                  const char *b_expr_str);
+
+int lfg_ct_assert_float_ge_impl(float a,
+                                float b,
+                                const char *filename,
+                                int line_no,
+                                const char *function,
+                                const char *a_expr_str,
+                                const char *b_expr_str);
+
+int lfg_ct_assert_float_le_impl(float a,
+                                float b,
+                                const char *filename,
+                                int line_no,
+                                const char *function,
+                                const char *a_expr_str,
+                                const char *b_expr_str);
+
+int lfg_ct_assert_float_in_range_impl(float val,
+                                      float min,
+                                      float max,
+                                      const char *filename,
+                                      int line_no,
+                                      const char *function,
+                                      const char *val_expr_str);
+
+#endif /* LFG_CTEST_HAS_FLOAT */
+
+/*============================================================================
+ *  64-bit Double Assertion Implementations (optional)
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_HAS_DOUBLE
+
+int lfg_ct_assert_double_equal_impl(double expected,
+                                    double actual,
+                                    double epsilon,
+                                    const char *filename,
+                                    int line_no,
+                                    const char *function,
+                                    const char *actual_expr_str);
+
+int lfg_ct_assert_double_not_equal_impl(double expected,
+                                        double actual,
+                                        double epsilon,
+                                        const char *filename,
+                                        int line_no,
+                                        const char *function,
+                                        const char *actual_expr_str);
+
+#endif /* LFG_CTEST_HAS_DOUBLE */
 
 #endif /* LFG_CTEST_H_ */
 

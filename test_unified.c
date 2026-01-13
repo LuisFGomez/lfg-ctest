@@ -1,8 +1,11 @@
 /*
  * Unified Test Suite for lfg-ctest
  *
- * This suite exercises ALL 49 assertion macros with both passing and failing tests
+ * This suite exercises all assertion macros with both passing and failing tests
  * to verify complete functionality of the testing framework.
+ *
+ * Floating-point assertions are only tested when LFG_CTEST_HAS_FLOAT is defined.
+ * Use cmake -DLFG_CTEST_ENABLE_FLOAT=OFF to build without float support.
  */
 
 #include "lfg_ctest.h"
@@ -135,6 +138,54 @@ static void test_bit_assertions_pass(void)
     ASSERT_BITS_CLEAR(value, 0b01010101);
 }
 
+#ifdef LFG_CTEST_HAS_FLOAT
+static void test_float_assertions_pass(void)
+{
+    /* Float equality with epsilon */
+    ASSERT_FLOAT_EQUAL(3.14159f, 3.14159f, 0.0001f);
+    ASSERT_FLT_EQ(100.0f, 100.0001f, 0.001f);
+
+    /* Float not equal */
+    ASSERT_FLOAT_NOT_EQUAL(1.0f, 2.0f, 0.1f);
+    ASSERT_FLT_NE(0.0f, 1.0f, 0.5f);
+
+    /* Float comparisons */
+    ASSERT_FLOAT_GREATER_THAN(10.5f, 5.5f);
+    ASSERT_FLT_GT(100.0f, 99.9f);
+
+    ASSERT_FLOAT_LESS_THAN(5.5f, 10.5f);
+    ASSERT_FLT_LT(99.9f, 100.0f);
+
+    ASSERT_FLOAT_GREATER_OR_EQUAL(10.0f, 10.0f);
+    ASSERT_FLOAT_GREATER_OR_EQUAL(10.0f, 5.0f);
+    ASSERT_FLT_GE(100.0f, 100.0f);
+    ASSERT_FLT_GE(100.0f, 50.0f);
+
+    ASSERT_FLOAT_LESS_OR_EQUAL(5.0f, 5.0f);
+    ASSERT_FLOAT_LESS_OR_EQUAL(5.0f, 10.0f);
+    ASSERT_FLT_LE(50.0f, 50.0f);
+    ASSERT_FLT_LE(50.0f, 100.0f);
+
+    /* Float range */
+    ASSERT_FLOAT_IN_RANGE(5.0f, 1.0f, 10.0f);
+    ASSERT_FLOAT_IN_RANGE(1.0f, 1.0f, 10.0f);
+    ASSERT_FLOAT_IN_RANGE(10.0f, 1.0f, 10.0f);
+}
+#endif
+
+#ifdef LFG_CTEST_HAS_DOUBLE
+static void test_double_assertions_pass(void)
+{
+    /* Double equality with epsilon */
+    ASSERT_DOUBLE_EQUAL(3.141592653589793, 3.141592653589793, 1e-10);
+    ASSERT_DBL_EQ(1e10, 1.00000001e10, 1e4);
+
+    /* Double not equal */
+    ASSERT_DOUBLE_NOT_EQUAL(1.0, 2.0, 0.1);
+    ASSERT_DBL_NE(0.0, 1.0, 0.5);
+}
+#endif
+
 /* ============================================================================
  * FAILING TESTS - All assertions should fail
  * ============================================================================ */
@@ -257,6 +308,49 @@ static void test_explicit_fail(void)
     ASSERT_FAIL("This is an intentional failure for testing ASSERT_FAIL");
 }
 
+#ifdef LFG_CTEST_HAS_FLOAT
+static void test_float_assertions_fail(void)
+{
+    /* Float equality with epsilon */
+    ASSERT_FLOAT_EQUAL(1.0f, 2.0f, 0.1f);           // FAIL: diff > epsilon
+    ASSERT_FLT_EQ(100.0f, 200.0f, 0.001f);          // FAIL: diff > epsilon
+
+    /* Float not equal */
+    ASSERT_FLOAT_NOT_EQUAL(1.0f, 1.0f, 0.1f);       // FAIL: they are equal
+    ASSERT_FLT_NE(0.0f, 0.0001f, 0.001f);           // FAIL: diff < epsilon
+
+    /* Float comparisons */
+    ASSERT_FLOAT_GREATER_THAN(5.5f, 10.5f);         // FAIL: 5.5 <= 10.5
+    ASSERT_FLT_GT(99.9f, 100.0f);                   // FAIL: 99.9 <= 100.0
+
+    ASSERT_FLOAT_LESS_THAN(10.5f, 5.5f);            // FAIL: 10.5 >= 5.5
+    ASSERT_FLT_LT(100.0f, 99.9f);                   // FAIL: 100.0 >= 99.9
+
+    ASSERT_FLOAT_GREATER_OR_EQUAL(5.0f, 10.0f);     // FAIL: 5.0 < 10.0
+    ASSERT_FLT_GE(50.0f, 100.0f);                   // FAIL: 50.0 < 100.0
+
+    ASSERT_FLOAT_LESS_OR_EQUAL(10.0f, 5.0f);        // FAIL: 10.0 > 5.0
+    ASSERT_FLT_LE(100.0f, 50.0f);                   // FAIL: 100.0 > 50.0
+
+    /* Float range */
+    ASSERT_FLOAT_IN_RANGE(0.5f, 1.0f, 10.0f);       // FAIL: 0.5 < 1.0
+    ASSERT_FLOAT_IN_RANGE(11.0f, 1.0f, 10.0f);      // FAIL: 11.0 > 10.0
+}
+#endif
+
+#ifdef LFG_CTEST_HAS_DOUBLE
+static void test_double_assertions_fail(void)
+{
+    /* Double equality with epsilon */
+    ASSERT_DOUBLE_EQUAL(1.0, 2.0, 0.1);             // FAIL: diff > epsilon
+    ASSERT_DBL_EQ(1e10, 2e10, 1e4);                 // FAIL: diff > epsilon
+
+    /* Double not equal */
+    ASSERT_DOUBLE_NOT_EQUAL(1.0, 1.0, 0.1);         // FAIL: they are equal
+    ASSERT_DBL_NE(0.0, 0.0001, 0.001);              // FAIL: diff < epsilon
+}
+#endif
+
 /* ============================================================================
  * TEST SUITES
  * ============================================================================ */
@@ -271,6 +365,12 @@ static void suite_passing_tests(void)
     lfg_ctest(test_comparison_assertions_pass);
     lfg_ctest(test_range_assertion_pass);
     lfg_ctest(test_bit_assertions_pass);
+#ifdef LFG_CTEST_HAS_FLOAT
+    lfg_ctest(test_float_assertions_pass);
+#endif
+#ifdef LFG_CTEST_HAS_DOUBLE
+    lfg_ctest(test_double_assertions_pass);
+#endif
 }
 
 static void suite_failing_tests(void)
@@ -284,6 +384,12 @@ static void suite_failing_tests(void)
     lfg_ctest(test_range_assertion_fail);
     lfg_ctest(test_bit_assertions_fail);
     lfg_ctest(test_explicit_fail);
+#ifdef LFG_CTEST_HAS_FLOAT
+    lfg_ctest(test_float_assertions_fail);
+#endif
+#ifdef LFG_CTEST_HAS_DOUBLE
+    lfg_ctest(test_double_assertions_fail);
+#endif
 }
 
 /* ============================================================================
@@ -316,9 +422,27 @@ int main(void)
 
     printf("\n");
     printf("EXPECTED RESULTS:\n");
+#if defined(LFG_CTEST_HAS_FLOAT) && defined(LFG_CTEST_HAS_DOUBLE)
+    printf("  (Float and Double enabled)\n");
+    printf("  - Suite 1: All tests PASS (10 tests with 85 passing assertions)\n");
+    printf("  - Suite 2: All tests FAIL (11 tests with 75 failing assertions)\n");
+    printf("  - Total: 21 tests, 10 pass, 11 fail, 160 total assertions\n");
+#elif defined(LFG_CTEST_HAS_FLOAT)
+    printf("  (Float enabled, Double disabled)\n");
+    printf("  - Suite 1: All tests PASS (9 tests with 81 passing assertions)\n");
+    printf("  - Suite 2: All tests FAIL (10 tests with 71 failing assertions)\n");
+    printf("  - Total: 19 tests, 9 pass, 10 fail, 152 total assertions\n");
+#elif defined(LFG_CTEST_HAS_DOUBLE)
+    printf("  (Float disabled, Double enabled)\n");
+    printf("  - Suite 1: All tests PASS (9 tests with 66 passing assertions)\n");
+    printf("  - Suite 2: All tests FAIL (10 tests with 59 failing assertions)\n");
+    printf("  - Total: 19 tests, 9 pass, 10 fail, 125 total assertions\n");
+#else
+    printf("  (Float and Double disabled)\n");
     printf("  - Suite 1: All tests PASS (8 tests with 62 passing assertions)\n");
     printf("  - Suite 2: All tests FAIL (9 tests with 55 failing assertions)\n");
     printf("  - Total: 17 tests, 8 pass, 9 fail, 117 total assertions\n");
+#endif
     printf("\n");
 
     return lfg_ct_return();
