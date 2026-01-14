@@ -49,6 +49,23 @@ cmake -B build -DLFG_CTEST_ENABLE_FLOAT=OFF -DLFG_CTEST_ENABLE_DOUBLE=OFF
 
 When enabled, the library defines `LFG_CTEST_HAS_FLOAT` and/or `LFG_CTEST_HAS_DOUBLE` and links against `libm`.
 
+### Function Name Reporting
+
+Assertion failure messages include the function name where the failure occurred. The library auto-detects the best available option:
+
+| Priority | Identifier | Availability |
+|----------|------------|--------------|
+| 1 | `__func__` | C99 standard |
+| 2 | `__FUNCTION__` | GCC/Clang/MSVC extension (C89) |
+| 3 | `"(unknown)"` | Fallback |
+
+To disable function name reporting entirely, define `LFG_CTEST_NO_FUNC` before including the header:
+
+```c
+#define LFG_CTEST_NO_FUNC
+#include <lfg_ctest.h>
+```
+
 ---
 
 ## Testing API
