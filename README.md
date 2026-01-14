@@ -6,13 +6,48 @@ A comprehensive, easy-to-use, zero-dependency, C99-compatible test framework wit
 
 - **C99 Compatible**: Works with any C99-compliant compiler
 - **Zero Dependencies**: Only requires the standard C library
-- **49 Assertions**: Comprehensive assertion API for all common test scenarios
+- **60+ Assertions**: Comprehensive assertion API for all common test scenarios
 - **Built-in Mocking**: Macro-based mock generation with parameter capture and return value queuing
 - **Struct-by-value Support**: Dedicated macros for functions with struct parameters
+- **Embedded-Friendly**: Optional floating-point support with separate 32-bit float and 64-bit double configuration
 
 ## Installation
 
 Copy `lfg_ctest.h` (and `lfg_ctest_mock.h` if using mocking) into your project's include path.
+
+### CMake Integration
+
+When using CMake, add as a subdirectory:
+
+```cmake
+add_subdirectory(deps/lfg-ctest)
+target_link_libraries(my_tests lfg_ctest)
+```
+
+### Floating-Point Configuration
+
+Floating-point assertions are optional and independently configurable. This is useful for embedded platforms where:
+- Hardware float (32-bit) is available but double (64-bit) uses slow software emulation
+- No FPU is present at all
+
+| CMake Option | Default | Description |
+|--------------|---------|-------------|
+| `LFG_CTEST_ENABLE_FLOAT` | `ON` | Enable 32-bit float assertions (requires `fabsf`) |
+| `LFG_CTEST_ENABLE_DOUBLE` | `ON` | Enable 64-bit double assertions (requires `fabs`) |
+
+Examples:
+```bash
+# Default: both float and double enabled
+cmake -B build
+
+# Float only (embedded with hardware FPU, no double)
+cmake -B build -DLFG_CTEST_ENABLE_DOUBLE=OFF
+
+# No floating-point (embedded without FPU)
+cmake -B build -DLFG_CTEST_ENABLE_FLOAT=OFF -DLFG_CTEST_ENABLE_DOUBLE=OFF
+```
+
+When enabled, the library defines `LFG_CTEST_HAS_FLOAT` and/or `LFG_CTEST_HAS_DOUBLE` and links against `libm`.
 
 ---
 
@@ -222,6 +257,54 @@ Unsigned variants (output in hex with appropriate width):
 | Assertion | Description |
 |-----------|-------------|
 | `ASSERT_FAIL(message)` | Unconditional failure with message |
+
+#### Floating-Point Assertions (Optional)
+
+These assertions require `LFG_CTEST_HAS_FLOAT` or `LFG_CTEST_HAS_DOUBLE` to be defined. See [Floating-Point Configuration](#floating-point-configuration).
+
+**32-bit Float** (requires `LFG_CTEST_HAS_FLOAT`):
+
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_FLOAT_EQUAL(expected, actual, epsilon)` | Floats are equal within epsilon |
+| `ASSERT_FLOAT_NOT_EQUAL(expected, actual, epsilon)` | Floats differ by more than epsilon |
+| `ASSERT_FLOAT_GREATER_THAN(a, b)` | a > b |
+| `ASSERT_FLOAT_LESS_THAN(a, b)` | a < b |
+| `ASSERT_FLOAT_GREATER_OR_EQUAL(a, b)` | a >= b |
+| `ASSERT_FLOAT_LESS_OR_EQUAL(a, b)` | a <= b |
+| `ASSERT_FLOAT_IN_RANGE(val, min, max)` | val is within [min, max] inclusive |
+| `ASSERT_FLT_EQ(e, a, eps)` | Alias for `FLOAT_EQUAL` |
+| `ASSERT_FLT_NE(e, a, eps)` | Alias for `FLOAT_NOT_EQUAL` |
+| `ASSERT_FLT_GT(a, b)` | Alias for `FLOAT_GREATER_THAN` |
+| `ASSERT_FLT_LT(a, b)` | Alias for `FLOAT_LESS_THAN` |
+| `ASSERT_FLT_GE(a, b)` | Alias for `FLOAT_GREATER_OR_EQUAL` |
+| `ASSERT_FLT_LE(a, b)` | Alias for `FLOAT_LESS_OR_EQUAL` |
+
+**64-bit Double** (requires `LFG_CTEST_HAS_DOUBLE`):
+
+| Assertion | Description |
+|-----------|-------------|
+| `ASSERT_DOUBLE_EQUAL(expected, actual, epsilon)` | Doubles are equal within epsilon |
+| `ASSERT_DOUBLE_NOT_EQUAL(expected, actual, epsilon)` | Doubles differ by more than epsilon |
+| `ASSERT_DBL_EQ(e, a, eps)` | Alias for `DOUBLE_EQUAL` |
+| `ASSERT_DBL_NE(e, a, eps)` | Alias for `DOUBLE_NOT_EQUAL` |
+
+**Example usage:**
+```c
+void test_float_math(void)
+{
+    float result = calculate_something();
+    ASSERT_FLOAT_EQUAL(3.14159f, result, 0.0001f);
+    ASSERT_FLT_GT(result, 3.0f);
+    ASSERT_FLOAT_IN_RANGE(result, 3.0f, 4.0f);
+}
+
+void test_double_precision(void)
+{
+    double pi = 3.141592653589793;
+    ASSERT_DOUBLE_EQUAL(pi, acos(-1.0), 1e-15);
+}
+```
 
 ---
 
