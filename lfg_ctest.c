@@ -37,6 +37,51 @@ static int _current_test_failures = 0;
 static int _current_suite_failures = 0;
 
 /*============================================================================
+ *  Self-Test Support (internal only)
+ *
+ *  When LFG_CTEST_SELF_TEST is defined, enables "expect failures" mode for
+ *  testing the framework itself. Failures during this mode are counted but
+ *  don't affect the final test result.
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_SELF_TEST
+static int _expect_failures_mode = 0;
+static int _expected_failures_count = 0;
+
+/* In expect-failures mode, count the failure but don't affect test results */
+#define RECORD_FAILURE() \
+    do { \
+        if (_expect_failures_mode) { \
+            _expected_failures_count++; \
+        } else { \
+            _current_test_failures++; \
+            _assertions_failed++; \
+        } \
+    } while (0)
+
+#define RECORD_PASS() \
+    do { \
+        if (!_expect_failures_mode) { \
+            _assertions_passed++; \
+        } \
+    } while (0)
+
+#else
+/* Normal mode: always record failures/passes */
+#define RECORD_FAILURE() \
+    do { \
+        _current_test_failures++; \
+        _assertions_failed++; \
+    } while (0)
+
+#define RECORD_PASS() \
+    do { \
+        _assertions_passed++; \
+    } while (0)
+
+#endif /* LFG_CTEST_SELF_TEST */
+
+/*============================================================================
  *  Public API
  *==========================================================================*/
 
@@ -92,6 +137,26 @@ int lfg_ct_return(void)
     return -_tests_failed;
 }
 
+/*============================================================================
+ *  Self-Test API (only available when LFG_CTEST_SELF_TEST is defined)
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_SELF_TEST
+
+void lfg_ct_expect_failures_begin(void)
+{
+    _expect_failures_mode = 1;
+    _expected_failures_count = 0;
+}
+
+int lfg_ct_expect_failures_end(void)
+{
+    _expect_failures_mode = 0;
+    return _expected_failures_count;
+}
+
+#endif /* LFG_CTEST_SELF_TEST */
+
 int lfg_ct_assert_false_impl(bool condition,
                                  char *filename,
                                  int line_no,
@@ -103,11 +168,10 @@ int lfg_ct_assert_false_impl(bool condition,
     {
         printf("*** %s: %u: FAILURE: in %s(): %s should be false\r\n",
                filename, line_no, function, condition_str);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -122,11 +186,10 @@ int lfg_ct_assert_true_impl(bool condition,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should be true\r\n",
                filename, line_no, function, condition_str);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -142,11 +205,10 @@ int lfg_ct_assert_int_equal_impl(int expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -162,11 +224,10 @@ int lfg_ct_assert_int_not_equal_impl(int expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -182,11 +243,10 @@ int lfg_ct_assert_uint_equal_impl(unsigned expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%u) should equal %u\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -202,11 +262,10 @@ int lfg_ct_assert_uint_not_equal_impl(unsigned expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %u\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -222,11 +281,10 @@ int lfg_ct_assert_uint8_equal_impl(uint8_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%02X) should equal 0x%02X\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -242,11 +300,10 @@ int lfg_ct_assert_uint8_not_equal_impl(uint8_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%02X\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -262,11 +319,10 @@ int lfg_ct_assert_uint16_equal_impl(uint16_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%04X) should equal 0x%04X\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -283,11 +339,10 @@ int lfg_ct_assert_uint16_not_equal_impl(uint16_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%04X\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -303,11 +358,10 @@ int lfg_ct_assert_uint32_equal_impl(uint32_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should equal 0x%08X\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -323,11 +377,10 @@ int lfg_ct_assert_uint32_not_equal_impl(uint32_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%08X\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -343,11 +396,10 @@ int lfg_ct_assert_ptr_equal_impl(void *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -363,11 +415,10 @@ int lfg_ct_assert_ptr_not_equal_impl(void *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %p\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -382,11 +433,10 @@ int lfg_ct_assert_ptr_not_null(void *actual,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not be NULL\r\n",
                filename, line_no, function, actual_expr_str);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -402,11 +452,10 @@ int lfg_ct_assert_ptr_null(void *actual,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should be NULL but is %p\r\n",
                filename, line_no, function, actual_expr_str, actual);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -422,11 +471,10 @@ int lfg_ct_assert_int8_equal_impl(int8_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -442,11 +490,10 @@ int lfg_ct_assert_int8_not_equal_impl(int8_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -462,11 +509,10 @@ int lfg_ct_assert_int16_equal_impl(int16_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -482,11 +528,10 @@ int lfg_ct_assert_int16_not_equal_impl(int16_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -502,11 +547,10 @@ int lfg_ct_assert_int32_equal_impl(int32_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -522,11 +566,10 @@ int lfg_ct_assert_int32_not_equal_impl(int32_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n",
                filename, line_no, function, actual_expr_str, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -543,11 +586,10 @@ int lfg_ct_assert_int64_equal_impl(int64_t expected,
         printf("*** %s: %u: FAILURE in %s(): %s (%lld) should equal %lld\r\n",
                filename, line_no, function, actual_expr_str,
                (long long)actual, (long long)expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -563,11 +605,10 @@ int lfg_ct_assert_int64_not_equal_impl(int64_t expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s should not equal %lld\r\n",
                filename, line_no, function, actual_expr_str, (long long)expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -584,11 +625,10 @@ int lfg_ct_assert_uint64_equal_impl(uint64_t expected,
         printf("*** %s: %u: FAILURE in %s(): %s (0x%016llX) should equal 0x%016llX\r\n",
                filename, line_no, function, actual_expr_str,
                (unsigned long long)actual, (unsigned long long)expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -605,11 +645,10 @@ int lfg_ct_assert_uint64_not_equal_impl(uint64_t expected,
         printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%016llX\r\n",
                filename, line_no, function, actual_expr_str,
                (unsigned long long)expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -628,8 +667,7 @@ int lfg_ct_assert_str_equal_impl(const char *expected,
             printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n",
                    filename, line_no, function, actual_expr_str,
                    (void*)actual, (void*)expected);
-            _tests_failed++;
-            _assertions_failed++;
+            RECORD_FAILURE();
             return -1;
         }
     }
@@ -637,11 +675,10 @@ int lfg_ct_assert_str_equal_impl(const char *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (\"%s\") should equal \"%s\"\r\n",
                filename, line_no, function, actual_expr_str, actual, expected);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -659,11 +696,10 @@ int lfg_ct_assert_str_not_equal_impl(const char *expected,
         printf("*** %s: %u: FAILURE in %s(): %s should not equal \"%s\"\r\n",
                filename, line_no, function, actual_expr_str,
                expected ? expected : "(null)");
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -683,8 +719,7 @@ int lfg_ct_assert_strn_equal_impl(const char *expected,
             printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n",
                    filename, line_no, function, actual_expr_str,
                    (void*)actual, (void*)expected);
-            _tests_failed++;
-            _assertions_failed++;
+            RECORD_FAILURE();
             return -1;
         }
     }
@@ -692,11 +727,10 @@ int lfg_ct_assert_strn_equal_impl(const char *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (first %zu chars) does not match expected\r\n",
                filename, line_no, function, actual_expr_str, n);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -715,8 +749,7 @@ int lfg_ct_assert_mem_equal_impl(const void *expected,
         {
             printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n",
                    filename, line_no, function, actual_expr_str, actual, expected);
-            _tests_failed++;
-            _assertions_failed++;
+            RECORD_FAILURE();
             return -1;
         }
     }
@@ -724,11 +757,10 @@ int lfg_ct_assert_mem_equal_impl(const void *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s memory (%zu bytes) does not match expected\r\n",
                filename, line_no, function, actual_expr_str, n);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -746,11 +778,10 @@ int lfg_ct_assert_mem_not_equal_impl(const void *expected,
     {
         printf("*** %s: %u: FAILURE in %s(): %s memory (%zu bytes) should not match\r\n",
                filename, line_no, function, actual_expr_str, n);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -767,11 +798,10 @@ int lfg_ct_assert_greater_than_impl(int a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should be > %s (%d)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -788,11 +818,10 @@ int lfg_ct_assert_less_than_impl(int a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should be < %s (%d)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -809,11 +838,10 @@ int lfg_ct_assert_greater_or_equal_impl(int a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should be >= %s (%d)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -830,11 +858,10 @@ int lfg_ct_assert_less_or_equal_impl(int a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should be <= %s (%d)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -851,11 +878,10 @@ int lfg_ct_assert_in_range_impl(int val,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%d) should be in range [%d, %d]\r\n",
                filename, line_no, function, val_expr_str, val, min, max);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -872,11 +898,10 @@ int lfg_ct_assert_bit_set_impl(unsigned val,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bit %u set\r\n",
                filename, line_no, function, val_expr_str, val, bit_num);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -893,11 +918,10 @@ int lfg_ct_assert_bit_clear_impl(unsigned val,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bit %u clear\r\n",
                filename, line_no, function, val_expr_str, val, bit_num);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -914,11 +938,10 @@ int lfg_ct_assert_bits_set_impl(unsigned val,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bits 0x%08X set\r\n",
                filename, line_no, function, val_expr_str, val, mask_val);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -935,11 +958,10 @@ int lfg_ct_assert_bits_clear_impl(unsigned val,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bits 0x%08X clear\r\n",
                filename, line_no, function, val_expr_str, val, mask_val);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -951,8 +973,7 @@ int lfg_ct_assert_fail_impl(char *filename,
     _assertions_executed++;
     printf("*** %s: %u: FAILURE in %s(): %s\r\n",
            filename, line_no, function, message ? message : "Explicit failure");
-    _tests_failed++;
-    _assertions_failed++;
+    RECORD_FAILURE();
     return -1;
 }
 
@@ -978,11 +999,10 @@ int lfg_ct_assert_float_equal_impl(float expected,
                "(diff=%.6g, eps=%.6g)\r\n",
                filename, line_no, function, actual_expr_str, actual,
                expected, diff, epsilon);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1002,11 +1022,10 @@ int lfg_ct_assert_float_not_equal_impl(float expected,
                "(diff=%.6g, eps=%.6g)\r\n",
                filename, line_no, function, actual_expr_str, actual,
                expected, diff, epsilon);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1023,11 +1042,10 @@ int lfg_ct_assert_float_greater_impl(float a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be > %s (%.6g)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1044,11 +1062,10 @@ int lfg_ct_assert_float_less_impl(float a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be < %s (%.6g)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1065,11 +1082,10 @@ int lfg_ct_assert_float_ge_impl(float a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be >= %s (%.6g)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1086,11 +1102,10 @@ int lfg_ct_assert_float_le_impl(float a,
     {
         printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be <= %s (%.6g)\r\n",
                filename, line_no, function, a_expr_str, a, b_expr_str, b);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1108,11 +1123,10 @@ int lfg_ct_assert_float_in_range_impl(float val,
         printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be in range "
                "[%.6g, %.6g]\r\n",
                filename, line_no, function, val_expr_str, val, min, max);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1140,11 +1154,10 @@ int lfg_ct_assert_double_equal_impl(double expected,
                "(diff=%.10g, eps=%.10g)\r\n",
                filename, line_no, function, actual_expr_str, actual,
                expected, diff, epsilon);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 
@@ -1164,11 +1177,10 @@ int lfg_ct_assert_double_not_equal_impl(double expected,
                "(diff=%.10g, eps=%.10g)\r\n",
                filename, line_no, function, actual_expr_str, actual,
                expected, diff, epsilon);
-        _current_test_failures++;
-        _assertions_failed++;
+        RECORD_FAILURE();
         return -1;
     }
-    _assertions_passed++;
+    RECORD_PASS();
     return 0;
 }
 

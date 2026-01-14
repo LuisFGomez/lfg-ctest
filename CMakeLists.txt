@@ -92,6 +92,11 @@ set(LFG_CTEST_SOURCES
 add_library(lfg_ctest STATIC ${LFG_CTEST_SOURCES})
 target_include_directories(lfg_ctest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Enable self-test mode when building standalone (for framework's own tests)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    target_compile_definitions(lfg_ctest PRIVATE LFG_CTEST_SELF_TEST=1)
+endif()
+
 # Add compile definitions for float/double support
 if(LFG_CTEST_HAS_FLOAT)
     target_compile_definitions(lfg_ctest PUBLIC LFG_CTEST_HAS_FLOAT=1)
@@ -121,6 +126,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     foreach(TEST_TARGET ${TEST_TARGETS})
         add_executable(${TEST_TARGET} ${TEST_TARGET}.c)
         target_link_libraries(${TEST_TARGET} lfg_ctest)
+        # Enable self-test mode for framework's own tests
+        target_compile_definitions(${TEST_TARGET} PRIVATE LFG_CTEST_SELF_TEST=1)
     endforeach()
 
     # Enable testing

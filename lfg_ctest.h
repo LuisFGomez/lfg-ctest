@@ -781,5 +781,28 @@ int lfg_ct_assert_double_not_equal_impl(double expected,
 
 #endif /* LFG_CTEST_HAS_DOUBLE */
 
+/*============================================================================
+ *  Self-Test API (internal only - requires LFG_CTEST_SELF_TEST)
+ *
+ *  These functions enable "expect failures" mode for testing the framework
+ *  itself. Assertion failures during this mode are counted but don't affect
+ *  the final test result. This allows the framework's own tests to verify
+ *  that assertions correctly detect failures while still passing.
+ *==========================================================================*/
+
+#ifdef LFG_CTEST_SELF_TEST
+
+/** Begin expect-failures mode. Assertion failures will be counted but won't
+ *  affect test results. Resets the expected failure counter.
+ */
+void lfg_ct_expect_failures_begin(void);
+
+/** End expect-failures mode and return the number of failures that occurred.
+ *  @return Number of assertion failures captured during expect-failures mode.
+ */
+int lfg_ct_expect_failures_end(void);
+
+#endif /* LFG_CTEST_SELF_TEST */
+
 #endif /* LFG_CTEST_H_ */
 
