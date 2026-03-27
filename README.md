@@ -379,6 +379,8 @@ Each mock generates these symbols (using `get_value` as example):
 | `get_value__param_history[]` | array | Captured parameters from each call |
 | `get_value__return_queue[]` | array | Return values (for R_* mocks) |
 | `get_value__param_actions` | pointer | Parameter read/write actions |
+| `get_value__callback` | function pointer | Optional callback invoked each call |
+| `get_value__callback_t` | typedef | Callback function pointer type |
 | `get_value_params` | typedef | Struct type for captured parameters |
 
 ### Storage Limits
@@ -523,6 +525,55 @@ action = mock_param_mem_write(action, 0, 2, buf2, 4);  // call 0, param 2
 action = mock_param_mem_read(action, 1, 1, buf3, 4);   // call 1, param 1
 my_func__param_actions = action;
 ```
+
+### Mock Callbacks
+
+Each mock has an optional callback that fires on every call, receiving the call index and all parameters. Use callbacks when you need custom side effects during a mock call (e.g., invoking a captured write callback with response data).
+
+The callback typedef is generated per-mock:
+
+```c
+// For DECLARE_MOCK_R_2(get_value, int, int, const char *):
+//   typedef void (*get_value__callback_t)(size_t call_index, int p0, const char *p1);
+//   extern get_value__callback_t get_value__callback;
+```
+
+Callbacks are void-returning — they're for side effects only. Return values still come from `__return_queue`.
+
+**Example: simulate curl_easy_perform writing response data:**
+```c
+static void on_perform(size_t call_index, CURL *handle)
+{
+    (void)call_index;
+    (void)handle;
+    /* Look up the write callback captured from curl_easy_setopt,
+       then feed it the mock response body */
+    write_cb("HTTP 200 OK", 1, 11, write_cb_userdata);
+}
+
+void test_http_request(void)
+{
+    curl_easy_perform__mock_reset();
+    curl_easy_perform__return_queue[0] = CURLE_OK;
+    curl_easy_perform__callback = on_perform;
+
+    function_under_test();
+
+    ASSERT_EQ(1, curl_easy_perform__call_count);
+    curl_easy_perform__mock_reset();
+}
+```
+
+**Callback execution order** within the mock body:
+1. Overflow check
+2. Store param_history
+3. Read return value from queue
+4. Process param_actions (if applicable)
+5. Invoke callback
+6. Increment call_count
+7. Return
+
+The callback sees the same `call_index` used for param_history indexing (pre-increment). Reset (`__mock_reset`) sets the callback to NULL.
 
 ### Struct-Safe Mocks
 

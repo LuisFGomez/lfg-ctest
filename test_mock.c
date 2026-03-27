@@ -703,6 +703,184 @@ static void test_mock_struct_return_queue(void)
 }
 
 /*============================================================================
+ *  Test: Callback - V_V (void, no params)
+ *==========================================================================*/
+
+static size_t cb_vv_last_index;
+static int cb_vv_fire_count;
+
+static void on_simple_void(size_t call_index)
+{
+    cb_vv_last_index = call_index;
+    cb_vv_fire_count++;
+}
+
+static void test_mock_callback_v_v(void)
+{
+    simple_void_func__mock_reset();
+    cb_vv_fire_count = 0;
+    cb_vv_last_index = 999;
+
+    simple_void_func__callback = on_simple_void;
+
+    simple_void_func__mock();
+    ASSERT_INT_EQUAL(1, cb_vv_fire_count);
+    ASSERT_INT_EQUAL(0, cb_vv_last_index);
+
+    simple_void_func__mock();
+    ASSERT_INT_EQUAL(2, cb_vv_fire_count);
+    ASSERT_INT_EQUAL(1, cb_vv_last_index);
+
+    simple_void_func__mock_reset();
+}
+
+/*============================================================================
+ *  Test: Callback - R_2 (returns value, 2 params)
+ *==========================================================================*/
+
+static size_t cb_r2_last_index;
+static int cb_r2_captured_p0;
+static int cb_r2_captured_p1;
+static int cb_r2_fire_count;
+
+static void on_add_numbers(size_t call_index, int p0, int p1)
+{
+    cb_r2_last_index = call_index;
+    cb_r2_captured_p0 = p0;
+    cb_r2_captured_p1 = p1;
+    cb_r2_fire_count++;
+}
+
+static void test_mock_callback_r_2(void)
+{
+    int result;
+
+    add_numbers__mock_reset();
+    cb_r2_fire_count = 0;
+
+    add_numbers__return_queue[0] = 30;
+    add_numbers__return_queue[1] = 77;
+    add_numbers__callback = on_add_numbers;
+
+    result = add_numbers__mock(10, 20);
+    ASSERT_INT_EQUAL(30, result);
+    ASSERT_INT_EQUAL(1, cb_r2_fire_count);
+    ASSERT_INT_EQUAL(0, cb_r2_last_index);
+    ASSERT_INT_EQUAL(10, cb_r2_captured_p0);
+    ASSERT_INT_EQUAL(20, cb_r2_captured_p1);
+
+    result = add_numbers__mock(33, 44);
+    ASSERT_INT_EQUAL(77, result);
+    ASSERT_INT_EQUAL(2, cb_r2_fire_count);
+    ASSERT_INT_EQUAL(1, cb_r2_last_index);
+    ASSERT_INT_EQUAL(33, cb_r2_captured_p0);
+    ASSERT_INT_EQUAL(44, cb_r2_captured_p1);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
+ *  Test: Callback - V_1_S (struct-safe, void return, 1 struct param)
+ *==========================================================================*/
+
+static size_t cb_v1s_last_index;
+static struct point cb_v1s_captured_point;
+
+static void on_draw_point(size_t call_index, struct point pt)
+{
+    cb_v1s_last_index = call_index;
+    cb_v1s_captured_point = pt;
+}
+
+static void test_mock_callback_v_1_s(void)
+{
+    struct point p = {42, 84};
+
+    draw_point__mock_reset();
+    cb_v1s_last_index = 999;
+
+    draw_point__callback = on_draw_point;
+
+    draw_point__mock(p);
+    ASSERT_INT_EQUAL(0, cb_v1s_last_index);
+    ASSERT_INT_EQUAL(42, cb_v1s_captured_point.x);
+    ASSERT_INT_EQUAL(84, cb_v1s_captured_point.y);
+
+    draw_point__mock_reset();
+}
+
+/*============================================================================
+ *  Test: Callback - reset clears callback
+ *==========================================================================*/
+
+static void test_mock_callback_reset_clears(void)
+{
+    simple_void_func__mock_reset();
+    simple_void_func__callback = on_simple_void;
+
+    ASSERT_TRUE(simple_void_func__callback != NULL);
+
+    simple_void_func__mock_reset();
+    ASSERT_NULL(simple_void_func__callback);
+}
+
+/*============================================================================
+ *  Test: Callback - NULL callback is no-op
+ *==========================================================================*/
+
+static void test_mock_callback_null_noop(void)
+{
+    add_numbers__mock_reset();
+    cb_r2_fire_count = 0;
+
+    /* callback is NULL after reset - should not crash */
+    add_numbers__return_queue[0] = 5;
+    (void)add_numbers__mock(1, 2);
+
+    ASSERT_INT_EQUAL(0, cb_r2_fire_count);
+    ASSERT_INT_EQUAL(1, add_numbers__call_count);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
+ *  Test: Callback fires with correct call_index matching param_history
+ *==========================================================================*/
+
+static size_t cb_indices[4];
+static int cb_index_count;
+
+static void on_set_value_index(size_t call_index, int val)
+{
+    (void)val;
+    cb_indices[cb_index_count++] = call_index;
+}
+
+static void test_mock_callback_index_sequence(void)
+{
+    set_value__mock_reset();
+    cb_index_count = 0;
+
+    set_value__callback = on_set_value_index;
+
+    set_value__mock(10);
+    set_value__mock(20);
+    set_value__mock(30);
+
+    ASSERT_INT_EQUAL(3, cb_index_count);
+    ASSERT_INT_EQUAL(0, cb_indices[0]);
+    ASSERT_INT_EQUAL(1, cb_indices[1]);
+    ASSERT_INT_EQUAL(2, cb_indices[2]);
+
+    /* Verify param_history matches */
+    ASSERT_INT_EQUAL(10, set_value__param_history[0].p0);
+    ASSERT_INT_EQUAL(20, set_value__param_history[1].p0);
+    ASSERT_INT_EQUAL(30, set_value__param_history[2].p0);
+
+    set_value__mock_reset();
+}
+
+/*============================================================================
  *  Test Suite
  *==========================================================================*/
 
@@ -745,6 +923,16 @@ static void suite_mock_overflow(void)
     lfg_ctest(test_mock_overflow_aborts);
 }
 
+static void suite_mock_callback(void)
+{
+    lfg_ctest(test_mock_callback_v_v);
+    lfg_ctest(test_mock_callback_r_2);
+    lfg_ctest(test_mock_callback_v_1_s);
+    lfg_ctest(test_mock_callback_reset_clears);
+    lfg_ctest(test_mock_callback_null_noop);
+    lfg_ctest(test_mock_callback_index_sequence);
+}
+
 /*============================================================================
  *  Main
  *==========================================================================*/
@@ -769,6 +957,9 @@ int main(void)
 
     printf("\n--- SUITE 4: Storage Limits ---\n");
     lfg_ct_suite(suite_mock_overflow);
+
+    printf("\n--- SUITE 5: Callbacks ---\n");
+    lfg_ct_suite(suite_mock_callback);
 
     printf("\n");
     lfg_ct_print_summary();
