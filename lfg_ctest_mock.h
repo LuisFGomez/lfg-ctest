@@ -81,8 +81,10 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
  */
 void mock_param_destroy(mock_param_action_t action);
 
-/** maximum number of function calls to store */
+/** maximum number of function calls to store (override at compile time) */
+#ifndef MOCK_CALL_STORAGE_MAX
 #define MOCK_CALL_STORAGE_MAX  32
+#endif
 
 /*============================================================================
  *  Internal Helper Macros
