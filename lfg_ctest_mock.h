@@ -991,4 +991,154 @@ void mock_param_destroy(mock_param_action_t action);
     } \
     _MOCK_RESET_R_SIMPLE(_func)
 
+/* R_2_S: returns value, 2 params, struct-safe */
+#define DECLARE_MOCK_R_2_S(_func, _rtype, _t0, _t1) \
+    typedef struct { _t0 p0; _t1 p1; } _func##_params; \
+    typedef void (*_func##__callback_t)(size_t, _t0, _t1); \
+    extern _func##__callback_t _func##__callback; \
+    extern size_t _func##__call_count; \
+    extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0, _t1); \
+    void _func##__mock_reset(void)
+
+#define DEFINE_MOCK_R_2_S(_func, _rtype, _t0, _t1) \
+    _func##__callback_t _func##__callback = NULL; \
+    size_t _func##__call_count = 0; \
+    _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0 _p0, _t1 _p1) { \
+        _func##_params *p; \
+        _rtype ret; \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
+        p = &_func##__param_history[i]; \
+        _MOCK_STORE_2 \
+        ret = _func##__return_queue[i]; \
+        _MOCK_CALLBACK_2(_func) \
+        _func##__call_count++; \
+        return ret; \
+    } \
+    _MOCK_RESET_R_SIMPLE(_func)
+
+/* R_3_S: returns value, 3 params, struct-safe */
+#define DECLARE_MOCK_R_3_S(_func, _rtype, _t0, _t1, _t2) \
+    typedef struct { _t0 p0; _t1 p1; _t2 p2; } _func##_params; \
+    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2); \
+    extern _func##__callback_t _func##__callback; \
+    extern size_t _func##__call_count; \
+    extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0, _t1, _t2); \
+    void _func##__mock_reset(void)
+
+#define DEFINE_MOCK_R_3_S(_func, _rtype, _t0, _t1, _t2) \
+    _func##__callback_t _func##__callback = NULL; \
+    size_t _func##__call_count = 0; \
+    _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0 _p0, _t1 _p1, _t2 _p2) { \
+        _func##_params *p; \
+        _rtype ret; \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
+        p = &_func##__param_history[i]; \
+        _MOCK_STORE_3 \
+        ret = _func##__return_queue[i]; \
+        _MOCK_CALLBACK_3(_func) \
+        _func##__call_count++; \
+        return ret; \
+    } \
+    _MOCK_RESET_R_SIMPLE(_func)
+
+/* R_4_S: returns value, 4 params, struct-safe */
+#define DECLARE_MOCK_R_4_S(_func, _rtype, _t0, _t1, _t2, _t3) \
+    typedef struct { _t0 p0; _t1 p1; _t2 p2; _t3 p3; } _func##_params; \
+    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3); \
+    extern _func##__callback_t _func##__callback; \
+    extern size_t _func##__call_count; \
+    extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0, _t1, _t2, _t3); \
+    void _func##__mock_reset(void)
+
+#define DEFINE_MOCK_R_4_S(_func, _rtype, _t0, _t1, _t2, _t3) \
+    _func##__callback_t _func##__callback = NULL; \
+    size_t _func##__call_count = 0; \
+    _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0 _p0, _t1 _p1, _t2 _p2, _t3 _p3) { \
+        _func##_params *p; \
+        _rtype ret; \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
+        p = &_func##__param_history[i]; \
+        _MOCK_STORE_4 \
+        ret = _func##__return_queue[i]; \
+        _MOCK_CALLBACK_4(_func) \
+        _func##__call_count++; \
+        return ret; \
+    } \
+    _MOCK_RESET_R_SIMPLE(_func)
+
+/* R_5_S: returns value, 5 params, struct-safe */
+#define DECLARE_MOCK_R_5_S(_func, _rtype, _t0, _t1, _t2, _t3, _t4) \
+    typedef struct { _t0 p0; _t1 p1; _t2 p2; _t3 p3; _t4 p4; } _func##_params; \
+    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4); \
+    extern _func##__callback_t _func##__callback; \
+    extern size_t _func##__call_count; \
+    extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0, _t1, _t2, _t3, _t4); \
+    void _func##__mock_reset(void)
+
+#define DEFINE_MOCK_R_5_S(_func, _rtype, _t0, _t1, _t2, _t3, _t4) \
+    _func##__callback_t _func##__callback = NULL; \
+    size_t _func##__call_count = 0; \
+    _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0 _p0, _t1 _p1, _t2 _p2, _t3 _p3, _t4 _p4) { \
+        _func##_params *p; \
+        _rtype ret; \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
+        p = &_func##__param_history[i]; \
+        _MOCK_STORE_5 \
+        ret = _func##__return_queue[i]; \
+        _MOCK_CALLBACK_5(_func) \
+        _func##__call_count++; \
+        return ret; \
+    } \
+    _MOCK_RESET_R_SIMPLE(_func)
+
+/* R_6_S: returns value, 6 params, struct-safe */
+#define DECLARE_MOCK_R_6_S(_func, _rtype, _t0, _t1, _t2, _t3, _t4, _t5) \
+    typedef struct { _t0 p0; _t1 p1; _t2 p2; _t3 p3; _t4 p4; _t5 p5; } _func##_params; \
+    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5); \
+    extern _func##__callback_t _func##__callback; \
+    extern size_t _func##__call_count; \
+    extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0, _t1, _t2, _t3, _t4, _t5); \
+    void _func##__mock_reset(void)
+
+#define DEFINE_MOCK_R_6_S(_func, _rtype, _t0, _t1, _t2, _t3, _t4, _t5) \
+    _func##__callback_t _func##__callback = NULL; \
+    size_t _func##__call_count = 0; \
+    _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX]; \
+    _rtype _func##__mock(_t0 _p0, _t1 _p1, _t2 _p2, _t3 _p3, _t4 _p4, _t5 _p5) { \
+        _func##_params *p; \
+        _rtype ret; \
+        size_t i = _func##__call_count; \
+        _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
+        p = &_func##__param_history[i]; \
+        _MOCK_STORE_6 \
+        ret = _func##__return_queue[i]; \
+        _MOCK_CALLBACK_6(_func) \
+        _func##__call_count++; \
+        return ret; \
+    } \
+    _MOCK_RESET_R_SIMPLE(_func)
+
 #endif /* LFG_CTEST_MOCK_H_ */
