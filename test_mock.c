@@ -38,6 +38,39 @@ DECLARE_MOCK_V_3(configure, int, int, int);
 /* R_4: returns value, 4 params */
 DECLARE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t);
 
+/* R_5: returns value, 5 params */
+DECLARE_MOCK_R_5(do_r5, int, int, int, int, int, int);
+
+/* R_6: returns value, 6 params */
+DECLARE_MOCK_R_6(do_r6, int, int, int, int, int, int, int);
+
+/* R_7: returns value, 7 params */
+DECLARE_MOCK_R_7(do_r7, int, int, int, int, int, int, int, int);
+
+/* R_8: returns value, 8 params */
+DECLARE_MOCK_R_8(do_r8, int, int, int, int, int, int, int, int, int);
+
+/* R_9: returns value, 9 params */
+DECLARE_MOCK_R_9(do_r9, int, int, int, int, int, int, int, int, int, int);
+
+/* V_4: void return, 4 params */
+DECLARE_MOCK_V_4(do_v4, int, int, int, int);
+
+/* V_5: void return, 5 params */
+DECLARE_MOCK_V_5(do_v5, int, int, int, int, int);
+
+/* V_6: void return, 6 params */
+DECLARE_MOCK_V_6(do_v6, int, int, int, int, int, int);
+
+/* V_7: void return, 7 params */
+DECLARE_MOCK_V_7(do_v7, int, int, int, int, int, int, int);
+
+/* V_8: void return, 8 params */
+DECLARE_MOCK_V_8(do_v8, int, int, int, int, int, int, int, int);
+
+/* V_9: void return, 9 params */
+DECLARE_MOCK_V_9(do_v9, int, int, int, int, int, int, int, int, int);
+
 /*============================================================================
  *  Struct-by-value Mock Declarations
  *  Note: param actions (mock_param_mem_read/write) don't work with struct
@@ -71,6 +104,21 @@ DECLARE_MOCK_R_1_S(transform_point, struct point, struct point);
 /* V_3_S with multiple struct params */
 DECLARE_MOCK_V_3_S(draw_line, struct point, struct point, int);
 
+/* R_2_S: returns value, 2 struct params */
+DECLARE_MOCK_R_2_S(blend_points, struct point, struct point, struct point);
+
+/* R_3_S: returns value, 3 params (mix of struct and primitive) */
+DECLARE_MOCK_R_3_S(scale_point, struct point, struct point, int, int);
+
+/* R_4_S: returns value, 4 params */
+DECLARE_MOCK_R_4_S(compose_rect, struct rect, struct point, struct point, int, int);
+
+/* R_5_S: returns value, 5 params */
+DECLARE_MOCK_R_5_S(do_r5s, int, struct point, struct point, int, int, int);
+
+/* R_6_S: returns value, 6 params */
+DECLARE_MOCK_R_6_S(do_r6s, int, struct point, struct point, int, int, int, int);
+
 /*============================================================================
  *  Mock Definitions (in .c file, typically)
  *==========================================================================*/
@@ -84,6 +132,17 @@ DEFINE_MOCK_R_2(add_numbers, int, int, int)
 DEFINE_MOCK_R_3(read_buffer, int, uint8_t*, size_t, size_t*)
 DEFINE_MOCK_V_3(configure, int, int, int)
 DEFINE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t)
+DEFINE_MOCK_R_5(do_r5, int, int, int, int, int, int)
+DEFINE_MOCK_R_6(do_r6, int, int, int, int, int, int, int)
+DEFINE_MOCK_R_7(do_r7, int, int, int, int, int, int, int, int)
+DEFINE_MOCK_R_8(do_r8, int, int, int, int, int, int, int, int, int)
+DEFINE_MOCK_R_9(do_r9, int, int, int, int, int, int, int, int, int, int)
+DEFINE_MOCK_V_4(do_v4, int, int, int, int)
+DEFINE_MOCK_V_5(do_v5, int, int, int, int, int)
+DEFINE_MOCK_V_6(do_v6, int, int, int, int, int, int)
+DEFINE_MOCK_V_7(do_v7, int, int, int, int, int, int, int)
+DEFINE_MOCK_V_8(do_v8, int, int, int, int, int, int, int, int)
+DEFINE_MOCK_V_9(do_v9, int, int, int, int, int, int, int, int, int)
 
 /* Struct-by-value mock definitions (using _S variants) */
 DEFINE_MOCK_V_1_S(draw_point, struct point)
@@ -91,6 +150,11 @@ DEFINE_MOCK_V_2_S(draw_rect, struct rect, int)
 DEFINE_MOCK_R_V_S(get_origin, struct point)
 DEFINE_MOCK_R_1_S(transform_point, struct point, struct point)
 DEFINE_MOCK_V_3_S(draw_line, struct point, struct point, int)
+DEFINE_MOCK_R_2_S(blend_points, struct point, struct point, struct point)
+DEFINE_MOCK_R_3_S(scale_point, struct point, struct point, int, int)
+DEFINE_MOCK_R_4_S(compose_rect, struct rect, struct point, struct point, int, int)
+DEFINE_MOCK_R_5_S(do_r5s, int, struct point, struct point, int, int, int)
+DEFINE_MOCK_R_6_S(do_r6s, int, struct point, struct point, int, int, int, int)
 
 /*============================================================================
  *  Test: V_V - void return, no params
@@ -290,6 +354,249 @@ static void test_mock_r_4(void)
     ASSERT_INT_EQUAL(-1, result);
 
     transfer__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_3 - returns value, 3 params (basic usage)
+ *==========================================================================*/
+
+static void test_mock_r_3(void)
+{
+    uint8_t buf[16];
+    size_t out = 0;
+    int result;
+
+    read_buffer__mock_reset();
+
+    read_buffer__return_queue[0] = 0;
+    read_buffer__return_queue[1] = -1;
+
+    result = read_buffer__mock(buf, sizeof(buf), &out);
+    ASSERT_INT_EQUAL(0, result);
+    ASSERT_PTR_EQUAL(buf, read_buffer__param_history[0].p0);
+    ASSERT_INT_EQUAL(sizeof(buf), read_buffer__param_history[0].p1);
+    ASSERT_PTR_EQUAL(&out, read_buffer__param_history[0].p2);
+
+    result = read_buffer__mock(NULL, 0, NULL);
+    ASSERT_INT_EQUAL(-1, result);
+    ASSERT_INT_EQUAL(2, read_buffer__call_count);
+
+    read_buffer__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_5 - returns value, 5 params
+ *==========================================================================*/
+
+static void test_mock_r_5(void)
+{
+    int result;
+
+    do_r5__mock_reset();
+
+    do_r5__return_queue[0] = 55;
+
+    result = do_r5__mock(1, 2, 3, 4, 5);
+    ASSERT_INT_EQUAL(55, result);
+    ASSERT_INT_EQUAL(1, do_r5__param_history[0].p0);
+    ASSERT_INT_EQUAL(2, do_r5__param_history[0].p1);
+    ASSERT_INT_EQUAL(3, do_r5__param_history[0].p2);
+    ASSERT_INT_EQUAL(4, do_r5__param_history[0].p3);
+    ASSERT_INT_EQUAL(5, do_r5__param_history[0].p4);
+    ASSERT_INT_EQUAL(1, do_r5__call_count);
+
+    do_r5__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_6 - returns value, 6 params
+ *==========================================================================*/
+
+static void test_mock_r_6(void)
+{
+    int result;
+
+    do_r6__mock_reset();
+
+    do_r6__return_queue[0] = 66;
+
+    result = do_r6__mock(10, 20, 30, 40, 50, 60);
+    ASSERT_INT_EQUAL(66, result);
+    ASSERT_INT_EQUAL(10, do_r6__param_history[0].p0);
+    ASSERT_INT_EQUAL(20, do_r6__param_history[0].p1);
+    ASSERT_INT_EQUAL(30, do_r6__param_history[0].p2);
+    ASSERT_INT_EQUAL(40, do_r6__param_history[0].p3);
+    ASSERT_INT_EQUAL(50, do_r6__param_history[0].p4);
+    ASSERT_INT_EQUAL(60, do_r6__param_history[0].p5);
+
+    do_r6__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_7 - returns value, 7 params
+ *==========================================================================*/
+
+static void test_mock_r_7(void)
+{
+    int result;
+
+    do_r7__mock_reset();
+
+    do_r7__return_queue[0] = 77;
+
+    result = do_r7__mock(1, 2, 3, 4, 5, 6, 7);
+    ASSERT_INT_EQUAL(77, result);
+    ASSERT_INT_EQUAL(1, do_r7__param_history[0].p0);
+    ASSERT_INT_EQUAL(4, do_r7__param_history[0].p3);
+    ASSERT_INT_EQUAL(7, do_r7__param_history[0].p6);
+
+    do_r7__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_8 - returns value, 8 params
+ *==========================================================================*/
+
+static void test_mock_r_8(void)
+{
+    int result;
+
+    do_r8__mock_reset();
+
+    do_r8__return_queue[0] = 88;
+
+    result = do_r8__mock(1, 2, 3, 4, 5, 6, 7, 8);
+    ASSERT_INT_EQUAL(88, result);
+    ASSERT_INT_EQUAL(1, do_r8__param_history[0].p0);
+    ASSERT_INT_EQUAL(5, do_r8__param_history[0].p4);
+    ASSERT_INT_EQUAL(8, do_r8__param_history[0].p7);
+
+    do_r8__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_9 - returns value, 9 params
+ *==========================================================================*/
+
+static void test_mock_r_9(void)
+{
+    int result;
+
+    do_r9__mock_reset();
+
+    do_r9__return_queue[0] = 99;
+
+    result = do_r9__mock(1, 2, 3, 4, 5, 6, 7, 8, 9);
+    ASSERT_INT_EQUAL(99, result);
+    ASSERT_INT_EQUAL(1, do_r9__param_history[0].p0);
+    ASSERT_INT_EQUAL(5, do_r9__param_history[0].p4);
+    ASSERT_INT_EQUAL(9, do_r9__param_history[0].p8);
+
+    do_r9__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_4 - void return, 4 params
+ *==========================================================================*/
+
+static void test_mock_v_4(void)
+{
+    do_v4__mock_reset();
+
+    do_v4__mock(10, 20, 30, 40);
+
+    ASSERT_INT_EQUAL(1, do_v4__call_count);
+    ASSERT_INT_EQUAL(10, do_v4__param_history[0].p0);
+    ASSERT_INT_EQUAL(20, do_v4__param_history[0].p1);
+    ASSERT_INT_EQUAL(30, do_v4__param_history[0].p2);
+    ASSERT_INT_EQUAL(40, do_v4__param_history[0].p3);
+
+    do_v4__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_5 - void return, 5 params
+ *==========================================================================*/
+
+static void test_mock_v_5(void)
+{
+    do_v5__mock_reset();
+
+    do_v5__mock(1, 2, 3, 4, 5);
+
+    ASSERT_INT_EQUAL(1, do_v5__call_count);
+    ASSERT_INT_EQUAL(1, do_v5__param_history[0].p0);
+    ASSERT_INT_EQUAL(5, do_v5__param_history[0].p4);
+
+    do_v5__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_6 - void return, 6 params
+ *==========================================================================*/
+
+static void test_mock_v_6(void)
+{
+    do_v6__mock_reset();
+
+    do_v6__mock(1, 2, 3, 4, 5, 6);
+
+    ASSERT_INT_EQUAL(1, do_v6__call_count);
+    ASSERT_INT_EQUAL(1, do_v6__param_history[0].p0);
+    ASSERT_INT_EQUAL(6, do_v6__param_history[0].p5);
+
+    do_v6__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_7 - void return, 7 params
+ *==========================================================================*/
+
+static void test_mock_v_7(void)
+{
+    do_v7__mock_reset();
+
+    do_v7__mock(1, 2, 3, 4, 5, 6, 7);
+
+    ASSERT_INT_EQUAL(1, do_v7__call_count);
+    ASSERT_INT_EQUAL(1, do_v7__param_history[0].p0);
+    ASSERT_INT_EQUAL(7, do_v7__param_history[0].p6);
+
+    do_v7__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_8 - void return, 8 params
+ *==========================================================================*/
+
+static void test_mock_v_8(void)
+{
+    do_v8__mock_reset();
+
+    do_v8__mock(1, 2, 3, 4, 5, 6, 7, 8);
+
+    ASSERT_INT_EQUAL(1, do_v8__call_count);
+    ASSERT_INT_EQUAL(1, do_v8__param_history[0].p0);
+    ASSERT_INT_EQUAL(8, do_v8__param_history[0].p7);
+
+    do_v8__mock_reset();
+}
+
+/*============================================================================
+ *  Test: V_9 - void return, 9 params
+ *==========================================================================*/
+
+static void test_mock_v_9(void)
+{
+    do_v9__mock_reset();
+
+    do_v9__mock(1, 2, 3, 4, 5, 6, 7, 8, 9);
+
+    ASSERT_INT_EQUAL(1, do_v9__call_count);
+    ASSERT_INT_EQUAL(1, do_v9__param_history[0].p0);
+    ASSERT_INT_EQUAL(9, do_v9__param_history[0].p8);
+
+    do_v9__mock_reset();
 }
 
 /*============================================================================
@@ -670,6 +977,248 @@ static void test_mock_multiple_struct_params(void)
 }
 
 /*============================================================================
+ *  Test: R_2_S - struct return, 2 struct params
+ *==========================================================================*/
+
+static void test_mock_r_2_s(void)
+{
+    struct point a = {1, 2};
+    struct point b = {3, 4};
+    struct point result;
+
+    blend_points__mock_reset();
+
+    blend_points__return_queue[0].x = 2;
+    blend_points__return_queue[0].y = 3;
+
+    result = blend_points__mock(a, b);
+
+    ASSERT_INT_EQUAL(1, blend_points__call_count);
+    ASSERT_INT_EQUAL(1, blend_points__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(2, blend_points__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(3, blend_points__param_history[0].p1.x);
+    ASSERT_INT_EQUAL(4, blend_points__param_history[0].p1.y);
+    ASSERT_INT_EQUAL(2, result.x);
+    ASSERT_INT_EQUAL(3, result.y);
+
+    blend_points__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_3_S - struct return, 3 params (struct + primitives)
+ *==========================================================================*/
+
+static void test_mock_r_3_s(void)
+{
+    struct point input = {5, 10};
+    struct point result;
+
+    scale_point__mock_reset();
+
+    scale_point__return_queue[0].x = 10;
+    scale_point__return_queue[0].y = 20;
+
+    result = scale_point__mock(input, 2, 3);
+
+    ASSERT_INT_EQUAL(1, scale_point__call_count);
+    ASSERT_INT_EQUAL(5, scale_point__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(10, scale_point__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(2, scale_point__param_history[0].p1);
+    ASSERT_INT_EQUAL(3, scale_point__param_history[0].p2);
+    ASSERT_INT_EQUAL(10, result.x);
+    ASSERT_INT_EQUAL(20, result.y);
+
+    scale_point__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_4_S - nested struct return, 4 params
+ *==========================================================================*/
+
+static void test_mock_r_4_s(void)
+{
+    struct point origin = {0, 0};
+    struct point size = {100, 200};
+    struct rect result;
+
+    compose_rect__mock_reset();
+
+    compose_rect__return_queue[0].origin.x = 10;
+    compose_rect__return_queue[0].origin.y = 20;
+    compose_rect__return_queue[0].size.x = 50;
+    compose_rect__return_queue[0].size.y = 60;
+
+    result = compose_rect__mock(origin, size, 1, 2);
+
+    ASSERT_INT_EQUAL(1, compose_rect__call_count);
+    ASSERT_INT_EQUAL(0, compose_rect__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(0, compose_rect__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(100, compose_rect__param_history[0].p1.x);
+    ASSERT_INT_EQUAL(200, compose_rect__param_history[0].p1.y);
+    ASSERT_INT_EQUAL(1, compose_rect__param_history[0].p2);
+    ASSERT_INT_EQUAL(2, compose_rect__param_history[0].p3);
+    ASSERT_INT_EQUAL(10, result.origin.x);
+    ASSERT_INT_EQUAL(20, result.origin.y);
+    ASSERT_INT_EQUAL(50, result.size.x);
+    ASSERT_INT_EQUAL(60, result.size.y);
+
+    compose_rect__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_5_S - returns int, 5 params with structs
+ *==========================================================================*/
+
+static void test_mock_r_5_s(void)
+{
+    struct point a = {1, 2};
+    struct point b = {3, 4};
+    int result;
+
+    do_r5s__mock_reset();
+
+    do_r5s__return_queue[0] = 55;
+
+    result = do_r5s__mock(a, b, 10, 20, 30);
+
+    ASSERT_INT_EQUAL(55, result);
+    ASSERT_INT_EQUAL(1, do_r5s__call_count);
+    ASSERT_INT_EQUAL(1, do_r5s__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(2, do_r5s__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(3, do_r5s__param_history[0].p1.x);
+    ASSERT_INT_EQUAL(4, do_r5s__param_history[0].p1.y);
+    ASSERT_INT_EQUAL(10, do_r5s__param_history[0].p2);
+    ASSERT_INT_EQUAL(20, do_r5s__param_history[0].p3);
+    ASSERT_INT_EQUAL(30, do_r5s__param_history[0].p4);
+
+    do_r5s__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_6_S - returns int, 6 params with structs
+ *==========================================================================*/
+
+static void test_mock_r_6_s(void)
+{
+    struct point a = {7, 8};
+    struct point b = {9, 10};
+    int result;
+
+    do_r6s__mock_reset();
+
+    do_r6s__return_queue[0] = 66;
+
+    result = do_r6s__mock(a, b, 11, 22, 33, 44);
+
+    ASSERT_INT_EQUAL(66, result);
+    ASSERT_INT_EQUAL(1, do_r6s__call_count);
+    ASSERT_INT_EQUAL(7, do_r6s__param_history[0].p0.x);
+    ASSERT_INT_EQUAL(8, do_r6s__param_history[0].p0.y);
+    ASSERT_INT_EQUAL(9, do_r6s__param_history[0].p1.x);
+    ASSERT_INT_EQUAL(10, do_r6s__param_history[0].p1.y);
+    ASSERT_INT_EQUAL(11, do_r6s__param_history[0].p2);
+    ASSERT_INT_EQUAL(22, do_r6s__param_history[0].p3);
+    ASSERT_INT_EQUAL(33, do_r6s__param_history[0].p4);
+    ASSERT_INT_EQUAL(44, do_r6s__param_history[0].p5);
+
+    do_r6s__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_2_S reset clears all state
+ *==========================================================================*/
+
+static void test_mock_r_2_s_reset(void)
+{
+    struct point a = {1, 2};
+    struct point b = {3, 4};
+
+    blend_points__mock_reset();
+
+    blend_points__return_queue[0].x = 99;
+    blend_points__return_queue[0].y = 99;
+    (void)blend_points__mock(a, b);
+
+    ASSERT_INT_EQUAL(1, blend_points__call_count);
+
+    blend_points__mock_reset();
+
+    ASSERT_INT_EQUAL(0, blend_points__call_count);
+    ASSERT_INT_EQUAL(0, blend_points__return_queue[0].x);
+    ASSERT_INT_EQUAL(0, blend_points__param_history[0].p0.x);
+}
+
+/*============================================================================
+ *  Test: R_2_S callback fires with struct params
+ *==========================================================================*/
+
+static size_t cb_r2s_last_index;
+static struct point cb_r2s_p0;
+static struct point cb_r2s_p1;
+
+static void on_blend_points(size_t call_index, struct point p0, struct point p1)
+{
+    cb_r2s_last_index = call_index;
+    cb_r2s_p0 = p0;
+    cb_r2s_p1 = p1;
+}
+
+static void test_mock_r_2_s_callback(void)
+{
+    struct point a = {11, 22};
+    struct point b = {33, 44};
+
+    blend_points__mock_reset();
+    cb_r2s_last_index = 999;
+
+    blend_points__return_queue[0].x = 0;
+    blend_points__return_queue[0].y = 0;
+    blend_points__callback = on_blend_points;
+
+    (void)blend_points__mock(a, b);
+
+    ASSERT_INT_EQUAL(0, cb_r2s_last_index);
+    ASSERT_INT_EQUAL(11, cb_r2s_p0.x);
+    ASSERT_INT_EQUAL(22, cb_r2s_p0.y);
+    ASSERT_INT_EQUAL(33, cb_r2s_p1.x);
+    ASSERT_INT_EQUAL(44, cb_r2s_p1.y);
+
+    blend_points__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_3_S multiple calls with return queue
+ *==========================================================================*/
+
+static void test_mock_r_3_s_return_queue(void)
+{
+    struct point input = {1, 1};
+    struct point r1, r2;
+
+    scale_point__mock_reset();
+
+    scale_point__return_queue[0].x = 10;
+    scale_point__return_queue[0].y = 10;
+    scale_point__return_queue[1].x = 20;
+    scale_point__return_queue[1].y = 20;
+
+    r1 = scale_point__mock(input, 1, 1);
+    r2 = scale_point__mock(input, 2, 2);
+
+    ASSERT_INT_EQUAL(2, scale_point__call_count);
+    ASSERT_INT_EQUAL(10, r1.x);
+    ASSERT_INT_EQUAL(10, r1.y);
+    ASSERT_INT_EQUAL(20, r2.x);
+    ASSERT_INT_EQUAL(20, r2.y);
+
+    /* Verify both calls captured params */
+    ASSERT_INT_EQUAL(1, scale_point__param_history[0].p1);
+    ASSERT_INT_EQUAL(2, scale_point__param_history[1].p1);
+
+    scale_point__mock_reset();
+}
+
+/*============================================================================
  *  Test: Multiple calls with struct returns
  *==========================================================================*/
 
@@ -893,7 +1442,19 @@ static void suite_mock_basic(void)
     lfg_ctest(test_mock_v_2);
     lfg_ctest(test_mock_r_2);
     lfg_ctest(test_mock_v_3);
+    lfg_ctest(test_mock_r_3);
     lfg_ctest(test_mock_r_4);
+    lfg_ctest(test_mock_r_5);
+    lfg_ctest(test_mock_r_6);
+    lfg_ctest(test_mock_r_7);
+    lfg_ctest(test_mock_r_8);
+    lfg_ctest(test_mock_r_9);
+    lfg_ctest(test_mock_v_4);
+    lfg_ctest(test_mock_v_5);
+    lfg_ctest(test_mock_v_6);
+    lfg_ctest(test_mock_v_7);
+    lfg_ctest(test_mock_v_8);
+    lfg_ctest(test_mock_v_9);
 }
 
 static void suite_mock_struct_by_value(void)
@@ -903,6 +1464,14 @@ static void suite_mock_struct_by_value(void)
     lfg_ctest(test_mock_struct_return);
     lfg_ctest(test_mock_struct_param_and_return);
     lfg_ctest(test_mock_multiple_struct_params);
+    lfg_ctest(test_mock_r_2_s);
+    lfg_ctest(test_mock_r_3_s);
+    lfg_ctest(test_mock_r_4_s);
+    lfg_ctest(test_mock_r_5_s);
+    lfg_ctest(test_mock_r_6_s);
+    lfg_ctest(test_mock_r_2_s_reset);
+    lfg_ctest(test_mock_r_2_s_callback);
+    lfg_ctest(test_mock_r_3_s_return_queue);
     lfg_ctest(test_mock_struct_return_queue);
 }
 
