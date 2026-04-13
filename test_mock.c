@@ -23,6 +23,9 @@ DECLARE_MOCK_V_1(set_value, int);
 /* R_1: returns value, 1 param */
 DECLARE_MOCK_R_1(increment, int, int);
 
+/* V_1 with string param for str_read/str_write tests */
+DECLARE_MOCK_V_1(process_name, const char*);
+
 /* V_2: void return, 2 params */
 DECLARE_MOCK_V_2(copy_data, void*, size_t);
 
@@ -127,6 +130,7 @@ DEFINE_MOCK_V_V(simple_void_func)
 DEFINE_MOCK_R_V(get_value, int)
 DEFINE_MOCK_V_1(set_value, int)
 DEFINE_MOCK_R_1(increment, int, int)
+DEFINE_MOCK_V_1(process_name, const char*)
 DEFINE_MOCK_V_2(copy_data, void*, size_t)
 DEFINE_MOCK_R_2(add_numbers, int, int, int)
 DEFINE_MOCK_R_3(read_buffer, int, uint8_t*, size_t, size_t*)
@@ -597,6 +601,103 @@ static void test_mock_v_9(void)
     ASSERT_INT_EQUAL(9, do_v9__param_history[0].p8);
 
     do_v9__mock_reset();
+}
+
+/*============================================================================
+ *  Test: param action - str_read (capture string from param)
+ *==========================================================================*/
+
+static void test_mock_param_action_str_read(void)
+{
+    char captured[32] = {0};
+    mock_param_action_t action;
+
+    process_name__mock_reset();
+
+    /* Set up action to capture string from param 0 on call 0 */
+    action = mock_param_str_read(NULL, 0, 0, captured, sizeof(captured));
+    process_name__param_actions = action;
+
+    /* Call mock with a short string literal */
+    process_name__mock("hello");
+
+    /* Verify string was captured */
+    ASSERT_STR_EQUAL("hello", captured);
+
+    process_name__mock_reset();
+}
+
+/*============================================================================
+ *  Test: param action - str_read truncation
+ *==========================================================================*/
+
+static void test_mock_param_action_str_read_truncation(void)
+{
+    char captured[4] = {0};
+    mock_param_action_t action;
+
+    process_name__mock_reset();
+
+    /* Buffer smaller than string - should truncate safely */
+    action = mock_param_str_read(NULL, 0, 0, captured, sizeof(captured));
+    process_name__param_actions = action;
+
+    process_name__mock("hello world");
+
+    /* Should be truncated to fit buffer with null terminator */
+    ASSERT_STR_EQUAL("hel", captured);
+
+    process_name__mock_reset();
+}
+
+/*============================================================================
+ *  Test: param action - str_read multi-call
+ *==========================================================================*/
+
+static void test_mock_param_action_str_read_multi_call(void)
+{
+    char cap0[32] = {0};
+    char cap1[32] = {0};
+    mock_param_action_t action;
+
+    process_name__mock_reset();
+
+    /* Chain captures for two calls */
+    action = mock_param_str_read(NULL, 0, 0, cap0, sizeof(cap0));
+    action = mock_param_str_read(action, 1, 0, cap1, sizeof(cap1));
+    process_name__param_actions = action;
+
+    process_name__mock("first");
+    process_name__mock("second");
+
+    ASSERT_STR_EQUAL("first", cap0);
+    ASSERT_STR_EQUAL("second", cap1);
+
+    process_name__mock_reset();
+}
+
+/*============================================================================
+ *  Test: param action - str_write (inject string into param)
+ *==========================================================================*/
+
+static void test_mock_param_action_str_write(void)
+{
+    char output[32] = {0};
+    mock_param_action_t action;
+
+    copy_data__mock_reset();
+
+    /* Set up action to inject a string into param 0 on call 0 */
+    action = mock_param_str_write(NULL, 0, 0, "injected", sizeof("injected"));
+    copy_data__param_actions = action;
+
+    /* Call mock - output should receive injected string */
+    copy_data__mock(output, sizeof(output));
+
+    /* Verify string was injected */
+    ASSERT_STR_EQUAL("injected", output);
+
+    copy_data__mock_reset();
 }
 
 /*============================================================================
@@ -1477,6 +1578,10 @@ static void suite_mock_struct_by_value(void)
 
 static void suite_mock_param_actions(void)
 {
+    lfg_ctest(test_mock_param_action_str_read);
+    lfg_ctest(test_mock_param_action_str_read_truncation);
+    lfg_ctest(test_mock_param_action_str_read_multi_call);
+    lfg_ctest(test_mock_param_action_str_write);
     lfg_ctest(test_mock_param_action_read);
     lfg_ctest(test_mock_param_action_write);
     lfg_ctest(test_mock_param_action_multi_call);

@@ -8,6 +8,7 @@
  *==========================================================================*/
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "lfg_ctest_mock.h"
 
@@ -61,6 +62,53 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
     p->call_index = callidx;
     p->parameter_index = paramidx;
     p->buffer = buffer;
+    p->buf_size = buf_size;
+    if (p0)
+    {
+        while (p0->next) {
+            p0 = p0->next;
+        }
+        p0->next = p;
+        return action; /* return head of list */
+    }
+    return p; /* new head */
+}
+
+mock_param_action_t mock_param_str_read(mock_param_action_t action, unsigned callidx,
+                                        unsigned paramidx, char *buffer, size_t buf_size)
+{
+    struct _mock_param_action *p, *p0;
+    p0 = action;
+    p = calloc(sizeof(*p), 1);
+    assert(p);
+    p->dir = eMOCK_PARAM_ACTION_DIR_READ_STR;
+    p->call_index = callidx;
+    p->parameter_index = paramidx;
+    p->buffer = buffer;
+    p->buf_size = buf_size;
+    if (p0)
+    {
+        while (p0->next) {
+            p0 = p0->next;
+        }
+        p0->next = p;
+        return action; /* return head of list */
+    }
+    return p; /* new head */
+}
+
+mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned callidx,
+                                         unsigned paramidx, const char *buffer,
+                                         size_t buf_size)
+{
+    struct _mock_param_action *p, *p0;
+    p0 = action;
+    p = calloc(sizeof(*p), 1);
+    assert(p);
+    p->dir = eMOCK_PARAM_ACTION_DIR_WRITE_STR;
+    p->call_index = callidx;
+    p->parameter_index = paramidx;
+    p->buffer = (void *)buffer;
     p->buf_size = buf_size;
     if (p0)
     {

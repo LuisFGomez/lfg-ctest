@@ -461,7 +461,7 @@ void test_callback_registration(void)
 }
 ```
 
-### Parameter Actions (Read/Write Memory)
+### Parameter Actions (Read/Write Memory and Strings)
 
 For pointer parameters, capture or inject data using parameter actions:
 
@@ -469,7 +469,13 @@ For pointer parameters, capture or inject data using parameter actions:
 |----------|-------------|
 | `mock_param_mem_read(action, call_idx, param_idx, buf, size)` | Capture `size` bytes from parameter into `buf` |
 | `mock_param_mem_write(action, call_idx, param_idx, buf, size)` | Inject `size` bytes from `buf` into parameter |
+| `mock_param_str_read(action, call_idx, param_idx, buf, size)` | Capture null-terminated string from parameter into `buf` |
+| `mock_param_str_write(action, call_idx, param_idx, str, size)` | Inject null-terminated string into parameter buffer |
 | `mock_param_destroy(action)` | Free action chain (called automatically by `_reset`) |
+
+The `str_` variants use `snprintf` instead of `memcpy`, so they stop at the null
+terminator and never read past it. Use them for `const char*` parameters where
+`mem_read` would over-read short string literals (e.g., ASAN redzone violations).
 
 **Capture data from a pointer parameter:**
 ```c
@@ -524,6 +530,30 @@ action = mock_param_mem_read(action, 0, 1, buf1, 4);   // call 0, param 1
 action = mock_param_mem_write(action, 0, 2, buf2, 4);  // call 0, param 2
 action = mock_param_mem_read(action, 1, 1, buf3, 4);   // call 1, param 1
 my_func__param_actions = action;
+```
+
+**Capture string parameters across multiple calls:**
+```c
+void test_captures_directory_names(void)
+{
+    char cap[3][256] = {{0}};
+    mock_param_action_t action = NULL;
+
+    // Capture the const char* param from 3 consecutive calls
+    for (int i = 0; i < 3; i++)
+    {
+        action = mock_param_str_read(action, i, 0, cap[i], sizeof(cap[i]));
+    }
+    mkdir__param_actions = action;
+
+    function_under_test();  // calls mkdir 3 times
+
+    ASSERT_STR_EQUAL("src",     cap[0]);
+    ASSERT_STR_EQUAL("src/lib", cap[1]);
+    ASSERT_STR_EQUAL("src/bin", cap[2]);
+
+    mkdir__mock_reset();
+}
 ```
 
 ### Mock Callbacks
@@ -603,7 +633,7 @@ void test_with_struct_param(void)
 }
 ```
 
-**Note:** `_S` variants do not support `mock_param_mem_read/write` actions.
+**Note:** `_S` variants do not support parameter actions (`mock_param_mem_read/write`, `mock_param_str_read/write`).
 
 ### Mock Limitations
 

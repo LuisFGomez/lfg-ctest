@@ -34,6 +34,8 @@ typedef void* mock_param_action_t;
 enum _mock_param_action_dir {
     eMOCK_PARAM_ACTION_DIR_READ,
     eMOCK_PARAM_ACTION_DIR_WRITE,
+    eMOCK_PARAM_ACTION_DIR_READ_STR,
+    eMOCK_PARAM_ACTION_DIR_WRITE_STR,
 };
 
 struct _mock_param_action
@@ -75,6 +77,33 @@ mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned cal
  */
 mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned callidx,
                                          unsigned paramidx, void *buffer, size_t buf_size);
+
+/** Treat parameter as a string and read (capture) it.
+ * Like mock_param_mem_read but uses snprintf instead of memcpy,
+ * so it stops at the null terminator and never reads past it.
+ * @param[in]  action   existing action chain to append to, or NULL to start new chain
+ * @param[in]  callidx  the call index (0-based) for this action
+ * @param[in]  paramidx the 0-based parameter position
+ * @param[out] buffer   destination to copy string into
+ * @param[in]  buf_size size of @p buffer (includes null terminator)
+ * @return     the action chain (use this for subsequent calls or assign to __param_actions)
+ */
+mock_param_action_t mock_param_str_read(mock_param_action_t action, unsigned callidx,
+                                        unsigned paramidx, char *buffer, size_t buf_size);
+
+/** Treat parameter as a string buffer and write (inject) into it.
+ * Like mock_param_mem_write but uses snprintf instead of memcpy,
+ * so it null-terminates and never writes past buf_size.
+ * @param[in]  action   existing action chain to append to, or NULL to start new chain
+ * @param[in]  callidx  the call index (0-based) for this action
+ * @param[in]  paramidx the 0-based parameter position
+ * @param[in]  buffer   source string to inject
+ * @param[in]  buf_size size of the destination parameter buffer
+ * @return     the action chain (use this for subsequent calls or assign to __param_actions)
+ */
+mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned callidx,
+                                         unsigned paramidx, const char *buffer,
+                                         size_t buf_size);
 
 /** Frees all linked parameter operations.
  * @param[in] action    parameter action chain to destroy.
@@ -150,6 +179,12 @@ void mock_param_destroy(mock_param_action_t action);
             memcpy(action->buffer, pparam, action->buf_size);                  \
         } else if (eMOCK_PARAM_ACTION_DIR_WRITE == action->dir) {              \
             memcpy(pparam, action->buffer, action->buf_size);                  \
+        } else if (eMOCK_PARAM_ACTION_DIR_READ_STR == action->dir) {           \
+            snprintf(action->buffer, action->buf_size, "%s",                   \
+                     (const char *)pparam);                                     \
+        } else if (eMOCK_PARAM_ACTION_DIR_WRITE_STR == action->dir) {          \
+            snprintf((char *)pparam, action->buf_size, "%s",                   \
+                     (const char *)action->buffer);                            \
         } else {                                                               \
             assert(false);                                                     \
         }                                                                      \
