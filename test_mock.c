@@ -1608,6 +1608,146 @@ static void suite_mock_callback(void)
 }
 
 /*============================================================================
+ *  Test: mock_reset_all - resets all invoked mocks
+ *==========================================================================*/
+
+static void test_mock_reset_all_clears_invoked(void)
+{
+    /* invoke several mocks */
+    simple_void_func__mock();
+    set_value__mock(42);
+    add_numbers__return_queue[0] = 99;
+    (void)add_numbers__mock(1, 2);
+
+    ASSERT_INT_EQUAL(1, simple_void_func__call_count);
+    ASSERT_INT_EQUAL(1, set_value__call_count);
+    ASSERT_INT_EQUAL(1, add_numbers__call_count);
+
+    mock_reset_all();
+
+    /* all should be zeroed */
+    ASSERT_INT_EQUAL(0, simple_void_func__call_count);
+    ASSERT_INT_EQUAL(0, set_value__call_count);
+    ASSERT_INT_EQUAL(0, add_numbers__call_count);
+}
+
+static void test_mock_reset_all_clears_return_queue(void)
+{
+    add_numbers__return_queue[0] = 77;
+    (void)add_numbers__mock(0, 0);
+
+    mock_reset_all();
+
+    ASSERT_INT_EQUAL(0, add_numbers__return_queue[0]);
+}
+
+static void test_mock_reset_all_clears_param_history(void)
+{
+    set_value__mock(123);
+
+    mock_reset_all();
+
+    ASSERT_INT_EQUAL(0, set_value__param_history[0].p0);
+}
+
+static void test_mock_reset_all_clears_callbacks(void)
+{
+    simple_void_func__callback = on_simple_void;
+    simple_void_func__mock();
+
+    mock_reset_all();
+
+    ASSERT_NULL(simple_void_func__callback);
+}
+
+static void test_mock_reset_all_clears_param_actions(void)
+{
+    uint8_t buf[4] = {0};
+    mock_param_action_t action;
+
+    action = mock_param_mem_read(NULL, 0, 0, buf, sizeof(buf));
+    copy_data__param_actions = action;
+    copy_data__mock(buf, 4);
+
+    mock_reset_all();
+
+    ASSERT_NULL(copy_data__param_actions);
+}
+
+static void test_mock_reset_all_skips_uninvoked(void)
+{
+    /* reset to a known clean slate */
+    get_value__mock_reset();
+    simple_void_func__mock_reset();
+
+    /* manually set state on get_value WITHOUT invoking it */
+    get_value__return_queue[0] = 55;
+
+    /* invoke only simple_void_func */
+    simple_void_func__mock();
+
+    mock_reset_all();
+
+    /* simple_void_func was invoked, should be reset */
+    ASSERT_INT_EQUAL(0, simple_void_func__call_count);
+
+    /* get_value was NOT invoked, return_queue should be untouched */
+    ASSERT_INT_EQUAL(55, get_value__return_queue[0]);
+
+    /* clean up */
+    get_value__mock_reset();
+}
+
+static void test_mock_reset_all_re_register_after_reset(void)
+{
+    simple_void_func__mock();
+    mock_reset_all();
+
+    ASSERT_INT_EQUAL(0, simple_void_func__call_count);
+
+    /* invoke again - should re-register */
+    simple_void_func__mock();
+    ASSERT_INT_EQUAL(1, simple_void_func__call_count);
+
+    mock_reset_all();
+    ASSERT_INT_EQUAL(0, simple_void_func__call_count);
+}
+
+static void test_mock_reset_all_noop_when_empty(void)
+{
+    /* should not crash with no registered mocks */
+    mock_reset_all();
+    mock_reset_all();
+}
+
+static void test_mock_reset_all_struct_safe(void)
+{
+    struct point p = {10, 20};
+
+    draw_point__mock(p);
+    ASSERT_INT_EQUAL(1, draw_point__call_count);
+    ASSERT_INT_EQUAL(10, draw_point__param_history[0].p0.x);
+
+    mock_reset_all();
+
+    ASSERT_INT_EQUAL(0, draw_point__call_count);
+    ASSERT_INT_EQUAL(0, draw_point__param_history[0].p0.x);
+}
+
+static void suite_mock_reset_all(void)
+{
+    lfg_ctest(test_mock_reset_all_clears_invoked);
+    lfg_ctest(test_mock_reset_all_clears_return_queue);
+    lfg_ctest(test_mock_reset_all_clears_param_history);
+    lfg_ctest(test_mock_reset_all_clears_callbacks);
+    lfg_ctest(test_mock_reset_all_clears_param_actions);
+    lfg_ctest(test_mock_reset_all_skips_uninvoked);
+    lfg_ctest(test_mock_reset_all_re_register_after_reset);
+    lfg_ctest(test_mock_reset_all_noop_when_empty);
+    lfg_ctest(test_mock_reset_all_struct_safe);
+}
+
+/*============================================================================
  *  Main
  *==========================================================================*/
 
@@ -1634,6 +1774,9 @@ int main(void)
 
     printf("\n--- SUITE 5: Callbacks ---\n");
     lfg_ct_suite(suite_mock_callback);
+
+    printf("\n--- SUITE 6: Reset All ---\n");
+    lfg_ct_suite(suite_mock_reset_all);
 
     printf("\n");
     lfg_ct_print_summary();

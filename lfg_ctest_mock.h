@@ -110,14 +110,34 @@ mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned ca
  */
 void mock_param_destroy(mock_param_action_t action);
 
+/** Register a mock reset function for bulk reset.
+ * Called automatically by each mock on first invocation. Deduplicates entries.
+ * @param[in] reset_fn   pointer to the mock's __mock_reset function.
+ */
+void _mock_register_reset(void (*reset_fn)(void));
+
+/** Reset all mocks that have been invoked since the last call to mock_reset_all().
+ * Iterates the auto-populated registry and calls each registered reset function,
+ * then clears the registry.
+ */
+void mock_reset_all(void);
+
 /** maximum number of function calls to store (override at compile time) */
 #ifndef MOCK_CALL_STORAGE_MAX
 #define MOCK_CALL_STORAGE_MAX  32
 #endif
 
+/** maximum number of distinct mocks that can be registered for bulk reset */
+#ifndef MOCK_REGISTRY_MAX
+#define MOCK_REGISTRY_MAX  64
+#endif
+
 /*============================================================================
  *  Internal Helper Macros
  *==========================================================================*/
+
+/* Auto-register mock reset function on first invocation */
+#define _MOCK_REGISTER(_func)  _mock_register_reset(_func##__mock_reset);
 
 /* Switch case generators for parameter lookup */
 #define _MOCK_SWITCH_1 \
@@ -270,6 +290,7 @@ void mock_param_destroy(mock_param_action_t action);
     size_t _func##__call_count = 0; \
     void _func##__mock(void) { \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         _MOCK_CALLBACK_V(_func) \
         _func##__call_count++; \
@@ -298,6 +319,7 @@ void mock_param_destroy(mock_param_action_t action);
     _rtype _func##__mock(void) { \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         ret = _func##__return_queue[i]; \
         _MOCK_CALLBACK_V(_func) \
@@ -333,6 +355,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_1 \
@@ -361,6 +384,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_2 \
@@ -389,6 +413,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_3 \
@@ -417,6 +442,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_4 \
@@ -445,6 +471,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_5 \
@@ -473,6 +500,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_6 \
@@ -501,6 +529,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_7 \
@@ -529,6 +558,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_8 \
@@ -557,6 +587,7 @@ void mock_param_destroy(mock_param_action_t action);
         struct _mock_param_action *action = _func##__param_actions; \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_9 \
@@ -592,6 +623,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_1 \
@@ -625,6 +657,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_2 \
@@ -658,6 +691,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_3 \
@@ -691,6 +725,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_4 \
@@ -724,6 +759,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_5 \
@@ -757,6 +793,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_6 \
@@ -790,6 +827,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_7 \
@@ -823,6 +861,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_8 \
@@ -856,6 +895,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_9 \
@@ -910,6 +950,7 @@ void mock_param_destroy(mock_param_action_t action);
     void _func##__mock(_t0 _p0) { \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_1 \
@@ -935,6 +976,7 @@ void mock_param_destroy(mock_param_action_t action);
     void _func##__mock(_t0 _p0, _t1 _p1) { \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_2 \
@@ -960,6 +1002,7 @@ void mock_param_destroy(mock_param_action_t action);
     void _func##__mock(_t0 _p0, _t1 _p1, _t2 _p2) { \
         _func##_params *p; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_V(_func) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_3 \
@@ -984,6 +1027,7 @@ void mock_param_destroy(mock_param_action_t action);
     _rtype _func##__mock(void) { \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         ret = _func##__return_queue[i]; \
         _MOCK_CALLBACK_V(_func) \
@@ -1016,6 +1060,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_1 \
@@ -1046,6 +1091,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_2 \
@@ -1076,6 +1122,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_3 \
@@ -1106,6 +1153,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_4 \
@@ -1136,6 +1184,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_5 \
@@ -1166,6 +1215,7 @@ void mock_param_destroy(mock_param_action_t action);
         _func##_params *p; \
         _rtype ret; \
         size_t i = _func##__call_count; \
+        _MOCK_REGISTER(_func) \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype) \
         p = &_func##__param_history[i]; \
         _MOCK_STORE_6 \

@@ -24,6 +24,9 @@
  *  Variables
  *==========================================================================*/
 
+static void (*_mock_reset_registry[MOCK_REGISTRY_MAX])(void);
+static size_t _mock_reset_registry_count;
+
 /*============================================================================
  *  Public API
  *==========================================================================*/
@@ -119,6 +122,40 @@ mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned ca
         return action; /* return head of list */
     }
     return p; /* new head */
+}
+
+void _mock_register_reset(void (*reset_fn)(void))
+{
+    size_t i;
+
+    for (i = 0; i < _mock_reset_registry_count; i++)
+    {
+        if (_mock_reset_registry[i] == reset_fn)
+        {
+            return; /* already registered */
+        }
+    }
+
+    if (_mock_reset_registry_count >= MOCK_REGISTRY_MAX)
+    {
+        fprintf(stderr, "MOCK REGISTRY OVERFLOW: exceeded %d distinct mocks\n",
+                MOCK_REGISTRY_MAX);
+        assert(0 && "mock reset registry exceeded");
+    }
+
+    _mock_reset_registry[_mock_reset_registry_count++] = reset_fn;
+}
+
+void mock_reset_all(void)
+{
+    size_t i;
+
+    for (i = 0; i < _mock_reset_registry_count; i++)
+    {
+        _mock_reset_registry[i]();
+    }
+
+    _mock_reset_registry_count = 0;
 }
 
 void mock_param_destroy(mock_param_action_t action)
