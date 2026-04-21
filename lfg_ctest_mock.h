@@ -2,12 +2,21 @@
  * @file
  * @brief       lfg-ctest mocking helpers.
  *
- * Macro naming convention: {R|V}_{V|N}
+ * Macro naming convention: {R|V}_{V|N}[_S]
  *   First letter:  R = returns a value, V = void return
  *   Second letter: V = void (no params), N = number of parameters (1-9)
+ *   _S suffix:     use ONLY when a parameter is a struct-by-value. Struct
+ *                  return types do NOT require _S -- the plain R_N variants
+ *                  handle struct returns and keep __param_actions available.
+ *                  _S drops __param_actions (mem/str read/write) because the
+ *                  parameter switch cannot cast struct-by-value through
+ *                  (void*)(size_t). For struct-by-value params, mock_param_mem_*
+ *                  would not help anyway (the mock receives a copy); read
+ *                  __param_history[i].pX.field directly instead.
  * Examples:
- *   DECLARE_MOCK_R_2 = returns value, 2 params
+ *   DECLARE_MOCK_R_2 = returns value, 2 params (return may be a struct)
  *   DECLARE_MOCK_V_V = void return, no params
+ *   DECLARE_MOCK_R_1_S = returns value, 1 struct-by-value param
  */
 
 #ifndef LFG_CTEST_MOCK_H_

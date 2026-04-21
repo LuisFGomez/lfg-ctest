@@ -338,12 +338,23 @@ The mocking framework provides macro-based mock generation for C functions.
 - `DECLARE` / `DEFINE`: Header declaration vs source definition
 - `R` = returns a value, `V` = void return
 - Second position: `V` = no parameters, `1-9` = parameter count
-- `_S` suffix = struct-safe (no param actions, works with struct-by-value)
+- `_S` suffix = struct-safe: use **only** when a *parameter* is a struct passed
+  by value. Drops `__param_actions` (`mock_param_mem_read` / `mock_param_mem_write`
+  / `mock_param_str_read` / `mock_param_str_write`) in exchange for compiling
+  when params can't be cast through `(void*)(size_t)`.
+
+> **Struct return types do NOT require `_S`.** A function returning a struct
+> with pointer or scalar parameters is fully supported by the plain `R_N`
+> variants, which also keep `__param_actions` available. Reach for `_S` only
+> when a *parameter* is a struct-by-value — never because of the return type.
+> If a parameter genuinely is struct-by-value, `mock_param_mem_*` wouldn't help
+> anyway (the mock receives a copy); use `__param_history[i].pX.field` to
+> inspect it.
 
 **Examples:**
-- `DECLARE_MOCK_R_2` - Returns value, 2 parameters
+- `DECLARE_MOCK_R_2` - Returns value, 2 parameters (return type may be a struct)
 - `DEFINE_MOCK_V_V` - Void return, no parameters
-- `DECLARE_MOCK_R_1_S` - Returns value, 1 parameter, struct-safe
+- `DECLARE_MOCK_R_1_S` - Returns value, 1 struct-by-value parameter
 
 ### Creating a Mock
 
