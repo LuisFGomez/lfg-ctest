@@ -112,6 +112,36 @@ if(LFG_CTEST_NEEDS_LIBM)
 endif()
 
 # ==============================================================================
+# Amalgamator -- C tool that produces dist/lfg_ctest.h (single-header form)
+# ==============================================================================
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_executable(lfg_ct_amalgamate tools/amalgamate.c)
+    target_compile_options(lfg_ct_amalgamate PRIVATE -Wall -Wextra -pedantic)
+
+    set(LFG_CTEST_AMALG_SOURCES
+        lfg_ctest.h
+        lfg_ctest_mock.h
+        lfg_ctest.c
+        lfg_ctest_mock.c
+        tools/amalgamate.manifest
+    )
+
+    add_custom_command(
+        OUTPUT ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/dist
+        COMMAND lfg_ct_amalgamate
+            ${CMAKE_SOURCE_DIR}/tools/amalgamate.manifest
+            ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h
+        DEPENDS lfg_ct_amalgamate ${LFG_CTEST_AMALG_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Amalgamating dist/lfg_ctest.h"
+    )
+
+    add_custom_target(amalgamate DEPENDS ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h)
+endif()
+
+# ==============================================================================
 # Tests (only when building standalone)
 # ==============================================================================
 
@@ -130,6 +160,23 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         target_compile_definitions(${TEST_TARGET} PRIVATE LFG_CTEST_SELF_TEST=1)
     endforeach()
 
+    # Smoke test for the amalgamated header -- catches drift between the
+    # split sources and dist/lfg_ctest.h. Self-contained (defines
+    # LFG_CTEST_IMPLEMENTATION itself; does NOT link against lfg_ctest).
+    add_executable(test_amalg test_amalg.c)
+    add_dependencies(test_amalg amalgamate)
+    target_include_directories(test_amalg PRIVATE ${CMAKE_SOURCE_DIR})
+    if(LFG_CTEST_HAS_FLOAT)
+        target_compile_definitions(test_amalg PRIVATE LFG_CTEST_HAS_FLOAT=1)
+    endif()
+    if(LFG_CTEST_HAS_DOUBLE)
+        target_compile_definitions(test_amalg PRIVATE LFG_CTEST_HAS_DOUBLE=1)
+    endif()
+    if(LFG_CTEST_NEEDS_LIBM)
+        target_link_libraries(test_amalg PRIVATE m)
+    endif()
+    list(APPEND TEST_TARGETS test_amalg)
+
     # Enable testing
     enable_testing()
 
@@ -137,6 +184,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # Note: test_unified includes intentional failures to verify framework behavior
     add_test(NAME test_unified COMMAND test_unified)
     add_test(NAME test_mock COMMAND test_mock)
+    add_test(NAME test_amalg COMMAND test_amalg)
 
     # Custom target to run all tests
     add_custom_target(run_all_tests

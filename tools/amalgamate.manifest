@@ -1,0 +1,14 @@
+# lfg-ctest amalgamation manifest
+# Files are concatenated in order within each section.
+# @header_begin/@header_end  -- public API (no LFG_CTEST_IMPLEMENTATION guard)
+# @impl_begin/@impl_end      -- implementation (wrapped in #ifdef LFG_CTEST_IMPLEMENTATION)
+
+@header_begin
+lfg_ctest.h
+lfg_ctest_mock.h
+@header_end
+
+@impl_begin
+lfg_ctest.c
+lfg_ctest_mock.c
+@impl_end
