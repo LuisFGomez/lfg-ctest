@@ -192,6 +192,24 @@ void test_with_isolation(void)
 | `ASSERT_NULL(ptr)` | Alias for `PTR_NULL` |
 | `ASSERT_NOT_NULL(ptr)` | Alias for `PTR_NOT_NULL` |
 
+> **Portability note — function pointers.** The pointer-assertion macros
+> above cast their argument through `(void *)`. ISO C99 §6.3.2.3 does not
+> define conversion between function pointers and `void *` (POSIX does),
+> so `gcc -std=c99 -pedantic-errors` will diagnose
+> `ASSERT_NULL(fn_ptr)` / `ASSERT_PTR_EQUAL(fn_a, fn_b)` etc. even though
+> the assertion works correctly at runtime. Clang accepts it silently.
+>
+> **Workaround:** use the boolean form, which compares on the function-pointer
+> type directly and stays within ISO C99:
+>
+> ```c
+> ASSERT_TRUE(cb == NULL);       /* instead of ASSERT_NULL(cb) */
+> ASSERT_TRUE(cb != NULL);       /* instead of ASSERT_NOT_NULL(cb) */
+> ASSERT_TRUE(cb_a == cb_b);     /* instead of ASSERT_PTR_EQUAL(cb_a, cb_b) */
+> ```
+>
+> A dedicated `ASSERT_FN_*` family is tracked for a future release.
+
 #### Boolean Assertions
 | Assertion | Description |
 |-----------|-------------|
