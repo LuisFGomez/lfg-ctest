@@ -149,6 +149,36 @@ guard doesn't follow that convention, the tool will emit both the `#ifndef`
 and the paste-in content, which typically shows up as duplicate-definition
 errors. Fix by renaming the guard, not by tweaking the tool.
 
+## Versioning
+
+`lfg_ctest.h` transitively includes `lfg_ctest_version.h`, a generated header
+produced by `tools/mkversion.c` at build time. The tool runs
+`git -C <src> describe --match 'v*'` and emits C macros for the captured
+version. The CMake side pipes stdout through `copy_if_different` so a rebuild
+only retriggers downstream compilation when the version actually changed.
+
+Public surface (see `README.md`):
+
+- `LFG_CTEST_VERSION` / `LFG_CTEST_VERSION_FULL` / `LFG_CTEST_VERSION_MAJOR|_MINOR|_PATCH`
+  (compile-time).
+- `const char *lfg_ct_version(void)` (runtime, returns `_FULL`).
+
+Tagging convention: annotated tags of the form `v<major>.<minor>`, e.g.
+`git tag -a v0.1 -m "..." <sha>`. `git describe` produces
+`v<major>.<minor>-<distance>-g<shorthash>` on intermediate commits; the
+stamper parses this into `M.m.<distance>[+<shorthash>]`. Lightweight tags
+are ignored.
+
+No git tag, or lfg-ctest vendored into a downstream without `.git` → the
+macros fall back to `0.0.0`. This is intentional so `add_subdirectory`
+embedders who ship tarballs still compile.
+
+`mkversion.c` is deliberately prefix-agnostic — invoked as
+`lfg_ct_mkversion LFG_CTEST <src>` — so it can be lifted into a shared
+project once a third consumer shows up. See the jotsms repo for the second
+inline copy of the same pattern; converge via `git mv` + a small
+`.cmake` helper when extraction is warranted.
+
 ## Formatting
 
 `.clang-format` at the repo root is authoritative. Apply:

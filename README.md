@@ -160,6 +160,22 @@ int main(void)
 | `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`) |
 | `lfg_ct_print_summary()` | Print pass/fail summary |
 | `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
+| `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
+
+### Version Macros
+
+`lfg_ctest.h` transitively includes a generated `lfg_ctest_version.h`
+(produced at build time from `git describe --match 'v*'`), exposing:
+
+| Macro | Example |
+|-------|---------|
+| `LFG_CTEST_VERSION` | `"0.1.42"` |
+| `LFG_CTEST_VERSION_FULL` | `"0.1.42+d2b1fa3"` |
+| `LFG_CTEST_VERSION_MAJOR` / `_MINOR` / `_PATCH` | `0` / `1` / `42` |
+
+Use the macros for compile-time gating and `lfg_ct_version()` for runtime
+reporting. When the source tree has no matching tag (e.g. vendored
+tarball), the macros fall back to `0.0.0`.
 
 ### Setup and Teardown
 
