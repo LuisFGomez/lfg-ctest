@@ -146,6 +146,55 @@ is never called is never registered.
 zeros the count — so mocks re-register on their next call. This lets a
 teardown drop every known mock's state without maintaining an explicit list.
 
+## Amalgamation (`tools/amalgamate.c`)
+
+The framework ships in two forms: the split sources (default) and a generated
+single-header at `dist/lfg_ctest.h` produced by the `amalgamate` CMake target.
+The single-header path exists for consumers who want drop-in use without CMake,
+submodules, or vendoring multiple files.
+
+The amalgamator itself is a small C99 program. It reads
+`tools/amalgamate.manifest` (two sections, `@header_begin/@header_end` and
+`@impl_begin/@impl_end`), concatenates the listed files in order, and writes
+the combined output wrapped in:
+
+```c
+#ifndef LFG_CTEST_SINGLE_H_
+/* ...headers, inline... */
+#ifdef LFG_CTEST_IMPLEMENTATION
+/* ...impl, inline... */
+#endif
+#endif
+```
+
+Per-file filtering:
+
+- Internal `#include "lfg_ctest*"` directives are stripped.
+- Include guards are stripped. Guard detection is a **repo-convention match**:
+  an identifier is treated as a guard only if it ends in `_H_` (trailing
+  underscore). This catches `LFG_CTEST_H_` / `LFG_CTEST_MOCK_H_` and ignores
+  operational macros like `LFG_CTEST_HAS_FLOAT` / `LFG_CTEST_HAS_DOUBLE` that
+  would false-match a naive `_H` substring check. Guard state is tracked
+  per-file: the tool remembers the opening `#ifndef FOO_H_`, strips the
+  matching `#define FOO_H_`, and strips the terminating `#endif` whose comment
+  mentions `FOO_H_`.
+- System includes (`#include <...>`) are deduplicated across all files so each
+  standard header appears once in the output.
+
+File-scope `static` state in the two `.c` halves (pass/fail counters, mock
+reset registry) stays `static` inside the `LFG_CTEST_IMPLEMENTATION` block,
+so multi-TU links against the amalgamated header are safe as long as exactly
+one TU defines the gate. `RECORD_FAILURE` / `RECORD_PASS` macros from
+`lfg_ctest.c` leak into `lfg_ctest_mock.c` scope after concatenation, but the
+mock impl doesn't reference those names, so there's no collision.
+
+`test_amalg` is the drift-detection smoke: it `#define`s
+`LFG_CTEST_IMPLEMENTATION`, includes `dist/lfg_ctest.h`, and exercises a small
+but representative slice (basic asserts, a mock with return queue + param
+history, optional float/double asserts). It depends on the `amalgamate` target
+so the dist header is always fresh before the smoke compiles. It does **not**
+link against the `lfg_ctest` static lib — it provides its own impl.
+
 ## Float / double gating
 
 `CMakeLists.txt` uses `check_symbol_exists(fabsf math.h)` and

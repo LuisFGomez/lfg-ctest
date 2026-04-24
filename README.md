@@ -10,6 +10,7 @@ A comprehensive, easy-to-use, zero-dependency, C99-compatible test framework wit
 - **Built-in Mocking**: Macro-based mock generation with parameter capture and return value queuing
 - **Struct-by-value Support**: Dedicated macros for functions with struct parameters
 - **Embedded-Friendly**: Optional floating-point support with separate 32-bit float and 64-bit double configuration
+- **Single-Header Distribution**: Optional amalgamated single-header form for drop-in use without CMake or submodules
 
 ## Installation
 
@@ -23,6 +24,41 @@ When using CMake, add as a subdirectory:
 add_subdirectory(deps/lfg-ctest)
 target_link_libraries(my_tests lfg_ctest)
 ```
+
+### Single-Header Amalgamation
+
+A single-header form can be generated from the split sources -- useful for drop-in use without CMake, submodules, or vendoring multiple files.
+
+Generate it from a clone of this repo:
+
+```bash
+cmake -B build
+cmake --build build --target amalgamate
+# produces dist/lfg_ctest.h
+```
+
+Drop `dist/lfg_ctest.h` anywhere on your include path. In **exactly one** translation unit, define `LFG_CTEST_IMPLEMENTATION` before the include; all other TUs just include the header:
+
+```c
+/* one .c file in your project */
+#define LFG_CTEST_IMPLEMENTATION
+#include "lfg_ctest.h"
+```
+
+```c
+/* every other .c file that uses assertions or mocks */
+#include "lfg_ctest.h"
+```
+
+All existing configuration defines still apply and must be set consistently across TUs:
+
+| Define | Effect |
+|--------|--------|
+| `LFG_CTEST_HAS_FLOAT` | Enable 32-bit float assertions (needs `-lm`) |
+| `LFG_CTEST_HAS_DOUBLE` | Enable 64-bit double assertions (needs `-lm`) |
+| `LFG_CTEST_NO_FUNC` | Disable `__func__` reporting |
+
+The `test_amalg` target in this repo is a smoke test that compiles against `dist/lfg_ctest.h` and is registered with CTest, so `cmake --build build` followed by `ctest --test-dir build` verifies the amalgamation stays in sync with the split sources.
 
 ### Floating-Point Configuration
 

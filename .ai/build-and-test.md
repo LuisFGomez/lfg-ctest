@@ -40,11 +40,16 @@ ctest --test-dir build --output-on-failure    # run all via CTest
 cmake --build build --target run_all_tests    # verbose wrapper
 ./build/test_unified                          # direct, core self-tests
 ./build/test_mock                             # direct, mock self-tests
+./build/test_amalg                            # amalgamated-header smoke
 ```
 
 `test_unified` intentionally exercises assertion failure paths (wrapped in
 expect-failures mode), so a clean run is "all passed" even though the binary
 internally triggered many failures.
+
+`test_amalg` builds against the generated `dist/lfg_ctest.h` and does not link
+against the `lfg_ctest` static library — it provides its own impl via
+`LFG_CTEST_IMPLEMENTATION`. CTest registers it alongside the other two.
 
 ### Run one specific test
 
@@ -112,6 +117,37 @@ static void test_widget_read_captures_params(void)
 Register in the appropriate suite. Reset at the end of each test (or in a
 per-test teardown helper) — state is file-scope and persists across tests
 otherwise.
+
+## Amalgamation
+
+The single-header form at `dist/lfg_ctest.h` is generated, not committed
+(`dist/` is gitignored). Regenerate it whenever you touch the split sources
+or the manifest:
+
+```
+cmake --build build --target amalgamate
+```
+
+The `amalgamate` target depends on `tools/amalgamate.c`, the manifest, and
+every source listed in `LFG_CTEST_AMALG_SOURCES` in `CMakeLists.txt`. Adding
+a new split source file means updating **both** that list and
+`tools/amalgamate.manifest` — otherwise the new file is silently omitted from
+the generated header, and `test_amalg` will fail to link as soon as it
+references anything from the missing file.
+
+`test_amalg` runs automatically as part of `ctest`. When investigating drift,
+run it in isolation to see the symbol that went missing:
+
+```
+cmake --build build --target test_amalg
+./build/test_amalg
+```
+
+The amalgamator's guard-stripping assumes include guards end in `_H_`
+(trailing underscore — this repo's convention). If you add a header whose
+guard doesn't follow that convention, the tool will emit both the `#ifndef`
+and the paste-in content, which typically shows up as duplicate-definition
+errors. Fix by renaming the guard, not by tweaking the tool.
 
 ## Formatting
 
