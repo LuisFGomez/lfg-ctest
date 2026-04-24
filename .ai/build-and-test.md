@@ -186,12 +186,30 @@ embedders who ship tarballs still compile.
 Cutting a release:
 
 ```
-git tag -a release-v0.1.42 <sha> -m "release 0.1.42: <summary>"
-git push origin release-v0.1.42
+cmake --build build --target release-tag
 ```
 
-(Gitea's release UI can also create the tag+release atomically — pick the
-target branch/commit in the dropdown.)
+The `release-tag` target runs `tools/mkrelease.c`, which reads the current
+`git describe` output, proposes the matching `release-v<M>.<m>.<p>`, and
+prompts for confirmation before execing `git tag -a <tag>` (so `$EDITOR`
+handles the annotation message, same as `git tag -a` by hand). Then:
+
+```
+git push origin release-v0.1.49    # triggers the CI release job
+```
+
+The target exists because hand-typing the version from a moving
+`git describe` output kept drifting — the distance number advances with
+every commit, and a stale tag silently ships the wrong version string.
+
+Direct alternatives if scripting or the prompt is in the way:
+
+```
+git tag -a release-v0.1.49 -m "release 0.1.49: <summary>"         # manual
+```
+
+Gitea's release UI can also create the tag+release atomically — pick the
+target branch/commit in the dropdown.
 
 `mkversion.c` is deliberately prefix-agnostic — invoked as
 `lfg_ct_mkversion LFG_CTEST <src>` — so it can be lifted into a shared

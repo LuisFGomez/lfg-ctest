@@ -47,6 +47,7 @@ to the code.
 | `tools/amalgamate.c` | C99 amalgamator. Concatenates sources per manifest, strips internal includes and `_H_`-suffixed include guards, dedupes system includes, wraps in `LFG_CTEST_IMPLEMENTATION` gate. Accepts trailing search-dir args to pick up generated files. |
 | `tools/amalgamate.manifest` | Ordered list of header + impl files to fold into `dist/lfg_ctest.h`. `lfg_ctest_version.h` is first so version macros are in scope before the rest. |
 | `tools/mkversion.c` | C99 version-stamper. `mkversion <PREFIX> [source_dir]` → stdout header with `<PREFIX>_VERSION_*` macros from `git describe`. Prefix-agnostic for future reuse. |
+| `tools/mkrelease.c` | Interactive C99 helper that proposes the right `release-v<M>.<m>.<p>` tag from `git describe` output and execs `git tag -a`. Invoked via `cmake --build build --target release-tag`. Maintainer-only; not in the amalgamation. |
 | `dist/lfg_ctest.h` | Generated single-header (gitignored). Built by the `amalgamate` CMake target. |
 | `<build>/lfg_ctest_version.h` | Generated version header (in build dir). Rebuilt on every build; `copy_if_different` suppresses no-op churn. |
 | `CMakeLists.txt` | Float/double auto-detection, static-lib build, self-test targets, amalgamator target, install rules. |

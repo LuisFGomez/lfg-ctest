@@ -186,6 +186,10 @@ Tagging convention:
   the version reports as a clean `M.m.p`, e.g. `0.1.42`. Releases are what
   CI builds and publishes; intermediate commits keep the base-tag form.
 
+For maintainers: `cmake --build build --target release-tag` reads the
+current `git describe` output, proposes the matching `release-v<M>.<m>.<p>`,
+prompts before creating it, and opens `$EDITOR` for the annotation message.
+
 ### Setup and Teardown
 
 lfg-ctest does not impose any setup/teardown mechanism. They're just functions you call however you like:
