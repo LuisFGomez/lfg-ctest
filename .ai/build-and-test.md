@@ -128,5 +128,7 @@ before committing if you've touched any of those files.
 
 ## CI
 
-None in-repo at the moment. Self-tests are the regression gate; run them
-locally before pushing.
+`.gitea/workflows/ci.yml` runs on every push. On a self-hosted runner
+(`popstation, host`) it configures with the `debug` preset, builds, then
+runs `ctest --test-dir build --output-on-failure`. Same commands as local —
+no CI-only build flags.
