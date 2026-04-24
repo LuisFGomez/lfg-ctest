@@ -79,6 +79,36 @@ else()
 endif()
 
 # ==============================================================================
+# Version Header (generated from git describe)
+# ==============================================================================
+#
+# tools/mkversion.c runs `git -C <src> describe --match 'v*'` and emits
+# lfg_ctest_version.h into the binary dir. The custom target runs on every
+# build (ALL); `copy_if_different` shields downstream compilation from
+# spurious rebuilds when git state is unchanged.
+#
+# Falls back to 0.0.0 when there is no matching tag or no git repo --
+# harmless for add_subdirectory embedders who vendor a tarball.
+#
+# ==============================================================================
+
+add_executable(lfg_ct_mkversion tools/mkversion.c)
+target_compile_options(lfg_ct_mkversion PRIVATE -Wall -Wextra -pedantic)
+
+set(LFG_CTEST_VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/lfg_ctest_version.h)
+
+add_custom_target(lfg_ct_version_header ALL
+    COMMAND lfg_ct_mkversion LFG_CTEST ${CMAKE_CURRENT_SOURCE_DIR}
+        > ${LFG_CTEST_VERSION_HEADER}.tmp
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${LFG_CTEST_VERSION_HEADER}.tmp ${LFG_CTEST_VERSION_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E remove ${LFG_CTEST_VERSION_HEADER}.tmp
+    BYPRODUCTS ${LFG_CTEST_VERSION_HEADER}
+    DEPENDS lfg_ct_mkversion
+    COMMENT "Generating lfg_ctest_version.h from git describe"
+)
+
+# ==============================================================================
 # Library Build
 # ==============================================================================
 
@@ -90,7 +120,11 @@ set(LFG_CTEST_SOURCES
 
 # Create static library
 add_library(lfg_ctest STATIC ${LFG_CTEST_SOURCES})
-target_include_directories(lfg_ctest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(lfg_ctest PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+add_dependencies(lfg_ctest lfg_ct_version_header)
 
 # Enable self-test mode when building standalone (for framework's own tests)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -127,14 +161,22 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         tools/amalgamate.manifest
     )
 
+    # Search dirs for the amalgamator: source root first (checked-in files),
+    # then binary dir (generated lfg_ctest_version.h).
+    # NB: DEPENDS lists the generated header by *path* as well as by target
+    # name. The target name only establishes build order; the path makes
+    # Ninja/Make retrigger amalgamation when the file's mtime changes
+    # (which, thanks to copy_if_different, only happens on real content change).
     add_custom_command(
         OUTPUT ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/dist
         COMMAND lfg_ct_amalgamate
             ${CMAKE_SOURCE_DIR}/tools/amalgamate.manifest
             ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h
-        DEPENDS lfg_ct_amalgamate ${LFG_CTEST_AMALG_SOURCES}
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}
+        DEPENDS lfg_ct_amalgamate lfg_ct_version_header
+                ${LFG_CTEST_VERSION_HEADER} ${LFG_CTEST_AMALG_SOURCES}
         COMMENT "Amalgamating dist/lfg_ctest.h"
     )
 
@@ -156,6 +198,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     foreach(TEST_TARGET ${TEST_TARGETS})
         add_executable(${TEST_TARGET} ${TEST_TARGET}.c)
         target_link_libraries(${TEST_TARGET} lfg_ctest)
+        # The test sources include lfg_ctest.h -> lfg_ctest_version.h (generated).
+        # add_dependencies() is not transitive across target_link_libraries, so
+        # state the prerequisite explicitly to avoid first-build races.
+        add_dependencies(${TEST_TARGET} lfg_ct_version_header)
         # Enable self-test mode for framework's own tests
         target_compile_definitions(${TEST_TARGET} PRIVATE LFG_CTEST_SELF_TEST=1)
     endforeach()
@@ -204,7 +250,10 @@ install(TARGETS lfg_ctest
     LIBRARY DESTINATION lib
 )
 
-install(FILES lfg_ctest.h lfg_ctest_mock.h
+install(FILES
+    lfg_ctest.h
+    lfg_ctest_mock.h
+    ${LFG_CTEST_VERSION_HEADER}
     DESTINATION include
 )
 

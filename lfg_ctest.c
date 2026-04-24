@@ -93,6 +93,12 @@ static int _expected_failures_count = 0;
  *  Public API
  *==========================================================================*/
 
+const char *
+lfg_ct_version(void)
+{
+    return LFG_CTEST_VERSION_FULL;
+}
+
 void lfg_ct_start(void)
 {
     unsigned rand_seed = time(NULL) % 1000;

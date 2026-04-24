@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Generated at configure/build time by tools/mkversion.c -- contains
+ * LFG_CTEST_VERSION, LFG_CTEST_VERSION_FULL, and LFG_CTEST_VERSION_{MAJOR,MINOR,PATCH}. */
+#include "lfg_ctest_version.h"
+
 /*============================================================================
  *  Defines/Typedefs
  *==========================================================================*/
@@ -263,6 +267,12 @@
 /*============================================================================
  *  Public API
  *==========================================================================*/
+
+/** Return the framework version string as "M.m.p[+<sha>]".
+ *  The underlying macro is LFG_CTEST_VERSION_FULL; use this function when
+ *  you need the version at runtime (e.g. logging a test harness banner).
+ */
+const char *lfg_ct_version(void);
 
 /** Mark the beginning of unit testing.
  */

@@ -4,6 +4,7 @@
 # @impl_begin/@impl_end      -- implementation (wrapped in #ifdef LFG_CTEST_IMPLEMENTATION)
 
 @header_begin
+lfg_ctest_version.h
 lfg_ctest.h
 lfg_ctest_mock.h
 @header_end
