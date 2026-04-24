@@ -2,7 +2,13 @@
  * @file
  * @brief   amalgamate.c -- combines modular lfg-ctest sources into a single header.
  *
- * Usage: amalgamate <manifest> <output>
+ * Usage: amalgamate <manifest> <output> [search_dir...]
+ *
+ * Trailing search_dir arguments are consulted in order when resolving each
+ * manifest entry; the first hit wins. If none are given, the tool falls
+ * back to "." (the process's working directory). This lets generated files
+ * (e.g. lfg_ctest_version.h in the build dir) be folded into the output
+ * alongside the checked-in sources.
  *
  * The manifest lists files in order with section markers:
  *   \@header_begin / \@header_end   -- public header section
@@ -192,15 +198,24 @@ is_system_include(const char *line, char *out_inc, size_t out_sz)
  *==========================================================================*/
 
 static int
-emit_file(FILE *out, const char *basedir, const char *relpath)
+emit_file(FILE *out, const char **search_dirs, int n_dirs, const char *relpath)
 {
     char fullpath[1024];
-    snprintf(fullpath, sizeof(fullpath), "%s/%s", basedir, relpath);
+    FILE *in = NULL;
+    int i;
 
-    FILE *in = fopen(fullpath, "r");
+    for (i = 0; i < n_dirs; i++)
+    {
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", search_dirs[i], relpath);
+        in = fopen(fullpath, "r");
+        if (in)
+        {
+            break;
+        }
+    }
     if (!in)
     {
-        fprintf(stderr, "amalgamate: cannot open '%s'\n", fullpath);
+        fprintf(stderr, "amalgamate: cannot find '%s' in any search dir\n", relpath);
         return -1;
     }
 
@@ -337,14 +352,29 @@ parse_manifest(const char *path, struct manifest *m)
 int
 main(int argc, char **argv)
 {
-    if (argc != 3)
+    if (argc < 3)
     {
-        fprintf(stderr, "usage: amalgamate <manifest> <output>\n");
+        fprintf(stderr, "usage: amalgamate <manifest> <output> [search_dir...]\n");
         return 1;
     }
 
     const char *manifest_path = argv[1];
     const char *output_path = argv[2];
+
+    /* Search dirs: CLI args after <output>, or "." as a single default. */
+    const char *default_dirs[] = {"."};
+    const char **search_dirs;
+    int n_search_dirs;
+    if (argc > 3)
+    {
+        search_dirs = (const char **)&argv[3];
+        n_search_dirs = argc - 3;
+    }
+    else
+    {
+        search_dirs = default_dirs;
+        n_search_dirs = 1;
+    }
 
     struct manifest m;
     if (parse_manifest(manifest_path, &m) != 0)
@@ -386,14 +416,10 @@ main(int argc, char **argv)
             "#ifndef LFG_CTEST_SINGLE_H_\n"
             "#define LFG_CTEST_SINGLE_H_\n\n");
 
-    /* Basedir is "." because CMake runs us with WORKING_DIRECTORY = source root,
-     * and manifest paths are relative to that root. */
-    const char *basedir = ".";
-
     int i;
     for (i = 0; i < m.header_count; i++)
     {
-        if (emit_file(out, basedir, m.header_files[i]) != 0)
+        if (emit_file(out, search_dirs, n_search_dirs, m.header_files[i]) != 0)
         {
             fclose(out);
             return 1;
@@ -408,7 +434,7 @@ main(int argc, char **argv)
 
     for (i = 0; i < m.impl_count; i++)
     {
-        if (emit_file(out, basedir, m.impl_files[i]) != 0)
+        if (emit_file(out, search_dirs, n_search_dirs, m.impl_files[i]) != 0)
         {
             fclose(out);
             return 1;
