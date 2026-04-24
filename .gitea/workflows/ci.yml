@@ -77,5 +77,5 @@ jobs:
         run: |
           curl -sS -X POST \
             -H "Authorization: token $TOKEN" \
-            -F "attachment=@dist/lfg_ctest.h;filename=lfg_ctest.h" \
-            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${{ steps.create.outputs.id }}/assets?name=lfg_ctest.h"
+            -F "attachment=@dist/lfg-ctest.h;filename=lfg-ctest.h" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${{ steps.create.outputs.id }}/assets?name=lfg-ctest.h"

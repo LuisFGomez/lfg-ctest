@@ -13,7 +13,7 @@
 #if defined(LFG_CTEST_HAS_FLOAT) || defined(LFG_CTEST_HAS_DOUBLE)
 #include <math.h>
 #endif
-#include "lfg_ctest.h"
+#include "lfg-ctest.h"
 
 /*============================================================================
  *  Defines/Typedefs

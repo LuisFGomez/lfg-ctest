@@ -7,7 +7,7 @@
  * Trailing search_dir arguments are consulted in order when resolving each
  * manifest entry; the first hit wins. If none are given, the tool falls
  * back to "." (the process's working directory). This lets generated files
- * (e.g. lfg_ctest_version.h in the build dir) be folded into the output
+ * (e.g. lfg-ctest-version.h in the build dir) be folded into the output
  * alongside the checked-in sources.
  *
  * The manifest lists files in order with section markers:
@@ -76,7 +76,7 @@ skip_ws(const char *p)
     return p;
 }
 
-/** True if @p line is an internal \#include (lfg_ctest.h / lfg_ctest_mock.h). */
+/** True if @p line is an internal \#include (lfg-ctest.h / lfg-ctest-mock.h). */
 static int
 is_internal_include(const char *line)
 {
@@ -91,7 +91,7 @@ is_internal_include(const char *line)
         return 0;
     }
     p++;
-    if (strncmp(p, "lfg_ctest", 9) == 0)
+    if (strncmp(p, "lfg-ctest", 9) == 0)
     {
         return 1;
     }
@@ -405,7 +405,7 @@ main(int argc, char **argv)
             " * before including this header:\n"
             " *\n"
             " *     #define LFG_CTEST_IMPLEMENTATION\n"
-            " *     #include \"lfg_ctest.h\"\n"
+            " *     #include \"lfg-ctest.h\"\n"
             " *\n"
             " * Optional build-time defines:\n"
             " *   LFG_CTEST_HAS_FLOAT    -- enable 32-bit float asserts (needs libm).\n"

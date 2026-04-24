@@ -32,7 +32,7 @@
 #include <string.h>
 #include <stddef.h>
 
-#include "lfg_ctest.h"
+#include "lfg-ctest.h"
 
 /*============================================================================
  *  Defines/Typedefs

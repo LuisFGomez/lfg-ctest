@@ -3,8 +3,8 @@
  * @brief       Test suite for lfg-ctest mocking framework
  */
 
-#include "lfg_ctest.h"
-#include "lfg_ctest_mock.h"
+#include "lfg-ctest.h"
+#include "lfg-ctest-mock.h"
 #include <stdint.h>
 
 /*============================================================================

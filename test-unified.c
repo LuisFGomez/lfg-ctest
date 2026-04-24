@@ -11,7 +11,7 @@
  * Use cmake -DLFG_CTEST_ENABLE_FLOAT=OFF to build without float support.
  */
 
-#include "lfg_ctest.h"
+#include "lfg-ctest.h"
 #include <stdint.h>
 #include <string.h>
 

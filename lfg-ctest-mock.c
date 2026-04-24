@@ -10,7 +10,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "lfg_ctest_mock.h"
+#include "lfg-ctest-mock.h"
 
 /*============================================================================
  *  Defines/Typedefs

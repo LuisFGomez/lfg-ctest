@@ -2,7 +2,7 @@
  * @file
  * @brief   Smoke test for the amalgamated single-header form.
  *
- * Exercises the generated @c dist/lfg_ctest.h with its own
+ * Exercises the generated @c dist/lfg-ctest.h with its own
  * @c LFG_CTEST_IMPLEMENTATION definition. Catches drift between the split
  * sources and the amalgamated output (missing file in the manifest,
  * guard-stripping regressions, mock-macro expansion breakage, etc.).
@@ -12,7 +12,7 @@
  */
 
 #define LFG_CTEST_IMPLEMENTATION
-#include "dist/lfg_ctest.h"
+#include "dist/lfg-ctest.h"
 
 /*============================================================================
  *  Mock under test

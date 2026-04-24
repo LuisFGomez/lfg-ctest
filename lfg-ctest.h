@@ -19,7 +19,7 @@
 
 /* Generated at configure/build time by tools/mkversion.c -- contains
  * LFG_CTEST_VERSION, LFG_CTEST_VERSION_FULL, and LFG_CTEST_VERSION_{MAJOR,MINOR,PATCH}. */
-#include "lfg_ctest_version.h"
+#include "lfg-ctest-version.h"
 
 /*============================================================================
  *  Defines/Typedefs
