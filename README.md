@@ -177,6 +177,15 @@ Use the macros for compile-time gating and `lfg_ct_version()` for runtime
 reporting. When the source tree has no matching tag (e.g. vendored
 tarball), the macros fall back to `0.0.0`.
 
+Tagging convention:
+
+- **`v<M>.<m>`** (annotated) — the rolling base tag. In-development builds
+  report `M.m.<distance>+<sha>`, e.g. `0.1.42+d2b1fa3`.
+- **`release-v<M>.<m>.<p>`** (annotated, exact-match) — an immutable release
+  marker. When HEAD is exactly on one, the `+<sha>` trailer is dropped and
+  the version reports as a clean `M.m.p`, e.g. `0.1.42`. Releases are what
+  CI builds and publishes; intermediate commits keep the base-tag form.
+
 ### Setup and Teardown
 
 lfg-ctest does not impose any setup/teardown mechanism. They're just functions you call however you like:

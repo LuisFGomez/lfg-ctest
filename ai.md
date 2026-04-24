@@ -24,13 +24,15 @@ to the code.
   the split sources into a single-header form at `dist/lfg_ctest.h` (gitignored,
   regenerated on demand). Consumers define `LFG_CTEST_IMPLEMENTATION` in one TU.
   `test_amalg` compiles against the generated header and catches drift.
-- A C99 version-stamper (`tools/mkversion.c`) runs `git describe --match 'v*'`
-  and emits `<build>/lfg_ctest_version.h` with `LFG_CTEST_VERSION[_FULL|_MAJOR|_MINOR|_PATCH]`
-  macros. `lfg_ctest.h` includes it transitively; `lfg_ct_version()` returns the
-  `_FULL` string. CMake uses `copy_if_different` so downstream recompiles only
-  on real version change. Falls back to `0.0.0` with no tag or no git repo.
-  The tool is intentionally prefix-agnostic (`mkversion <PREFIX> [source_dir]`)
-  so it can be lifted into a shared repo once 3+ projects reuse it.
+- A C99 version-stamper (`tools/mkversion.c`) runs `git describe` in two
+  tiers — exact `release-v*` tag first (clean `M.m.p`), then rolling `v*`
+  base tag (`M.m.<distance>+<sha>`) — and emits `<build>/lfg_ctest_version.h`
+  with `LFG_CTEST_VERSION[_FULL|_MAJOR|_MINOR|_PATCH]` macros. `lfg_ctest.h`
+  includes it transitively; `lfg_ct_version()` returns the `_FULL` string.
+  CMake uses `copy_if_different` so downstream recompiles only on real
+  version change. Falls back to `0.0.0` with no tag or no git repo.
+  The tool is prefix-agnostic (`mkversion <PREFIX> [source_dir]`) so it
+  can be lifted into a shared repo once 3+ projects reuse it.
 - `README.md` is the authoritative user spec. Mirror any user-visible change there.
 
 ## Layout

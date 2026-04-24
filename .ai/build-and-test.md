@@ -163,15 +163,35 @@ Public surface (see `README.md`):
   (compile-time).
 - `const char *lfg_ct_version(void)` (runtime, returns `_FULL`).
 
-Tagging convention: annotated tags of the form `v<major>.<minor>`, e.g.
-`git tag -a v0.1 -m "..." <sha>`. `git describe` produces
-`v<major>.<minor>-<distance>-g<shorthash>` on intermediate commits; the
-stamper parses this into `M.m.<distance>[+<shorthash>]`. Lightweight tags
-are ignored.
+Tagging convention (two tiers):
+
+1. **`v<M>.<m>`** — the rolling base tag. Annotated, e.g.
+   `git tag -a v0.1 -m "..." <sha>`. Governs everyday in-development builds;
+   `git describe` produces `v<M>.<m>-<distance>-g<shorthash>` and the
+   stamper emits `M.m.<distance>+<shorthash>`.
+2. **`release-v<M>.<m>.<p>`** — an immutable release marker. Annotated,
+   placed on whichever commit is being shipped. The stamper tries
+   `git describe --match 'release-v*' --exact-match` first; on a hit it
+   strips the prefix and emits a clean `M.m.p` with no `+<sha>` trailer
+   (rationale: releases are fixed points; the hash is redundant noise and
+   semver 2.0 treats `+build` as metadata tools should ignore).
+
+HEAD not on a release tag → fall through to tier 1. Lightweight tags in
+either form are ignored by `git describe`.
 
 No git tag, or lfg-ctest vendored into a downstream without `.git` → the
 macros fall back to `0.0.0`. This is intentional so `add_subdirectory`
 embedders who ship tarballs still compile.
+
+Cutting a release:
+
+```
+git tag -a release-v0.1.42 <sha> -m "release 0.1.42: <summary>"
+git push origin release-v0.1.42
+```
+
+(Gitea's release UI can also create the tag+release atomically — pick the
+target branch/commit in the dropdown.)
 
 `mkversion.c` is deliberately prefix-agnostic — invoked as
 `lfg_ct_mkversion LFG_CTEST <src>` — so it can be lifted into a shared
