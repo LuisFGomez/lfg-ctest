@@ -137,7 +137,7 @@ static void test_bit_assertions_pass(void)
     ASSERT_BIT_CLEAR(value, 4);
     ASSERT_BIT_CLEAR(value, 6);
 
-    ASSERT_BITS_SET(value, 0xA0);    /* 0b10100000 */
+    ASSERT_BITS_SET(value, 0xA0);   /* 0b10100000 */
     ASSERT_BITS_CLEAR(value, 0x55); /* 0b01010101 */
 }
 
@@ -208,12 +208,12 @@ static void test_pointer_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_PTR_EQUAL(ptr1, ptr2);           /* FAIL: different pointers */
-    ASSERT_PTR_NOT_EQUAL(ptr1, ptr1);       /* FAIL: same pointer */
-    ASSERT_PTR_NULL(ptr1);                  /* FAIL: not null */
-    ASSERT_PTR_NOT_NULL(ptr3);              /* FAIL: is null */
-    ASSERT_NULL(ptr1);                      /* FAIL: not null */
-    ASSERT_NOT_NULL(ptr3);                  /* FAIL: is null */
+    ASSERT_PTR_EQUAL(ptr1, ptr2);     /* FAIL: different pointers */
+    ASSERT_PTR_NOT_EQUAL(ptr1, ptr1); /* FAIL: same pointer */
+    ASSERT_PTR_NULL(ptr1);            /* FAIL: not null */
+    ASSERT_PTR_NOT_NULL(ptr3);        /* FAIL: is null */
+    ASSERT_NULL(ptr1);                /* FAIL: not null */
+    ASSERT_NOT_NULL(ptr3);            /* FAIL: is null */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -226,10 +226,10 @@ static void test_boolean_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_TRUE(0);                         /* FAIL: false */
-    ASSERT_TRUE(2 < 1);                     /* FAIL: false expression */
-    ASSERT_FALSE(1);                        /* FAIL: true */
-    ASSERT_FALSE(5 > 3);                    /* FAIL: true expression */
+    ASSERT_TRUE(0);      /* FAIL: false */
+    ASSERT_TRUE(2 < 1);  /* FAIL: false expression */
+    ASSERT_FALSE(1);     /* FAIL: true */
+    ASSERT_FALSE(5 > 3); /* FAIL: true expression */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -243,31 +243,31 @@ static void test_integer_failure_detection(void)
     lfg_ct_expect_failures_begin();
 
     /* Generic int */
-    ASSERT_INT_EQUAL(42, 43);               /* FAIL: not equal */
-    ASSERT_INT_NOT_EQUAL(42, 42);           /* FAIL: equal */
-    ASSERT_EQ(100, 99);                     /* FAIL: not equal */
-    ASSERT_NE(100, 100);                    /* FAIL: equal */
+    ASSERT_INT_EQUAL(42, 43);     /* FAIL: not equal */
+    ASSERT_INT_NOT_EQUAL(42, 42); /* FAIL: equal */
+    ASSERT_EQ(100, 99);           /* FAIL: not equal */
+    ASSERT_NE(100, 100);          /* FAIL: equal */
 
     /* Unsigned */
-    ASSERT_UINT_EQUAL(42U, 43U);            /* FAIL: not equal */
-    ASSERT_UINT_NOT_EQUAL(42U, 42U);        /* FAIL: equal */
+    ASSERT_UINT_EQUAL(42U, 43U);     /* FAIL: not equal */
+    ASSERT_UINT_NOT_EQUAL(42U, 42U); /* FAIL: equal */
 
     /* Fixed-width signed */
-    ASSERT_INT8_EQUAL((int8_t)127, (int8_t)-128);           /* FAIL */
-    ASSERT_INT8_NOT_EQUAL((int8_t)-128, (int8_t)-128);      /* FAIL */
-    ASSERT_INT16_EQUAL((int16_t)32767, (int16_t)-32768);    /* FAIL */
-    ASSERT_INT16_NOT_EQUAL((int16_t)-32768, (int16_t)-32768); /* FAIL */
-    ASSERT_INT32_EQUAL((int32_t)123456, (int32_t)-123456);  /* FAIL */
-    ASSERT_INT32_NOT_EQUAL((int32_t)123456, (int32_t)123456); /* FAIL */
-    ASSERT_INT64_EQUAL((int64_t)9223372036854775807LL, (int64_t)-9223372036854775807LL); /* FAIL */
+    ASSERT_INT8_EQUAL((int8_t)127, (int8_t)-128);                                           /* FAIL */
+    ASSERT_INT8_NOT_EQUAL((int8_t)-128, (int8_t)-128);                                      /* FAIL */
+    ASSERT_INT16_EQUAL((int16_t)32767, (int16_t)-32768);                                    /* FAIL */
+    ASSERT_INT16_NOT_EQUAL((int16_t)-32768, (int16_t)-32768);                               /* FAIL */
+    ASSERT_INT32_EQUAL((int32_t)123456, (int32_t)-123456);                                  /* FAIL */
+    ASSERT_INT32_NOT_EQUAL((int32_t)123456, (int32_t)123456);                               /* FAIL */
+    ASSERT_INT64_EQUAL((int64_t)9223372036854775807LL, (int64_t)-9223372036854775807LL);    /* FAIL */
     ASSERT_INT64_NOT_EQUAL((int64_t)9223372036854775807LL, (int64_t)9223372036854775807LL); /* FAIL */
 
     /* Fixed-width unsigned */
-    ASSERT_UINT8_EQUAL((uint8_t)255, (uint8_t)0);           /* FAIL */
-    ASSERT_UINT8_NOT_EQUAL((uint8_t)255, (uint8_t)255);     /* FAIL */
-    ASSERT_UINT16_EQUAL((uint16_t)65535, (uint16_t)0);      /* FAIL */
-    ASSERT_UINT16_NOT_EQUAL((uint16_t)65535, (uint16_t)65535); /* FAIL */
-    ASSERT_UINT32_EQUAL((uint32_t)4294967295UL, (uint32_t)0); /* FAIL */
+    ASSERT_UINT8_EQUAL((uint8_t)255, (uint8_t)0);                            /* FAIL */
+    ASSERT_UINT8_NOT_EQUAL((uint8_t)255, (uint8_t)255);                      /* FAIL */
+    ASSERT_UINT16_EQUAL((uint16_t)65535, (uint16_t)0);                       /* FAIL */
+    ASSERT_UINT16_NOT_EQUAL((uint16_t)65535, (uint16_t)65535);               /* FAIL */
+    ASSERT_UINT32_EQUAL((uint32_t)4294967295UL, (uint32_t)0);                /* FAIL */
     ASSERT_UINT32_NOT_EQUAL((uint32_t)4294967295UL, (uint32_t)4294967295UL); /* FAIL */
 
     actual_failures = lfg_ct_expect_failures_end();
@@ -281,10 +281,10 @@ static void test_integer64_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_UINT64_EQUAL((uint64_t)18446744073709551615ULL, (uint64_t)0); /* FAIL */
+    ASSERT_UINT64_EQUAL((uint64_t)18446744073709551615ULL, (uint64_t)0);                           /* FAIL */
     ASSERT_UINT64_NOT_EQUAL((uint64_t)18446744073709551615ULL, (uint64_t)18446744073709551615ULL); /* FAIL */
-    ASSERT_INT64_EQUAL((int64_t)0, (int64_t)1); /* FAIL */
-    ASSERT_INT64_NOT_EQUAL((int64_t)0, (int64_t)0); /* FAIL */
+    ASSERT_INT64_EQUAL((int64_t)0, (int64_t)1);                                                    /* FAIL */
+    ASSERT_INT64_NOT_EQUAL((int64_t)0, (int64_t)0);                                                /* FAIL */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -300,9 +300,9 @@ static void test_string_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_STR_EQUAL(str1, str2);           /* FAIL: different strings */
-    ASSERT_STR_NOT_EQUAL(str1, str1);       /* FAIL: same string */
-    ASSERT_STRN_EQUAL(str1, str3, 10);      /* FAIL: first 10 chars differ */
+    ASSERT_STR_EQUAL(str1, str2);      /* FAIL: different strings */
+    ASSERT_STR_NOT_EQUAL(str1, str1);  /* FAIL: same string */
+    ASSERT_STRN_EQUAL(str1, str3, 10); /* FAIL: first 10 chars differ */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -317,8 +317,8 @@ static void test_memory_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_MEM_EQUAL(buf1, buf2, 4);        /* FAIL: different memory */
-    ASSERT_MEM_NOT_EQUAL(buf1, buf1, 4);    /* FAIL: same memory */
+    ASSERT_MEM_EQUAL(buf1, buf2, 4);     /* FAIL: different memory */
+    ASSERT_MEM_NOT_EQUAL(buf1, buf1, 4); /* FAIL: same memory */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -331,17 +331,17 @@ static void test_comparison_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_GREATER_THAN(5, 10);             /* FAIL: 5 <= 10 */
-    ASSERT_GT(50, 100);                     /* FAIL: 50 <= 100 */
+    ASSERT_GREATER_THAN(5, 10); /* FAIL: 5 <= 10 */
+    ASSERT_GT(50, 100);         /* FAIL: 50 <= 100 */
 
-    ASSERT_LESS_THAN(10, 5);                /* FAIL: 10 >= 5 */
-    ASSERT_LT(100, 50);                     /* FAIL: 100 >= 50 */
+    ASSERT_LESS_THAN(10, 5); /* FAIL: 10 >= 5 */
+    ASSERT_LT(100, 50);      /* FAIL: 100 >= 50 */
 
-    ASSERT_GREATER_OR_EQUAL(5, 10);         /* FAIL: 5 < 10 */
-    ASSERT_GE(50, 100);                     /* FAIL: 50 < 100 */
+    ASSERT_GREATER_OR_EQUAL(5, 10); /* FAIL: 5 < 10 */
+    ASSERT_GE(50, 100);             /* FAIL: 50 < 100 */
 
-    ASSERT_LESS_OR_EQUAL(10, 5);            /* FAIL: 10 > 5 */
-    ASSERT_LE(100, 50);                     /* FAIL: 100 > 50 */
+    ASSERT_LESS_OR_EQUAL(10, 5); /* FAIL: 10 > 5 */
+    ASSERT_LE(100, 50);          /* FAIL: 100 > 50 */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -354,9 +354,9 @@ static void test_range_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_IN_RANGE(0, 1, 10);              /* FAIL: 0 < 1 */
-    ASSERT_IN_RANGE(11, 1, 10);             /* FAIL: 11 > 10 */
-    ASSERT_IN_RANGE(-5, 0, 10);             /* FAIL: -5 < 0 */
+    ASSERT_IN_RANGE(0, 1, 10);  /* FAIL: 0 < 1 */
+    ASSERT_IN_RANGE(11, 1, 10); /* FAIL: 11 > 10 */
+    ASSERT_IN_RANGE(-5, 0, 10); /* FAIL: -5 < 0 */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -370,14 +370,14 @@ static void test_bit_failure_detection(void)
 
     lfg_ct_expect_failures_begin();
 
-    ASSERT_BIT_SET(value, 0);               /* FAIL: bit 0 is clear */
-    ASSERT_BIT_SET(value, 2);               /* FAIL: bit 2 is clear */
+    ASSERT_BIT_SET(value, 0); /* FAIL: bit 0 is clear */
+    ASSERT_BIT_SET(value, 2); /* FAIL: bit 2 is clear */
 
-    ASSERT_BIT_CLEAR(value, 1);             /* FAIL: bit 1 is set */
-    ASSERT_BIT_CLEAR(value, 3);             /* FAIL: bit 3 is set */
+    ASSERT_BIT_CLEAR(value, 1); /* FAIL: bit 1 is set */
+    ASSERT_BIT_CLEAR(value, 3); /* FAIL: bit 3 is set */
 
-    ASSERT_BITS_SET(value, 0xFF);           /* FAIL: some bits clear */
-    ASSERT_BITS_CLEAR(value, 0x80);         /* FAIL: bit 7 is set */
+    ASSERT_BITS_SET(value, 0xFF);   /* FAIL: some bits clear */
+    ASSERT_BITS_CLEAR(value, 0x80); /* FAIL: bit 7 is set */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -405,29 +405,29 @@ static void test_float_failure_detection(void)
     lfg_ct_expect_failures_begin();
 
     /* Float equality with epsilon */
-    ASSERT_FLOAT_EQUAL(1.0f, 2.0f, 0.1f);           /* FAIL: diff > epsilon */
-    ASSERT_FLT_EQ(100.0f, 200.0f, 0.001f);          /* FAIL: diff > epsilon */
+    ASSERT_FLOAT_EQUAL(1.0f, 2.0f, 0.1f);  /* FAIL: diff > epsilon */
+    ASSERT_FLT_EQ(100.0f, 200.0f, 0.001f); /* FAIL: diff > epsilon */
 
     /* Float not equal */
-    ASSERT_FLOAT_NOT_EQUAL(1.0f, 1.0f, 0.1f);       /* FAIL: they are equal */
-    ASSERT_FLT_NE(0.0f, 0.0001f, 0.001f);           /* FAIL: diff < epsilon */
+    ASSERT_FLOAT_NOT_EQUAL(1.0f, 1.0f, 0.1f); /* FAIL: they are equal */
+    ASSERT_FLT_NE(0.0f, 0.0001f, 0.001f);     /* FAIL: diff < epsilon */
 
     /* Float comparisons */
-    ASSERT_FLOAT_GREATER_THAN(5.5f, 10.5f);         /* FAIL: 5.5 <= 10.5 */
-    ASSERT_FLT_GT(99.9f, 100.0f);                   /* FAIL: 99.9 <= 100.0 */
+    ASSERT_FLOAT_GREATER_THAN(5.5f, 10.5f); /* FAIL: 5.5 <= 10.5 */
+    ASSERT_FLT_GT(99.9f, 100.0f);           /* FAIL: 99.9 <= 100.0 */
 
-    ASSERT_FLOAT_LESS_THAN(10.5f, 5.5f);            /* FAIL: 10.5 >= 5.5 */
-    ASSERT_FLT_LT(100.0f, 99.9f);                   /* FAIL: 100.0 >= 99.9 */
+    ASSERT_FLOAT_LESS_THAN(10.5f, 5.5f); /* FAIL: 10.5 >= 5.5 */
+    ASSERT_FLT_LT(100.0f, 99.9f);        /* FAIL: 100.0 >= 99.9 */
 
-    ASSERT_FLOAT_GREATER_OR_EQUAL(5.0f, 10.0f);     /* FAIL: 5.0 < 10.0 */
-    ASSERT_FLT_GE(50.0f, 100.0f);                   /* FAIL: 50.0 < 100.0 */
+    ASSERT_FLOAT_GREATER_OR_EQUAL(5.0f, 10.0f); /* FAIL: 5.0 < 10.0 */
+    ASSERT_FLT_GE(50.0f, 100.0f);               /* FAIL: 50.0 < 100.0 */
 
-    ASSERT_FLOAT_LESS_OR_EQUAL(10.0f, 5.0f);        /* FAIL: 10.0 > 5.0 */
-    ASSERT_FLT_LE(100.0f, 50.0f);                   /* FAIL: 100.0 > 50.0 */
+    ASSERT_FLOAT_LESS_OR_EQUAL(10.0f, 5.0f); /* FAIL: 10.0 > 5.0 */
+    ASSERT_FLT_LE(100.0f, 50.0f);            /* FAIL: 100.0 > 50.0 */
 
     /* Float range */
-    ASSERT_FLOAT_IN_RANGE(0.5f, 1.0f, 10.0f);       /* FAIL: 0.5 < 1.0 */
-    ASSERT_FLOAT_IN_RANGE(11.0f, 1.0f, 10.0f);      /* FAIL: 11.0 > 10.0 */
+    ASSERT_FLOAT_IN_RANGE(0.5f, 1.0f, 10.0f);  /* FAIL: 0.5 < 1.0 */
+    ASSERT_FLOAT_IN_RANGE(11.0f, 1.0f, 10.0f); /* FAIL: 11.0 > 10.0 */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);
@@ -443,12 +443,12 @@ static void test_double_failure_detection(void)
     lfg_ct_expect_failures_begin();
 
     /* Double equality with epsilon */
-    ASSERT_DOUBLE_EQUAL(1.0, 2.0, 0.1);             /* FAIL: diff > epsilon */
-    ASSERT_DBL_EQ(1e10, 2e10, 1e4);                 /* FAIL: diff > epsilon */
+    ASSERT_DOUBLE_EQUAL(1.0, 2.0, 0.1); /* FAIL: diff > epsilon */
+    ASSERT_DBL_EQ(1e10, 2e10, 1e4);     /* FAIL: diff > epsilon */
 
     /* Double not equal */
-    ASSERT_DOUBLE_NOT_EQUAL(1.0, 1.0, 0.1);         /* FAIL: they are equal */
-    ASSERT_DBL_NE(0.0, 0.0001, 0.001);              /* FAIL: diff < epsilon */
+    ASSERT_DOUBLE_NOT_EQUAL(1.0, 1.0, 0.1); /* FAIL: they are equal */
+    ASSERT_DBL_NE(0.0, 0.0001, 0.001);      /* FAIL: diff < epsilon */
 
     actual_failures = lfg_ct_expect_failures_end();
     ASSERT_INT_EQUAL(expected_failures, actual_failures);

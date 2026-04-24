@@ -24,22 +24,22 @@ DECLARE_MOCK_V_1(set_value, int);
 DECLARE_MOCK_R_1(increment, int, int);
 
 /* V_1 with string param for str_read/str_write tests */
-DECLARE_MOCK_V_1(process_name, const char*);
+DECLARE_MOCK_V_1(process_name, const char *);
 
 /* V_2: void return, 2 params */
-DECLARE_MOCK_V_2(copy_data, void*, size_t);
+DECLARE_MOCK_V_2(copy_data, void *, size_t);
 
 /* R_2: returns value, 2 params */
 DECLARE_MOCK_R_2(add_numbers, int, int, int);
 
 /* R_3: returns value, 3 params - typical for functions with output params */
-DECLARE_MOCK_R_3(read_buffer, int, uint8_t*, size_t, size_t*);
+DECLARE_MOCK_R_3(read_buffer, int, uint8_t *, size_t, size_t *);
 
 /* V_3: void return, 3 params */
 DECLARE_MOCK_V_3(configure, int, int, int);
 
 /* R_4: returns value, 4 params */
-DECLARE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t);
+DECLARE_MOCK_R_4(transfer, int, void *, size_t, void *, size_t);
 
 /* R_5: returns value, 5 params */
 DECLARE_MOCK_R_5(do_r5, int, int, int, int, int, int);
@@ -130,12 +130,12 @@ DEFINE_MOCK_V_V(simple_void_func)
 DEFINE_MOCK_R_V(get_value, int)
 DEFINE_MOCK_V_1(set_value, int)
 DEFINE_MOCK_R_1(increment, int, int)
-DEFINE_MOCK_V_1(process_name, const char*)
-DEFINE_MOCK_V_2(copy_data, void*, size_t)
+DEFINE_MOCK_V_1(process_name, const char *)
+DEFINE_MOCK_V_2(copy_data, void *, size_t)
 DEFINE_MOCK_R_2(add_numbers, int, int, int)
-DEFINE_MOCK_R_3(read_buffer, int, uint8_t*, size_t, size_t*)
+DEFINE_MOCK_R_3(read_buffer, int, uint8_t *, size_t, size_t *)
 DEFINE_MOCK_V_3(configure, int, int, int)
-DEFINE_MOCK_R_4(transfer, int, void*, size_t, void*, size_t)
+DEFINE_MOCK_R_4(transfer, int, void *, size_t, void *, size_t)
 DEFINE_MOCK_R_5(do_r5, int, int, int, int, int, int)
 DEFINE_MOCK_R_6(do_r6, int, int, int, int, int, int, int)
 DEFINE_MOCK_R_7(do_r7, int, int, int, int, int, int, int, int)
@@ -920,7 +920,6 @@ static void test_mock_overflow_aborts(void)
 
     ASSERT_TRUE(WIFSIGNALED(status));
     ASSERT_INT_EQUAL(SIGABRT, WTERMSIG(status));
-
 }
 
 /*============================================================================

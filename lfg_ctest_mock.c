@@ -31,8 +31,8 @@ static size_t _mock_reset_registry_count;
  *  Public API
  *==========================================================================*/
 
-mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned callidx,
-                                        unsigned paramidx, void *buffer, size_t buf_size)
+mock_param_action_t mock_param_mem_read(
+        mock_param_action_t action, unsigned callidx, unsigned paramidx, void *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -45,7 +45,8 @@ mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned cal
     p->buf_size = buf_size;
     if (p0)
     {
-        while (p0->next) {
+        while (p0->next)
+        {
             p0 = p0->next;
         }
         p0->next = p;
@@ -54,8 +55,8 @@ mock_param_action_t mock_param_mem_read(mock_param_action_t action, unsigned cal
     return p; /* new head */
 }
 
-mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned callidx,
-                                         unsigned paramidx, void *buffer, size_t buf_size)
+mock_param_action_t mock_param_mem_write(
+        mock_param_action_t action, unsigned callidx, unsigned paramidx, void *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -68,7 +69,8 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
     p->buf_size = buf_size;
     if (p0)
     {
-        while (p0->next) {
+        while (p0->next)
+        {
             p0 = p0->next;
         }
         p0->next = p;
@@ -77,8 +79,8 @@ mock_param_action_t mock_param_mem_write(mock_param_action_t action, unsigned ca
     return p; /* new head */
 }
 
-mock_param_action_t mock_param_str_read(mock_param_action_t action, unsigned callidx,
-                                        unsigned paramidx, char *buffer, size_t buf_size)
+mock_param_action_t mock_param_str_read(
+        mock_param_action_t action, unsigned callidx, unsigned paramidx, char *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -91,7 +93,8 @@ mock_param_action_t mock_param_str_read(mock_param_action_t action, unsigned cal
     p->buf_size = buf_size;
     if (p0)
     {
-        while (p0->next) {
+        while (p0->next)
+        {
             p0 = p0->next;
         }
         p0->next = p;
@@ -100,9 +103,8 @@ mock_param_action_t mock_param_str_read(mock_param_action_t action, unsigned cal
     return p; /* new head */
 }
 
-mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned callidx,
-                                         unsigned paramidx, const char *buffer,
-                                         size_t buf_size)
+mock_param_action_t mock_param_str_write(
+        mock_param_action_t action, unsigned callidx, unsigned paramidx, const char *buffer, size_t buf_size)
 {
     struct _mock_param_action *p, *p0;
     p0 = action;
@@ -115,7 +117,8 @@ mock_param_action_t mock_param_str_write(mock_param_action_t action, unsigned ca
     p->buf_size = buf_size;
     if (p0)
     {
-        while (p0->next) {
+        while (p0->next)
+        {
             p0 = p0->next;
         }
         p0->next = p;
@@ -138,8 +141,7 @@ void _mock_register_reset(void (*reset_fn)(void))
 
     if (_mock_reset_registry_count >= MOCK_REGISTRY_MAX)
     {
-        fprintf(stderr, "MOCK REGISTRY OVERFLOW: exceeded %d distinct mocks\n",
-                MOCK_REGISTRY_MAX);
+        fprintf(stderr, "MOCK REGISTRY OVERFLOW: exceeded %d distinct mocks\n", MOCK_REGISTRY_MAX);
         assert(0 && "mock reset registry exceeded");
     }
 
@@ -174,4 +176,3 @@ void mock_param_destroy(mock_param_action_t action)
 /*============================================================================
  *  Private Functions
  *==========================================================================*/
-
