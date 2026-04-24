@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - '**'
+    tags:
+      - 'release-v*'
 
 jobs:
   build-and-test:
@@ -11,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0              # tags are required for mkversion
 
       - name: Configure
         run: cmake --preset debug
@@ -20,3 +24,58 @@ jobs:
 
       - name: Tests
         run: ctest --test-dir build --output-on-failure
+
+  release:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/release-v')
+    runs-on: [popstation, host]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure
+        run: cmake --preset debug
+
+      - name: Amalgamate
+        run: cmake --build build --target amalgamate
+
+      - name: Extract tag metadata
+        id: tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          BODY=$(git tag -l --format='%(contents)' "$TAG")
+          {
+            echo "name=$TAG"
+            echo "body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        id: create
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg tag "${{ steps.tag.outputs.name }}" \
+            --arg body "${{ steps.tag.outputs.body }}" \
+            '{tag_name: $tag, name: $tag, body: $body, draft: false, prerelease: false}')
+          RESP=$(curl -sS -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases")
+          ID=$(echo "$RESP" | jq -r .id)
+          [ "$ID" != "null" ] || { echo "Create failed: $RESP"; exit 1; }
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload amalgamated header
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: token $TOKEN" \
+            -F "attachment=@dist/lfg_ctest.h;filename=lfg_ctest.h" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${{ steps.create.outputs.id }}/assets?name=lfg_ctest.h"
