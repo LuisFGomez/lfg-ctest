@@ -181,6 +181,20 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     )
 
     add_custom_target(amalgamate DEPENDS ${CMAKE_SOURCE_DIR}/dist/lfg_ctest.h)
+
+    # ── release-tag: interactive shortcut for release-v<M>.<m>.<p> ─
+    # Reads `git describe`, proposes the right tag, prompts for
+    # confirmation, then execs `git tag -a` so $EDITOR handles the
+    # annotation. USES_TERMINAL gives the tool a real tty so the
+    # prompt actually appears (Ninja otherwise captures stdio).
+    add_executable(lfg_ct_mkrelease tools/mkrelease.c)
+    target_compile_options(lfg_ct_mkrelease PRIVATE -Wall -Wextra -pedantic)
+    add_custom_target(release-tag
+        COMMAND lfg_ct_mkrelease ${CMAKE_CURRENT_SOURCE_DIR}
+        DEPENDS lfg_ct_mkrelease
+        USES_TERMINAL
+        VERBATIM
+    )
 endif()
 
 # ==============================================================================
