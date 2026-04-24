@@ -5,23 +5,23 @@ API, see `README.md`.
 
 ## Two concerns, one static library
 
-CMake produces a single archive `lfg_ctest` from:
+CMake produces a single archive `lfg-ctest` from:
 
-- `lfg_ctest.c` — test runner and assertion implementations.
-- `lfg_ctest_mock.c` — mock runtime (param-action chain, reset registry).
+- `lfg-ctest.c` — test runner and assertion implementations.
+- `lfg-ctest-mock.c` — mock runtime (param-action chain, reset registry).
 
-Consumers include `lfg_ctest.h` for assertions/runner and optionally
-`lfg_ctest_mock.h` for mocking. The two headers are independent; you can use
+Consumers include `lfg-ctest.h` for assertions/runner and optionally
+`lfg-ctest-mock.h` for mocking. The two headers are independent; you can use
 the runner without ever pulling in the mock macros.
 
-## Core runner (`lfg_ctest.c`)
+## Core runner (`lfg-ctest.c`)
 
 State lives in a small set of file-scope statics (pass/fail counters, current
 test name, etc.). All public entry points (`lfg_ct_start`, `lfg_ctest`,
 `lfg_ct_suite`, `lfg_ct_print_summary`, `lfg_ct_return`) mutate this state.
 There is no reentrancy guarantee — one test run at a time.
 
-Every assertion macro in `lfg_ctest.h` ultimately routes to an internal
+Every assertion macro in `lfg-ctest.h` ultimately routes to an internal
 failure path that:
 
 1. Formats a diagnostic (including `__func__` if available — see the
@@ -40,8 +40,8 @@ hidden.
 The flag gates:
 
 - `lfg_ct_expect_failures_begin()` / `lfg_ct_expect_failures_end()` —
-  declared in `lfg_ctest.h` under `#ifdef LFG_CTEST_SELF_TEST`.
-- The `_expect_failures_mode` static in `lfg_ctest.c` and the branches in
+  declared in `lfg-ctest.h` under `#ifdef LFG_CTEST_SELF_TEST`.
+- The `_expect_failures_mode` static in `lfg-ctest.c` and the branches in
   `_lfg_ct_fail`-path macros that consult it.
 
 ### Expect-failures mode
@@ -66,10 +66,10 @@ and the pass/fail counters are not incremented at the top level — only the
 local failure counter increments. `_end()` returns the count and restores
 normal behavior.
 
-Every "does assertion X fail correctly?" self-test in `test_unified.c` uses
+Every "does assertion X fail correctly?" self-test in `test-unified.c` uses
 this pattern.
 
-## Mock system (`lfg_ctest_mock.[ch]`)
+## Mock system (`lfg-ctest-mock.[ch]`)
 
 ### Macro fanout
 
@@ -96,7 +96,7 @@ function `foo`:
 | `foo_params` | Typedef for the captured-params struct. |
 
 `MOCK_CALL_STORAGE_MAX` defaults to 32 and can be overridden per translation
-unit by `#define`-ing it before including `lfg_ctest_mock.h`. Overflow asserts.
+unit by `#define`-ing it before including `lfg-ctest-mock.h`. Overflow asserts.
 
 ### Why `_S` exists
 
@@ -129,7 +129,7 @@ param 1, then write its param 2, …) matches execution order.
 
 ### Reset registry and `mock_reset_all()`
 
-`lfg_ctest_mock.c` holds a flat, file-scope array:
+`lfg-ctest-mock.c` holds a flat, file-scope array:
 
 ```c
 static void (*_mock_reset_registry[MOCK_REGISTRY_MAX])(void);
@@ -149,7 +149,7 @@ teardown drop every known mock's state without maintaining an explicit list.
 ## Amalgamation (`tools/amalgamate.c`)
 
 The framework ships in two forms: the split sources (default) and a generated
-single-header at `dist/lfg_ctest.h` produced by the `amalgamate` CMake target.
+single-header at `dist/lfg-ctest.h` produced by the `amalgamate` CMake target.
 The single-header path exists for consumers who want drop-in use without CMake,
 submodules, or vendoring multiple files.
 
@@ -169,7 +169,7 @@ the combined output wrapped in:
 
 Per-file filtering:
 
-- Internal `#include "lfg_ctest*"` directives are stripped.
+- Internal `#include "lfg-ctest*"` directives are stripped.
 - Include guards are stripped. Guard detection is a **repo-convention match**:
   an identifier is treated as a guard only if it ends in `_H_` (trailing
   underscore). This catches `LFG_CTEST_H_` / `LFG_CTEST_MOCK_H_` and ignores
@@ -185,15 +185,15 @@ File-scope `static` state in the two `.c` halves (pass/fail counters, mock
 reset registry) stays `static` inside the `LFG_CTEST_IMPLEMENTATION` block,
 so multi-TU links against the amalgamated header are safe as long as exactly
 one TU defines the gate. `RECORD_FAILURE` / `RECORD_PASS` macros from
-`lfg_ctest.c` leak into `lfg_ctest_mock.c` scope after concatenation, but the
+`lfg-ctest.c` leak into `lfg-ctest-mock.c` scope after concatenation, but the
 mock impl doesn't reference those names, so there's no collision.
 
-`test_amalg` is the drift-detection smoke: it `#define`s
-`LFG_CTEST_IMPLEMENTATION`, includes `dist/lfg_ctest.h`, and exercises a small
+`test-amalg` is the drift-detection smoke: it `#define`s
+`LFG_CTEST_IMPLEMENTATION`, includes `dist/lfg-ctest.h`, and exercises a small
 but representative slice (basic asserts, a mock with return queue + param
 history, optional float/double asserts). It depends on the `amalgamate` target
 so the dist header is always fresh before the smoke compiles. It does **not**
-link against the `lfg_ctest` static lib — it provides its own impl.
+link against the `lfg-ctest` static lib — it provides its own impl.
 
 ## Float / double gating
 
@@ -204,6 +204,6 @@ line) to decide whether to define `LFG_CTEST_HAS_FLOAT=1` and/or
 (`LFG_CTEST_NEEDS_LIBM`). Users can force either off via the
 `LFG_CTEST_ENABLE_FLOAT` / `LFG_CTEST_ENABLE_DOUBLE` cache options.
 
-All float/double assertions in `lfg_ctest.h` sit under
+All float/double assertions in `lfg-ctest.h` sit under
 `#ifdef LFG_CTEST_HAS_FLOAT` / `#ifdef LFG_CTEST_HAS_DOUBLE`, so the library
 links cleanly on platforms without an FPU.

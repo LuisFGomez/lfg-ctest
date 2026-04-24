@@ -17,7 +17,7 @@ The only preset is `debug` (see `CMakePresets.json`).
 `CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR`. When a consumer does
 `add_subdirectory(deps/lfg-ctest)`:
 
-- `test_unified` and `test_mock` are not built.
+- `test-unified` and `test-mock` are not built.
 - `LFG_CTEST_SELF_TEST` is not defined → `lfg_ct_expect_failures_*` is not
   exposed.
 - The configuration summary block is skipped.
@@ -38,17 +38,17 @@ Defaults are ON, auto-detected against `math.h` / `fabsf` / `fabs`.
 ```
 ctest --test-dir build --output-on-failure    # run all via CTest
 cmake --build build --target run_all_tests    # verbose wrapper
-./build/test_unified                          # direct, core self-tests
-./build/test_mock                             # direct, mock self-tests
-./build/test_amalg                            # amalgamated-header smoke
+./build/test-unified                          # direct, core self-tests
+./build/test-mock                             # direct, mock self-tests
+./build/test-amalg                            # amalgamated-header smoke
 ```
 
-`test_unified` intentionally exercises assertion failure paths (wrapped in
+`test-unified` intentionally exercises assertion failure paths (wrapped in
 expect-failures mode), so a clean run is "all passed" even though the binary
 internally triggered many failures.
 
-`test_amalg` builds against the generated `dist/lfg_ctest.h` and does not link
-against the `lfg_ctest` static library — it provides its own impl via
+`test-amalg` builds against the generated `dist/lfg-ctest.h` and does not link
+against the `lfg-ctest` static library — it provides its own impl via
 `LFG_CTEST_IMPLEMENTATION`. CTest registers it alongside the other two.
 
 ### Run one specific test
@@ -64,7 +64,7 @@ Don't commit these edits. They're a local iteration tool, not a workflow.
 
 ## Add a self-test
 
-### For the core framework (in `test_unified.c`)
+### For the core framework (in `test-unified.c`)
 
 Most new core self-tests need to verify that an assertion macro fails when it
 should. Use the expect-failures pattern:
@@ -91,7 +91,7 @@ lfg_ctest(test_my_new_assert_detects_mismatch);
 Positive cases (assertion passes when it should) don't need expect-failures —
 just call the assertion directly inside a `void` test.
 
-### For the mock framework (in `test_mock.c`)
+### For the mock framework (in `test-mock.c`)
 
 Declare and define the mock at file scope, then write a test that exercises
 it:
@@ -120,7 +120,7 @@ otherwise.
 
 ## Amalgamation
 
-The single-header form at `dist/lfg_ctest.h` is generated, not committed
+The single-header form at `dist/lfg-ctest.h` is generated, not committed
 (`dist/` is gitignored). Regenerate it whenever you touch the split sources
 or the manifest:
 
@@ -132,15 +132,15 @@ The `amalgamate` target depends on `tools/amalgamate.c`, the manifest, and
 every source listed in `LFG_CTEST_AMALG_SOURCES` in `CMakeLists.txt`. Adding
 a new split source file means updating **both** that list and
 `tools/amalgamate.manifest` — otherwise the new file is silently omitted from
-the generated header, and `test_amalg` will fail to link as soon as it
+the generated header, and `test-amalg` will fail to link as soon as it
 references anything from the missing file.
 
-`test_amalg` runs automatically as part of `ctest`. When investigating drift,
+`test-amalg` runs automatically as part of `ctest`. When investigating drift,
 run it in isolation to see the symbol that went missing:
 
 ```
-cmake --build build --target test_amalg
-./build/test_amalg
+cmake --build build --target test-amalg
+./build/test-amalg
 ```
 
 The amalgamator's guard-stripping assumes include guards end in `_H_`
@@ -151,7 +151,7 @@ errors. Fix by renaming the guard, not by tweaking the tool.
 
 ## Versioning
 
-`lfg_ctest.h` transitively includes `lfg_ctest_version.h`, a generated header
+`lfg-ctest.h` transitively includes `lfg-ctest-version.h`, a generated header
 produced by `tools/mkversion.c` at build time. The tool runs
 `git -C <src> describe --match 'v*'` and emits C macros for the captured
 version. The CMake side pipes stdout through `copy_if_different` so a rebuild
@@ -222,9 +222,9 @@ inline copy of the same pattern; converge via `git mv` + a small
 `.clang-format` at the repo root is authoritative. Apply:
 
 ```
-clang-format -i lfg_ctest.c lfg_ctest.h \
-                lfg_ctest_mock.c lfg_ctest_mock.h \
-                test_unified.c test_mock.c
+clang-format -i lfg-ctest.c lfg-ctest.h \
+                lfg-ctest-mock.c lfg-ctest-mock.h \
+                test-unified.c test-mock.c
 ```
 
 **Not wired into CMake or CI.** It's a developer-invoked check — run it

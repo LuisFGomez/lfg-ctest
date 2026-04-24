@@ -14,7 +14,7 @@ A comprehensive, easy-to-use, zero-dependency, C99-compatible test framework wit
 
 ## Installation
 
-Copy `lfg_ctest.h` (and `lfg_ctest_mock.h` if using mocking) into your project's include path.
+Copy `lfg-ctest.h` (and `lfg-ctest-mock.h` if using mocking) into your project's include path.
 
 ### CMake Integration
 
@@ -22,7 +22,7 @@ When using CMake, add as a subdirectory:
 
 ```cmake
 add_subdirectory(deps/lfg-ctest)
-target_link_libraries(my_tests lfg_ctest)
+target_link_libraries(my_tests lfg-ctest)
 ```
 
 ### Single-Header Amalgamation
@@ -34,20 +34,20 @@ Generate it from a clone of this repo:
 ```bash
 cmake -B build
 cmake --build build --target amalgamate
-# produces dist/lfg_ctest.h
+# produces dist/lfg-ctest.h
 ```
 
-Drop `dist/lfg_ctest.h` anywhere on your include path. In **exactly one** translation unit, define `LFG_CTEST_IMPLEMENTATION` before the include; all other TUs just include the header:
+Drop `dist/lfg-ctest.h` anywhere on your include path. In **exactly one** translation unit, define `LFG_CTEST_IMPLEMENTATION` before the include; all other TUs just include the header:
 
 ```c
 /* one .c file in your project */
 #define LFG_CTEST_IMPLEMENTATION
-#include "lfg_ctest.h"
+#include "lfg-ctest.h"
 ```
 
 ```c
 /* every other .c file that uses assertions or mocks */
-#include "lfg_ctest.h"
+#include "lfg-ctest.h"
 ```
 
 All existing configuration defines still apply and must be set consistently across TUs:
@@ -58,7 +58,7 @@ All existing configuration defines still apply and must be set consistently acro
 | `LFG_CTEST_HAS_DOUBLE` | Enable 64-bit double assertions (needs `-lm`) |
 | `LFG_CTEST_NO_FUNC` | Disable `__func__` reporting |
 
-The `test_amalg` target in this repo is a smoke test that compiles against `dist/lfg_ctest.h` and is registered with CTest, so `cmake --build build` followed by `ctest --test-dir build` verifies the amalgamation stays in sync with the split sources.
+The `test-amalg` target in this repo is a smoke test that compiles against `dist/lfg-ctest.h` and is registered with CTest, so `cmake --build build` followed by `ctest --test-dir build` verifies the amalgamation stays in sync with the split sources.
 
 ### Floating-Point Configuration
 
@@ -99,7 +99,7 @@ To disable function name reporting entirely, define `LFG_CTEST_NO_FUNC` before i
 
 ```c
 #define LFG_CTEST_NO_FUNC
-#include <lfg_ctest.h>
+#include <lfg-ctest.h>
 ```
 
 ---
@@ -111,7 +111,7 @@ To disable function name reporting entirely, define `LFG_CTEST_NO_FUNC` before i
 Tests are just `void` functions. The framework tracks pass/fail automatically.
 
 ```c
-#include <lfg_ctest.h>
+#include <lfg-ctest.h>
 
 void test_example(void)
 {
@@ -164,7 +164,7 @@ int main(void)
 
 ### Version Macros
 
-`lfg_ctest.h` transitively includes a generated `lfg_ctest_version.h`
+`lfg-ctest.h` transitively includes a generated `lfg-ctest-version.h`
 (produced at build time from `git describe --match 'v*'`), exposing:
 
 | Macro | Example |
@@ -443,7 +443,7 @@ The mocking framework provides macro-based mock generation for C functions.
 
 **Header file (my_module_mock.h):**
 ```c
-#include <lfg_ctest_mock.h>
+#include <lfg-ctest-mock.h>
 
 // Mock a function: int get_value(int id, const char *name);
 DECLARE_MOCK_R_2(get_value, int, int, const char *);
@@ -484,7 +484,7 @@ Mock arrays are statically sized to `MOCK_CALL_STORAGE_MAX` (default 32). To inc
 ```c
 // Define before including the header
 #define MOCK_CALL_STORAGE_MAX 64
-#include <lfg_ctest_mock.h>
+#include <lfg-ctest-mock.h>
 ```
 
 Exceeding the limit triggers `assert()` failure with a diagnostic message.
@@ -810,7 +810,7 @@ void _i2c_done(int status, void *ctx)
 #ifndef I2C_MOCK_H_
 #define I2C_MOCK_H_
 
-#include <lfg_ctest_mock.h>
+#include <lfg-ctest-mock.h>
 #include <stdint.h>
 
 typedef void (*i2c_callback_t)(int status, void *ctx);
@@ -857,7 +857,7 @@ void led_driver_suite(void);
 
 **led_driver_test.c** - Test implementation:
 ```c
-#include <lfg_ctest.h>
+#include <lfg-ctest.h>
 #include "led_driver_test.h"
 
 /* Test-local state to capture callback invocations */
@@ -1002,7 +1002,7 @@ gcc -DUNITTEST -Itest/mock -o led_test \
     src/drivers/led_driver.c \
     test/led_driver_test.c \
     test/mock/i2c_mock.c \
-    lfg_ctest.c lfg_ctest_mock.c
+    lfg-ctest.c lfg-ctest-mock.c
 
 # Production build (links real HAL)
 gcc -o firmware \
