@@ -1,0 +1,47 @@
+# Project style: BSD/Allman, 4-space indent, 120 col, spaces (no tabs).
+# Continuation is 8 spaces (double-indent, DontAlign) to stay readable
+# regardless of function-name length.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Indentation
+IndentWidth: 4
+UseTab: Never
+TabWidth: 4
+ContinuationIndentWidth: 8
+AlignAfterOpenBracket: DontAlign
+ConstructorInitializerIndentWidth: 8
+
+# Line width
+ColumnLimit: 120
+
+# Braces: Allman
+BreakBeforeBraces: Allman
+
+# Function definitions: return type stays on same line as name,
+# clang-format will break only if the signature overflows ColumnLimit.
+AlwaysBreakAfterReturnType: None
+AlwaysBreakAfterDefinitionReturnType: None
+
+# Pointers: glued to the name (`char *p`, `const char *s`).
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+# Preprocessor: keep directives flush-left.
+IndentPPDirectives: None
+
+# Switch: case labels flush with the switch.
+IndentCaseLabels: false
+
+# Misc quality-of-life
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+SpaceBeforeParens: ControlStatements
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SortIncludes: false
+ReflowComments: false
