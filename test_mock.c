@@ -1470,7 +1470,7 @@ static void test_mock_callback_reset_clears(void)
     ASSERT_TRUE(simple_void_func__callback != NULL);
 
     simple_void_func__mock_reset();
-    ASSERT_NULL(simple_void_func__callback);
+    ASSERT_TRUE(simple_void_func__callback == NULL);
 }
 
 /*============================================================================
@@ -1656,7 +1656,7 @@ static void test_mock_reset_all_clears_callbacks(void)
 
     mock_reset_all();
 
-    ASSERT_NULL(simple_void_func__callback);
+    ASSERT_TRUE(simple_void_func__callback == NULL);
 }
 
 static void test_mock_reset_all_clears_param_actions(void)
