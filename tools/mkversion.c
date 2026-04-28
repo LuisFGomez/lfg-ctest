@@ -39,6 +39,10 @@
  * self-contained; no project-specific logic.
  */
 
+/* popen/pclose are POSIX, not ISO C. Strict -std=c99 hides them in <stdio.h>,
+ * which silently truncates the FILE* return to int and SEGVs in fgets. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
