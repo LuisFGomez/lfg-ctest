@@ -250,65 +250,132 @@ void mock_reset_all(void);
         action = action->next;                                                                                         \
     }
 
-/* Callback invocation helpers */
-#define _MOCK_CALLBACK_V(_func)                                                                                        \
+/* Callback invocation helpers.
+ * V-variant: void callback for V_* mocks (no return to control).
+ * R-variant: callback receives a pointer to the mock's local `ret` (already loaded
+ * from __return_queue[i]). Writing to *ret overrides the queue value for this
+ * call; not writing preserves it. Lets tests compute returns from per-call state
+ * (captured args, sequence position, external state map) without priming the
+ * queue, while side-effect-only callbacks need no explicit delegation. */
+
+#define _MOCK_CALLBACK_V_V(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i);                                                                                          \
     }
 
-#define _MOCK_CALLBACK_1(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_1(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0);                                                                                     \
     }
 
-#define _MOCK_CALLBACK_2(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_2(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1);                                                                                \
     }
 
-#define _MOCK_CALLBACK_3(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_3(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2);                                                                           \
     }
 
-#define _MOCK_CALLBACK_4(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_4(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3);                                                                      \
     }
 
-#define _MOCK_CALLBACK_5(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_5(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3, _p4);                                                                 \
     }
 
-#define _MOCK_CALLBACK_6(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_6(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3, _p4, _p5);                                                            \
     }
 
-#define _MOCK_CALLBACK_7(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_7(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3, _p4, _p5, _p6);                                                       \
     }
 
-#define _MOCK_CALLBACK_8(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_8(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7);                                                  \
     }
 
-#define _MOCK_CALLBACK_9(_func)                                                                                        \
+#define _MOCK_CALLBACK_V_9(_func)                                                                                      \
     if (_func##__callback)                                                                                             \
     {                                                                                                                  \
         _func##__callback(i, _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7, _p8);                                             \
+    }
+
+#define _MOCK_CALLBACK_R_V(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret);                                                                                    \
+    }
+
+#define _MOCK_CALLBACK_R_1(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0);                                                                               \
+    }
+
+#define _MOCK_CALLBACK_R_2(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1);                                                                          \
+    }
+
+#define _MOCK_CALLBACK_R_3(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2);                                                                     \
+    }
+
+#define _MOCK_CALLBACK_R_4(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3);                                                                \
+    }
+
+#define _MOCK_CALLBACK_R_5(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3, _p4);                                                           \
+    }
+
+#define _MOCK_CALLBACK_R_6(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3, _p4, _p5);                                                      \
+    }
+
+#define _MOCK_CALLBACK_R_7(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3, _p4, _p5, _p6);                                                 \
+    }
+
+#define _MOCK_CALLBACK_R_8(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7);                                            \
+    }
+
+#define _MOCK_CALLBACK_R_9(_func)                                                                                      \
+    if (_func##__callback)                                                                                             \
+    {                                                                                                                  \
+        _func##__callback(i, &ret, _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7, _p8);                                       \
     }
 
 /* Reset function for void-return mocks */
@@ -364,7 +431,7 @@ void mock_reset_all(void);
         size_t i = _func##__call_count;                                                                                \
         _MOCK_REGISTER(_func)                                                                                          \
         _MOCK_OVERFLOW_CHECK_V(_func)                                                                                  \
-        _MOCK_CALLBACK_V(_func)                                                                                        \
+        _MOCK_CALLBACK_V_V(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     void _func##__mock_reset(void)                                                                                     \
@@ -378,7 +445,7 @@ void mock_reset_all(void);
  *==========================================================================*/
 
 #define DECLARE_MOCK_R_V(_func, _rtype)                                                                                \
-    typedef void (*_func##__callback_t)(size_t);                                                                       \
+    typedef void (*_func##__callback_t)(size_t, _rtype *);                                                             \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX];                                                        \
@@ -396,7 +463,7 @@ void mock_reset_all(void);
         _MOCK_REGISTER(_func)                                                                                          \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype)                                                                          \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_V(_func)                                                                                        \
+        _MOCK_CALLBACK_R_V(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -439,7 +506,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_1                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_1)                                                                       \
-        _MOCK_CALLBACK_1(_func)                                                                                        \
+        _MOCK_CALLBACK_V_1(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -473,7 +540,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_2                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_2)                                                                       \
-        _MOCK_CALLBACK_2(_func)                                                                                        \
+        _MOCK_CALLBACK_V_2(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -508,7 +575,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_3                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_3)                                                                       \
-        _MOCK_CALLBACK_3(_func)                                                                                        \
+        _MOCK_CALLBACK_V_3(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -544,7 +611,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_4                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_4)                                                                       \
-        _MOCK_CALLBACK_4(_func)                                                                                        \
+        _MOCK_CALLBACK_V_4(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -581,7 +648,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_5                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_5)                                                                       \
-        _MOCK_CALLBACK_5(_func)                                                                                        \
+        _MOCK_CALLBACK_V_5(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -619,7 +686,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_6                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_6)                                                                       \
-        _MOCK_CALLBACK_6(_func)                                                                                        \
+        _MOCK_CALLBACK_V_6(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -658,7 +725,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_7                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_7)                                                                       \
-        _MOCK_CALLBACK_7(_func)                                                                                        \
+        _MOCK_CALLBACK_V_7(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -698,7 +765,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_8                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_8)                                                                       \
-        _MOCK_CALLBACK_8(_func)                                                                                        \
+        _MOCK_CALLBACK_V_8(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -739,7 +806,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_9                                                                                                  \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_9)                                                                       \
-        _MOCK_CALLBACK_9(_func)                                                                                        \
+        _MOCK_CALLBACK_V_9(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V(_func)
@@ -753,7 +820,7 @@ void mock_reset_all(void);
     {                                                                                                                  \
         _t0 p0;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0);                                                                  \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0);                                                        \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -780,7 +847,7 @@ void mock_reset_all(void);
         _MOCK_STORE_1                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_1)                                                                       \
-        _MOCK_CALLBACK_1(_func)                                                                                        \
+        _MOCK_CALLBACK_R_1(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -792,7 +859,7 @@ void mock_reset_all(void);
         _t0 p0;                                                                                                        \
         _t1 p1;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1);                                                             \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1);                                                   \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -819,7 +886,7 @@ void mock_reset_all(void);
         _MOCK_STORE_2                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_2)                                                                       \
-        _MOCK_CALLBACK_2(_func)                                                                                        \
+        _MOCK_CALLBACK_R_2(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -832,7 +899,7 @@ void mock_reset_all(void);
         _t1 p1;                                                                                                        \
         _t2 p2;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2);                                                        \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2);                                              \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -859,7 +926,7 @@ void mock_reset_all(void);
         _MOCK_STORE_3                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_3)                                                                       \
-        _MOCK_CALLBACK_3(_func)                                                                                        \
+        _MOCK_CALLBACK_R_3(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -873,7 +940,7 @@ void mock_reset_all(void);
         _t2 p2;                                                                                                        \
         _t3 p3;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3);                                                   \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3);                                         \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -900,7 +967,7 @@ void mock_reset_all(void);
         _MOCK_STORE_4                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_4)                                                                       \
-        _MOCK_CALLBACK_4(_func)                                                                                        \
+        _MOCK_CALLBACK_R_4(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -915,7 +982,7 @@ void mock_reset_all(void);
         _t3 p3;                                                                                                        \
         _t4 p4;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4);                                              \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4);                                    \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -942,7 +1009,7 @@ void mock_reset_all(void);
         _MOCK_STORE_5                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_5)                                                                       \
-        _MOCK_CALLBACK_5(_func)                                                                                        \
+        _MOCK_CALLBACK_R_5(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -958,7 +1025,7 @@ void mock_reset_all(void);
         _t4 p4;                                                                                                        \
         _t5 p5;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5);                                         \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4, _t5);                               \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -985,7 +1052,7 @@ void mock_reset_all(void);
         _MOCK_STORE_6                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_6)                                                                       \
-        _MOCK_CALLBACK_6(_func)                                                                                        \
+        _MOCK_CALLBACK_R_6(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1002,7 +1069,7 @@ void mock_reset_all(void);
         _t5 p5;                                                                                                        \
         _t6 p6;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5, _t6);                                    \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4, _t5, _t6);                          \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1029,7 +1096,7 @@ void mock_reset_all(void);
         _MOCK_STORE_7                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_7)                                                                       \
-        _MOCK_CALLBACK_7(_func)                                                                                        \
+        _MOCK_CALLBACK_R_7(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1047,7 +1114,7 @@ void mock_reset_all(void);
         _t6 p6;                                                                                                        \
         _t7 p7;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5, _t6, _t7);                               \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4, _t5, _t6, _t7);                     \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1074,7 +1141,7 @@ void mock_reset_all(void);
         _MOCK_STORE_8                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_8)                                                                       \
-        _MOCK_CALLBACK_8(_func)                                                                                        \
+        _MOCK_CALLBACK_R_8(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1093,7 +1160,7 @@ void mock_reset_all(void);
         _t7 p7;                                                                                                        \
         _t8 p8;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8);                          \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8);                \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1120,7 +1187,7 @@ void mock_reset_all(void);
         _MOCK_STORE_9                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
         _MOCK_ACTION_LOOP(_func, _MOCK_SWITCH_9)                                                                       \
-        _MOCK_CALLBACK_9(_func)                                                                                        \
+        _MOCK_CALLBACK_R_9(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1179,7 +1246,7 @@ void mock_reset_all(void);
         _MOCK_OVERFLOW_CHECK_V(_func)                                                                                  \
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_1                                                                                                  \
-        _MOCK_CALLBACK_1(_func)                                                                                        \
+        _MOCK_CALLBACK_V_1(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V_SIMPLE(_func)
@@ -1210,7 +1277,7 @@ void mock_reset_all(void);
         _MOCK_OVERFLOW_CHECK_V(_func)                                                                                  \
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_2                                                                                                  \
-        _MOCK_CALLBACK_2(_func)                                                                                        \
+        _MOCK_CALLBACK_V_2(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V_SIMPLE(_func)
@@ -1242,14 +1309,14 @@ void mock_reset_all(void);
         _MOCK_OVERFLOW_CHECK_V(_func)                                                                                  \
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_3                                                                                                  \
-        _MOCK_CALLBACK_3(_func)                                                                                        \
+        _MOCK_CALLBACK_V_3(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
     }                                                                                                                  \
     _MOCK_RESET_V_SIMPLE(_func)
 
 /* R_V_S: returns value, no params, struct-safe */
 #define DECLARE_MOCK_R_V_S(_func, _rtype)                                                                              \
-    typedef void (*_func##__callback_t)(size_t);                                                                       \
+    typedef void (*_func##__callback_t)(size_t, _rtype *);                                                             \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _rtype _func##__return_queue[MOCK_CALL_STORAGE_MAX];                                                        \
@@ -1267,7 +1334,7 @@ void mock_reset_all(void);
         _MOCK_REGISTER(_func)                                                                                          \
         _MOCK_OVERFLOW_CHECK_R(_func, _rtype)                                                                          \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_V(_func)                                                                                        \
+        _MOCK_CALLBACK_R_V(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1284,7 +1351,7 @@ void mock_reset_all(void);
     {                                                                                                                  \
         _t0 p0;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0);                                                                  \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0);                                                        \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1307,7 +1374,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_1                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_1(_func)                                                                                        \
+        _MOCK_CALLBACK_R_1(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1320,7 +1387,7 @@ void mock_reset_all(void);
         _t0 p0;                                                                                                        \
         _t1 p1;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1);                                                             \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1);                                                   \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1343,7 +1410,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_2                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_2(_func)                                                                                        \
+        _MOCK_CALLBACK_R_2(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1357,7 +1424,7 @@ void mock_reset_all(void);
         _t1 p1;                                                                                                        \
         _t2 p2;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2);                                                        \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2);                                              \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1380,7 +1447,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_3                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_3(_func)                                                                                        \
+        _MOCK_CALLBACK_R_3(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1395,7 +1462,7 @@ void mock_reset_all(void);
         _t2 p2;                                                                                                        \
         _t3 p3;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3);                                                   \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3);                                         \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1418,7 +1485,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_4                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_4(_func)                                                                                        \
+        _MOCK_CALLBACK_R_4(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1434,7 +1501,7 @@ void mock_reset_all(void);
         _t3 p3;                                                                                                        \
         _t4 p4;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4);                                              \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4);                                    \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1457,7 +1524,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_5                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_5(_func)                                                                                        \
+        _MOCK_CALLBACK_R_5(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \
@@ -1474,7 +1541,7 @@ void mock_reset_all(void);
         _t4 p4;                                                                                                        \
         _t5 p5;                                                                                                        \
     } _func##_params;                                                                                                  \
-    typedef void (*_func##__callback_t)(size_t, _t0, _t1, _t2, _t3, _t4, _t5);                                         \
+    typedef void (*_func##__callback_t)(size_t, _rtype *, _t0, _t1, _t2, _t3, _t4, _t5);                               \
     extern _func##__callback_t _func##__callback;                                                                      \
     extern size_t _func##__call_count;                                                                                 \
     extern _func##_params _func##__param_history[MOCK_CALL_STORAGE_MAX];                                               \
@@ -1497,7 +1564,7 @@ void mock_reset_all(void);
         p = &_func##__param_history[i];                                                                                \
         _MOCK_STORE_6                                                                                                  \
         ret = _func##__return_queue[i];                                                                                \
-        _MOCK_CALLBACK_6(_func)                                                                                        \
+        _MOCK_CALLBACK_R_6(_func)                                                                                      \
         _func##__call_count++;                                                                                         \
         return ret;                                                                                                    \
     }                                                                                                                  \

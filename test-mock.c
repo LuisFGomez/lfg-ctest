@@ -1256,8 +1256,9 @@ static size_t cb_r2s_last_index;
 static struct point cb_r2s_p0;
 static struct point cb_r2s_p1;
 
-static void on_blend_points(size_t call_index, struct point p0, struct point p1)
+static void on_blend_points(size_t call_index, struct point *return_override, struct point p0, struct point p1)
 {
+    (void)return_override; /* side-effect-only: leave queue value in place */
     cb_r2s_last_index = call_index;
     cb_r2s_p0 = p0;
     cb_r2s_p1 = p1;
@@ -1392,8 +1393,9 @@ static int cb_r2_captured_p0;
 static int cb_r2_captured_p1;
 static int cb_r2_fire_count;
 
-static void on_add_numbers(size_t call_index, int p0, int p1)
+static void on_add_numbers(size_t call_index, int *return_override, int p0, int p1)
 {
+    (void)return_override; /* side-effect-only: leave queue value in place */
     cb_r2_last_index = call_index;
     cb_r2_captured_p0 = p0;
     cb_r2_captured_p1 = p1;
@@ -1530,6 +1532,246 @@ static void test_mock_callback_index_sequence(void)
 }
 
 /*============================================================================
+ *  Test: R_* callback overrides return queue (scalar-return override)
+ *==========================================================================*/
+
+static void on_add_numbers_override(size_t call_index, int *ret, int p0, int p1)
+{
+    (void)call_index;
+    (void)p0;
+    (void)p1;
+    *ret = 999;
+}
+
+static void test_mock_callback_r_2_override(void)
+{
+    int result;
+
+    add_numbers__mock_reset();
+
+    /* Queue is primed but the callback's write to *ret must win. */
+    add_numbers__return_queue[0] = 30;
+    add_numbers__return_queue[1] = 77;
+    add_numbers__callback = on_add_numbers_override;
+
+    result = add_numbers__mock(10, 20);
+    ASSERT_INT_EQUAL(999, result);
+
+    result = add_numbers__mock(33, 44);
+    ASSERT_INT_EQUAL(999, result);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_* callback computes return from captured arguments
+ *==========================================================================*/
+
+static void on_add_numbers_argdriven(size_t call_index, int *ret, int p0, int p1)
+{
+    (void)call_index;
+    *ret = p0 + p1;
+}
+
+static void test_mock_callback_r_2_argdriven(void)
+{
+    int result;
+
+    add_numbers__mock_reset();
+
+    /* Prime the queue with values that would be wrong; the callback overrides. */
+    add_numbers__return_queue[0] = -1;
+    add_numbers__return_queue[1] = -1;
+    add_numbers__callback = on_add_numbers_argdriven;
+
+    result = add_numbers__mock(2, 3);
+    ASSERT_INT_EQUAL(5, result);
+
+    result = add_numbers__mock(100, 23);
+    ASSERT_INT_EQUAL(123, result);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_* callback computes return from external (state) lookup
+ *==========================================================================*/
+
+static int _state_is_file_table[8];
+
+static void on_is_file_state(size_t call_index, int *ret, int key)
+{
+    (void)call_index;
+    if (key < 0 || key >= 8)
+    {
+        *ret = 0;
+        return;
+    }
+    *ret = _state_is_file_table[key];
+}
+
+static void test_mock_callback_r_1_state_driven(void)
+{
+    int r0, r1, r2;
+
+    increment__mock_reset();
+
+    /* External "state" the test seeds; mock's return depends on it. */
+    _state_is_file_table[0] = 0;
+    _state_is_file_table[1] = 1;
+    _state_is_file_table[2] = 1;
+
+    /* No queue priming. */
+    increment__callback = on_is_file_state;
+
+    r0 = increment__mock(0);
+    r1 = increment__mock(1);
+    r2 = increment__mock(2);
+
+    ASSERT_INT_EQUAL(0, r0);
+    ASSERT_INT_EQUAL(1, r1);
+    ASSERT_INT_EQUAL(1, r2);
+    ASSERT_INT_EQUAL(3, increment__call_count);
+
+    increment__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_* callback that doesn't touch *ret falls through to queue
+ *==========================================================================*/
+
+static int _r2_observe_count;
+
+static void on_add_numbers_observe(size_t call_index, int *ret, int p0, int p1)
+{
+    (void)call_index;
+    (void)ret;
+    (void)p0;
+    (void)p1;
+    _r2_observe_count++;
+}
+
+static void test_mock_callback_r_2_no_touch_preserves_queue(void)
+{
+    int result;
+
+    add_numbers__mock_reset();
+    _r2_observe_count = 0;
+
+    add_numbers__return_queue[0] = 42;
+    add_numbers__return_queue[1] = 84;
+    add_numbers__callback = on_add_numbers_observe;
+
+    result = add_numbers__mock(0, 0);
+    ASSERT_INT_EQUAL(42, result);
+
+    result = add_numbers__mock(0, 0);
+    ASSERT_INT_EQUAL(84, result);
+
+    ASSERT_INT_EQUAL(2, _r2_observe_count);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_*_S callback overrides struct return (type-safety check)
+ *==========================================================================*/
+
+static void on_transform_point_override(size_t call_index, struct point *ret, struct point p)
+{
+    (void)call_index;
+    ret->x = p.x * 2;
+    ret->y = p.y * 3;
+}
+
+static void test_mock_callback_r_1_s_override(void)
+{
+    struct point in = {7, 11};
+    struct point out;
+
+    transform_point__mock_reset();
+
+    /* Queue would return {0,0}; callback overrides with computed result. */
+    transform_point__callback = on_transform_point_override;
+
+    out = transform_point__mock(in);
+
+    ASSERT_INT_EQUAL(14, out.x);
+    ASSERT_INT_EQUAL(33, out.y);
+    ASSERT_INT_EQUAL(1, transform_point__call_count);
+
+    transform_point__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_V callback overrides return (no-params variant)
+ *==========================================================================*/
+
+static int _r_v_seq;
+
+static void on_get_value_seq(size_t call_index, int *ret)
+{
+    (void)call_index;
+    *ret = ++_r_v_seq;
+}
+
+static void test_mock_callback_r_v_override(void)
+{
+    int r0, r1, r2;
+
+    get_value__mock_reset();
+    _r_v_seq = 0;
+
+    /* Queue primed with sentinels; the callback wins. */
+    get_value__return_queue[0] = -1;
+    get_value__return_queue[1] = -1;
+    get_value__return_queue[2] = -1;
+    get_value__callback = on_get_value_seq;
+
+    r0 = get_value__mock();
+    r1 = get_value__mock();
+    r2 = get_value__mock();
+
+    ASSERT_INT_EQUAL(1, r0);
+    ASSERT_INT_EQUAL(2, r1);
+    ASSERT_INT_EQUAL(3, r2);
+
+    get_value__mock_reset();
+}
+
+/*============================================================================
+ *  Test: R_* callback can read current *ret value before deciding to override
+ *==========================================================================*/
+
+static void on_add_numbers_modify(size_t call_index, int *ret, int p0, int p1)
+{
+    (void)call_index;
+    (void)p0;
+    (void)p1;
+    /* Add 1 to whatever the queue had. */
+    *ret = *ret + 1;
+}
+
+static void test_mock_callback_r_2_modify_queue(void)
+{
+    int result;
+
+    add_numbers__mock_reset();
+
+    add_numbers__return_queue[0] = 10;
+    add_numbers__return_queue[1] = 20;
+    add_numbers__callback = on_add_numbers_modify;
+
+    result = add_numbers__mock(0, 0);
+    ASSERT_INT_EQUAL(11, result);
+
+    result = add_numbers__mock(0, 0);
+    ASSERT_INT_EQUAL(21, result);
+
+    add_numbers__mock_reset();
+}
+
+/*============================================================================
  *  Test Suite
  *==========================================================================*/
 
@@ -1604,6 +1846,13 @@ static void suite_mock_callback(void)
     lfg_ctest(test_mock_callback_reset_clears);
     lfg_ctest(test_mock_callback_null_noop);
     lfg_ctest(test_mock_callback_index_sequence);
+    lfg_ctest(test_mock_callback_r_2_override);
+    lfg_ctest(test_mock_callback_r_2_argdriven);
+    lfg_ctest(test_mock_callback_r_1_state_driven);
+    lfg_ctest(test_mock_callback_r_2_no_touch_preserves_queue);
+    lfg_ctest(test_mock_callback_r_1_s_override);
+    lfg_ctest(test_mock_callback_r_v_override);
+    lfg_ctest(test_mock_callback_r_2_modify_queue);
 }
 
 /*============================================================================
