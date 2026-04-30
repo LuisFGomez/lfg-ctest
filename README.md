@@ -652,23 +652,28 @@ void test_captures_directory_names(void)
 
 ### Mock Callbacks
 
-Each mock has an optional callback that fires on every call, receiving the call index and all parameters. Use callbacks when you need custom side effects during a mock call (e.g., invoking a captured write callback with response data).
+Each mock has an optional callback that fires on every call, receiving the call index and all parameters. Use callbacks when you need custom side effects during a mock call (e.g., invoking a captured write callback with response data) or when the mock's return value depends on per-call state the test (or the SUT) seeded.
 
-The callback typedef is generated per-mock:
+The callback typedef is generated per-mock. R_* callbacks receive an extra `_rtype *return_override` argument that points at the value about to be returned (already loaded from `__return_queue[i]` by the time the callback runs). V_* callbacks have no return to control, so they get only the call index and parameters:
 
 ```c
+// For DECLARE_MOCK_V_2(set_value, int, const char *):
+//   typedef void (*set_value__callback_t)(size_t call_index, int p0, const char *p1);
+//   extern set_value__callback_t set_value__callback;
+
 // For DECLARE_MOCK_R_2(get_value, int, int, const char *):
-//   typedef void (*get_value__callback_t)(size_t call_index, int p0, const char *p1);
+//   typedef void (*get_value__callback_t)(size_t call_index, int *return_override, int p0, const char *p1);
 //   extern get_value__callback_t get_value__callback;
 ```
 
-Callbacks are void-returning — they're for side effects only. Return values still come from `__return_queue`.
+The override is opt-in per call: writing to `*return_override` replaces the queue value for this call; not writing leaves the queue value in place. A side-effect-only callback can simply ignore the pointer.
 
-**Example: simulate curl_easy_perform writing response data:**
+**Example: side-effects only, queue-driven return.** The callback observes parameters and triggers an external action; it doesn't write to `*return_override`, so the queue value flows through unchanged:
 ```c
-static void on_perform(size_t call_index, CURL *handle)
+static void on_perform(size_t call_index, CURLcode *return_override, CURL *handle)
 {
     (void)call_index;
+    (void)return_override; /* leave queue value in place */
     (void)handle;
     /* Look up the write callback captured from curl_easy_setopt,
        then feed it the mock response body */
@@ -688,12 +693,34 @@ void test_http_request(void)
 }
 ```
 
+**Example: state-driven return.** No queue priming; the callback computes the result from external state at call time:
+```c
+static void on_is_file(size_t call_index, int *ret, const char *path)
+{
+    (void)call_index;
+    *ret = seeded_state_has(path);
+}
+
+void test_state_driven_query(void)
+{
+    is_file__mock_reset();
+    is_file__callback = on_is_file;
+
+    seed_state("a");        /* "a" exists, "c" does not */
+    process_manifest("ab,c");
+
+    is_file__mock_reset();
+}
+```
+
+The callback can also read `*return_override` mid-body to inspect the queue-loaded value before deciding whether to override - useful for "modify if state says X" patterns.
+
 **Callback execution order** within the mock body:
 1. Overflow check
 2. Store param_history
-3. Read return value from queue
+3. Read return value from queue (R_* only)
 4. Process param_actions (if applicable)
-5. Invoke callback
+5. Invoke callback (R_*: callback may write through `return_override` to replace step 3)
 6. Increment call_count
 7. Return
 
