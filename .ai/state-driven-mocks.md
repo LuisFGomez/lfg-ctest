@@ -49,7 +49,8 @@ The marked `(*)` line is the friction. By the time `__callback` runs:
   `__return_queue[i]` from inside the callback is a no-op for *this* call
   (it would only affect a hypothetical later call at a higher index).
 - The callback's signature is `void (size_t, params...)`. It cannot
-  signal a different return value to the wrapping mock body.
+  signal a different return value to the wrapping mock body. The
+  void-return is the constraint that prevents fixing this in place.
 
 So if a test wants "return `true` from `cweb_fio_is_file(path)` iff this
 test has previously seeded `path`," it cannot phrase that against the
@@ -124,46 +125,54 @@ ASSERT_STREQ(do_thing__param_history[0].p0, "a");
 the consumer to compute the `is_file` return from a path lookup at call
 time.
 
-## Approach 1 — framework-level: opt-in return-decider hook
+## Approach 1 — framework-level: extend the R_* callback to decide the return
 
-Introduce a NULL-by-default function pointer per R-style mock that, if
-set, computes the return value from the captured params. When unset, the
-existing `__return_queue[i]` path is used unchanged.
+The void-return on the R_* callback typedef is the only thing preventing
+the existing `__callback` mechanism from solving this in place. Lift
+that constraint: change the R_* callback typedef from
+`void (size_t, params...)` to `_rtype (size_t, params...)`. The mock
+body assigns the callback's return value to `ret` when the callback is
+set, overriding the queue load.
+
+V_* (void-return) mocks are unchanged — they have no return to decide.
 
 ### API sketch
 
 For an R_N mock of `int foo(T0, T1)`:
 
 ```c
-/* Generated alongside foo__callback / foo__return_queue: */
-typedef int (*foo__return_fn_t)(size_t call_index, T0, T1);
-extern foo__return_fn_t foo__return_fn;
+/* WAS: typedef void (*foo__callback_t)(size_t, T0, T1); */
+typedef int (*foo__callback_t)(size_t, T0, T1);
+extern foo__callback_t foo__callback;
 ```
 
-(Name `__return_fn` is consistent with the existing `__callback` pattern;
-bikesheddable — `__compute_return`, `__return_decider`, `__return_for`
-were all considered.)
-
-Codegen change inside the R_N mock body, replacing the single
-`ret = _func##__return_queue[i];` line:
+Codegen change inside each `DEFINE_MOCK_R_*` body. The existing
+`_MOCK_CALLBACK_N` invocation helper is shared between V_* and R_*
+today; the cleanest implementation is to split it into V- and R-flavored
+variants, or inline the R_* invocation directly:
 
 ```c
-if (_func##__return_fn)
+/* WAS: if (foo__callback) foo__callback(i, _p0, _p1); */
+/* NOW: */
+if (foo__callback)
 {
-    ret = _func##__return_fn(i, _p0, _p1);
-}
-else
-{
-    ret = _func##__return_queue[i];
+    ret = foo__callback(i, _p0, _p1);
 }
 ```
 
-`__mock_reset` NULLs the pointer (one extra line, mirroring the existing
-`__callback = NULL` in `_MOCK_RESET_R`). For `_S` variants, the signature
-takes the struct by value, matching the existing `_S` callback shape.
-For `R_V` (no params), the signature is `_rtype (size_t)`.
+A side-effects-only callback that wants to preserve queue-driven returns
+spells that intent explicitly:
 
-Test usage — the worked example above:
+```c
+static int
+my_side_effect(size_t i, const char *path)
+{
+    do_thing();
+    return foo__return_queue[i];
+}
+```
+
+A state-driven callback ignores the queue:
 
 ```c
 static bool
@@ -172,42 +181,74 @@ my_is_file(size_t i, const char *path)
     (void)i;
     return fake_fs_has(path);
 }
-
-cweb_fio_is_file__return_fn = my_is_file;
 ```
+
+For `_S` variants, the signature takes the struct by value (matching the
+existing `_S` callback shape) and gains the `_rtype` return.
 
 ### Properties
 
-- **Opt-in per-mock.** Default codegen behavior is unchanged: every
-  existing test that uses `__return_queue[i]` keeps working byte-for-byte.
-  A mock with a NULL `__return_fn` (the default) behaves exactly as it
-  does today.
-- **Composes (or doesn't, by choice).** A return-fn that wants the queue
-  as a fallback can read `_func##__return_queue[i]` itself — those arrays
-  are public. A return-fn that wants pure state computation just ignores
-  the queue.
-- **No new macro fanout.** A single edit to each `DEFINE_MOCK_R_*` body
-  (and the matching reset and `DECLARE_MOCK_R_*`) covers V/0/1/.../9 and
-  the `_S` set. The amalgamation manifest is unchanged.
-- **No effect on V_* mocks.** Void-return mocks have nothing to decide;
-  the existing `__callback` already covers their needs.
-- **Codegen cost.** One branch per call, predictable, optimizes to nothing
-  when the pointer is NULL. One additional symbol per R-style mock
-  (`__return_fn` + typedef).
+- **One symbol per R_* mock.** No new typedef, no new function pointer,
+  no new row in the README's "Generated symbols" table. The existing
+  symbol gets a richer signature.
+- **Opt-in per-mock at runtime.** Default behavior — NULL callback —
+  preserves the queue-driven path byte-for-byte. Only tests that *set*
+  the callback are affected.
+- **Composes with the queue.** A callback that returns
+  `foo__return_queue[i]` delegates to the queue; one that ignores the
+  queue computes `ret` from state. The two strategies coexist on a
+  per-test, per-mock basis.
+- **V_* unchanged.** V mocks have no return to decide; their callback
+  stays `void (size_t, params...)`.
 
 ### Trade-offs
 
-- (–) Adds one publicly-named symbol to every R-style mock. README's
-  "Generated symbols" table grows by a row.
-- (–) Documentation surface: the public API now has two ways to influence
-  a mock's return (the queue and the fn). The doc has to explain when to
-  reach for which. Recommended phrasing: "queue for fixed/per-call
-  values; return-fn for state-driven values; setting the fn replaces the
-  queue load for that mock."
-- (+) Solves the underlying mismatch for *every* future state-coupled
-  seam, not just the `cweb_fio` ones that motivated this. Any consumer
-  hitting the same shape — a network mock keyed on URL, a key-value mock
-  keyed on key — gets the ergonomic for free.
+- **(–) Breaking change for R_* callbacks.** The callback typedef
+  changes from `void (...)` to `_rtype (...)` for R-style mocks. Every
+  existing R_* callback in lfg-ctest's self-tests and in downstream
+  consumers (currently `lfg/cweb`) needs a one-line update to its
+  function signature, plus an explicit `return foo__return_queue[i];`
+  where the caller wanted queue-driven behavior. The compiler catches
+  every site via typedef mismatch at the `foo__callback = …` assignment.
+  Migration is mechanical, but it is a real source-level break —
+  affordable for a pre-1.0 framework with one in-repo consumer; would
+  be a much harder sell post-1.0.
+- **(–) V_*/R_* callback signatures diverge.** V_* keeps
+  `void (size_t, params...)`; R_* returns `_rtype`. The README has to
+  say "R callbacks decide the return; V callbacks are side-effects only."
+  Mild documentation wart; the asymmetry is directly justified by the
+  return-type asymmetry.
+- **(+) One conceptual model.** "The callback decides what this call
+  does (return + side effects)." No queue-vs-fn disambiguation in docs
+  or in the test author's head.
+- **(+) Solves the underlying mismatch for every state-coupled seam, not
+  just `cweb_fio`.** Any consumer hitting the same shape — a network
+  mock keyed on URL, a key-value mock keyed on key — gets the ergonomic
+  for free.
+- **(0) Codegen cost.** One existing branch (`if (__callback)`) gets one
+  assignment from the callback's return added to it. No new symbols, no
+  new typedefs. The `_MOCK_CALLBACK_N` invocation helper splits or
+  inlines per the implementation note above.
+
+### Considered and rejected: a separate `__return_fn` symbol
+
+An additive design (`__return_fn` next to the existing void `__callback`)
+would avoid the source-level break. Costs of that design: a second
+symbol per R-style mock, a second typedef, a doc burden of explaining
+when to reach for which (the state-driven callback would have to live in
+one function, side effects in another, or one would consult the other).
+Rejected — the smaller API surface and single conceptual model of the
+merged callback outweigh the one-time mechanical migration. (See PR #7
+discussion.)
+
+### Considered and rejected: out-pointer signature
+
+Keeping the R_* callback's return type `void` and adding `_rtype *out_ret`
+to the signature was considered. It preserves V_*/R_* return-type
+symmetry, but the out-pointer is uglier at the call site
+(`*out = state_lookup(path)` vs. `return state_lookup(path)`) and forces
+an awkward "if you want the queue value, write `*out = foo__return_queue[i];`"
+idiom. Rejected in favor of the rtype-return form.
 
 ## Approach 2 — consumer-level: `cweb_fio_fake` helper, no framework change
 
@@ -253,25 +294,26 @@ cweb_fio_fake_predict_is_file_true(slot)   /* sugar over __return_queue[N] */
 
 ## Approach 3 — both
 
-Approach 1 (framework primitive) plus Approach 2 (cweb-side helper that
-*uses* the primitive). With `__return_fn` available, the helper sketch
-collapses:
+Approach 1 (extended R_* callback) plus Approach 2 (cweb-side helper that
+*uses* the new callback semantics). With the merged callback, every
+fake-fs hookup is a single `__callback` assignment regardless of whether
+the mock's role is "capture writes" (V or R, side effects) or "decide
+returns from state" (R, returns rtype):
 
 ```
 cweb_fio_fake_install()
     mock_reset_all();
-    cweb_fio_write_file__callback   = on_write;
-    cweb_fio_foreach_line__callback = on_foreach;
-    cweb_fio_is_file__return_fn     = on_is_file;   /* NEW: state-driven */
-    cweb_fio_exists__return_fn      = on_exists;    /* NEW: state-driven */
+    cweb_fio_write_file__callback   = on_write;     /* side effect: capture bytes */
+    cweb_fio_foreach_line__callback = on_foreach;   /* side effect: synthesize lines */
+    cweb_fio_is_file__callback      = on_is_file;   /* returns bool from state map */
+    cweb_fio_exists__callback       = on_exists;    /* returns bool from state map */
 
 cweb_fio_fake_set_file(path, data, size)
 cweb_fio_fake_get(path, &data, &size)
 /* predict_is_file_true and friends become unnecessary */
 ```
 
-Tests stop priming per-call return slots entirely. The helper is smaller
-than under Approach 2 because the slot-prediction sugar drops out.
+Tests stop priming per-call return slots entirely.
 
 ## Approach 4 — neither
 
@@ -292,93 +334,115 @@ needs it manually sets up a state map and primes the queue by hand.
 
 | Axis | Approach 1 | Approach 2 | Approach 3 | Approach 4 |
 |------|-----------|-----------|-----------|-----------|
-| Codegen complexity (lfg-ctest) | + one branch & one symbol per R-mock | none | + one branch & one symbol per R-mock | none |
+| API surface (lfg-ctest) | unchanged (no new symbols) | unchanged | unchanged (no new symbols) | unchanged |
+| Backward compat for R_* callbacks | source-level break (mechanical migration; compiler-caught) | preserved | source-level break | preserved |
+| Backward compat for runtime behavior | preserved (NULL callback unchanged) | preserved | preserved | preserved |
 | Test ergonomics for is_file/exists | strong | weak | strong | none |
-| Test ergonomics for write+read+foreach | weak (still need callbacks) | strong | strong | none |
-| Consumer-agnostic invariant (lfg-ctest) | preserved (helper is per-mock, types defined by user) | preserved | preserved | preserved |
+| Test ergonomics for write+read+foreach | weak (still need helper layer) | strong | strong | none |
+| Consumer-agnostic invariant (lfg-ctest) | preserved | preserved | preserved | preserved |
 | Cross-repo coordination | single-repo (lfg-ctest) | single-repo (cweb) | two repos in sequence | none |
-| Backward compat for existing tests | full (NULL default) | full | full | full |
 | Reusable beyond cweb | yes | no | yes | no |
 
-The single-repo-vs-cross-repo distinction is the load-bearing axis.
-Approach 1 alone fixes the worst ergonomic in lfg-ctest and enables a
-future cweb decision; Approach 2 alone does the easy 60% in cweb but
-leaves the hard 40% unsolved; Approach 3 is the right sequence; Approach
-4 punts.
+The R_* callback signature break is the load-bearing axis. It is a
+one-time, compiler-caught, mechanical migration; pre-1.0 framework with
+a single in-repo consumer makes it affordable.
 
 ## Recommendation
 
 **Approach 3, in two ordered steps:**
 
-1. **Upstream first**: file an lfg-ctest issue to add the opt-in
-   `__return_fn` hook per Approach 1's sketch. This is the strict
-   prerequisite — it is the only piece that resolves the queue-vs-state
-   mismatch, and it is consumer-agnostic, opt-in per-mock, and
-   default-off. Per issue #6's preference #2, the framework knob does
-   not change default codegen behavior.
+1. **Upstream first**: file an lfg-ctest issue to extend the R_*
+   callback typedef to return `_rtype`, per Approach 1. The change is
+   opt-in at runtime (NULL callback preserves the queue path) and
+   breaks compilation for any existing R_* callback — the compiler
+   catches every site, and the migration is a one-line signature update
+   plus an explicit `return foo__return_queue[i];` where the caller
+   wanted queue-driven behavior. lfg-ctest's own self-tests and any
+   in-repo callers are migrated in the same change.
 
 2. **Downstream follow-up**: file an lfg/cweb issue (draft body in the
    next section) to ship `cweb_fio_fake` as a helper that consumes the
-   new framework primitive. This is Luis's call to make once the
-   primitive is in — the doc does not commit to it on his behalf.
+   new callback semantics. Luis's call once the upstream piece is in;
+   the doc does not commit to it on his behalf.
 
 Per issue #6's preference #1, the recommendation is framed in the
-framework-vs-consumer split: the framework piece is the bottleneck, and
-the consumer fake is downstream of that decision. We pick "both" because
-shipping only the framework primitive leaves cweb tests to rewrite the
-state-map scaffolding by hand (Approach 4's failure mode), and shipping
-only the cweb helper leaves the queue-vs-state mismatch unresolved
-(Approach 2's failure mode).
+framework-vs-consumer split: the framework piece is the bottleneck,
+and the consumer fake is downstream of that decision. Per preference
+#2, the framework knob is opt-in per-mock — default-off — and does
+not change runtime behavior for any test that does not set the
+callback. The break is purely at the source level for the small number
+of tests that already use R_* callbacks.
+
+We pick "both" because the framework primitive alone leaves cweb tests
+to rewrite the state-map scaffolding by hand (Approach 4's failure
+mode), and the consumer helper alone leaves the queue-vs-state
+mismatch unresolved (Approach 2's failure mode).
 
 ## Draft body for the lfg-ctest follow-up issue
 
-Title: `mock R-style: opt-in __return_fn hook for state-driven returns`
+Title: `mock R_*: extend __callback to return _rtype`
 
 Body:
 
 > ## Summary
 >
-> Add an opt-in, NULL-by-default function-pointer `<func>__return_fn` to
-> every R-style generated mock (`R_V`, `R_1`..`R_9`, and the `_S`
-> equivalents). When set, the mock body invokes it in place of loading
-> from `<func>__return_queue[i]`. When NULL (the default), the existing
-> queue path is taken, byte-for-byte.
+> Change the R_* callback typedef from `void (size_t, params...)` to
+> `_rtype (size_t, params...)`. Inside each `DEFINE_MOCK_R_*` body,
+> assign the callback's return value to `ret` when the callback is set,
+> overriding the queue load. V_* mocks unchanged.
 >
 > Motivation, design rationale, and trade-offs in
 > `.ai/state-driven-mocks.md`.
 >
 > ## Codegen change
 >
-> Replace, in each `DEFINE_MOCK_R_*` body, the single line
-> `ret = _func##__return_queue[i];` with:
+> In each `DECLARE_MOCK_R_*` and `DEFINE_MOCK_R_*`:
 >
-> ```c
-> if (_func##__return_fn)
-> {
->     ret = _func##__return_fn(i, /* params... */);
-> }
-> else
-> {
->     ret = _func##__return_queue[i];
-> }
-> ```
+> - Update the callback typedef:
 >
-> Add `_func##__return_fn = NULL;` to `_MOCK_RESET_R`. Declare typedef
-> `<func>__return_fn_t` and `extern` symbol in each `DECLARE_MOCK_R_*`.
-> For `_S` variants, the signature takes the struct by value, matching
-> the existing `_S` callback shape.
+>   ```c
+>   /* WAS: */ typedef void   (*_func##__callback_t)(size_t, /* params */);
+>   /* NOW: */ typedef _rtype (*_func##__callback_t)(size_t, /* params */);
+>   ```
+>
+> - Update the callback invocation to assign the returned value to `ret`:
+>
+>   ```c
+>   /* WAS: if (_func##__callback) _func##__callback(i, _p0); */
+>   /* NOW: if (_func##__callback) ret = _func##__callback(i, _p0); */
+>   ```
+>
+> The existing `_MOCK_CALLBACK_N` invocation helpers are shared between
+> V_* and R_* today. Splitting them into V- and R-flavored variants
+> (`_MOCK_CALLBACK_V_N` / `_MOCK_CALLBACK_R_N`) is the cleanest way to
+> apply this; the alternative is to inline the R_* invocation directly
+> in the `DEFINE_MOCK_R_*` body.
+>
+> The `_S` variants follow the same shape (struct-by-value param,
+> rtype return).
+>
+> ## Migration
+>
+> Self-test callbacks in `test-mock.c` and any in-repo callers update
+> their callback function signatures: change return type from `void` to
+> the mock's `_rtype`, and add `return <mock>__return_queue[i];` (or
+> equivalent) where the test wanted queue-driven behavior. The compiler
+> catches every site via typedef mismatch at the `<mock>__callback = …`
+> assignment.
 >
 > ## Acceptance criteria
 >
-> - All existing self-tests pass unchanged.
-> - New self-test in `test-mock.c` covers: (a) `__return_fn` overrides
->   the queue when set, (b) the queue is used when `__return_fn` is
->   NULL, (c) `__mock_reset` NULLs `__return_fn`, (d) the chosen
->   semantic for `_S` variants.
-> - `dist/lfg-ctest.h` (amalgamation) regenerates with the new symbols
+> - All existing self-tests pass after migration.
+> - New self-test in `test-mock.c` covers: (a) callback return overrides
+>   queue when callback is set, (b) queue is used when callback is NULL,
+>   (c) callback that returns `<mock>__return_queue[i]` reproduces
+>   today's "side effects + queue-driven return" pattern, (d) the `_S`
+>   variant follows the same shape.
+> - `dist/lfg-ctest.h` (amalgamation) regenerates against the new shape
 >   and `test-amalg` passes.
-> - `README.md` "Generated symbols" table gains a `__return_fn` row;
->   "When to use" guidance distinguishes queue vs. fn use cases.
+> - `README.md` "Generated symbols" table updated; the section on
+>   `__callback` distinguishes V_* (void) and R_* (returns rtype) shapes
+>   and shows both the queue-driven and state-driven idioms.
 
 ## Draft body for the lfg/cweb follow-up issue
 
@@ -395,19 +459,22 @@ Body:
 > - `cweb_fio_fake_install()` — calls `mock_reset_all()`, registers a
 >   reset hook to clear fake state on next reset, and wires:
 >   - `cweb_fio_write_file__callback` / `__append_file__callback`
->     to capture writes into the fake state map;
+>     to capture writes into the fake state map (side-effect callbacks);
 >   - `cweb_fio_foreach_line__callback` to iterate the captured state
->     for the requested path;
->   - `cweb_fio_is_file__return_fn` / `cweb_fio_exists__return_fn` to
->     compute returns from the fake state map (depends on the lfg-ctest
->     `__return_fn` primitive — see the upstream issue).
+>     for the requested path and synthesize line invocations
+>     (side-effect callback that returns the queue value to drive its
+>     own return);
+>   - `cweb_fio_is_file__callback` / `cweb_fio_exists__callback` to
+>     compute returns from the fake state map (rtype-returning
+>     callbacks; depends on the lfg-ctest typedef change — see the
+>     upstream issue).
 > - `cweb_fio_fake_set_file(path, data, size)` — test-side seeding.
 > - `cweb_fio_fake_get(path, &data, &size)` — inspect bytes the SUT
 >   wrote.
 >
 > ## Depends on
 >
-> lfg/ctest#<N> (the `__return_fn` hook must land first).
+> lfg/ctest#<N> (the R_* callback typedef change must land first).
 >
 > ## Constraints
 >
@@ -429,18 +496,18 @@ Body:
 ## Notes for implementers
 
 - The codegen change is small but touches every R-style macro family —
-  `R_V`, `R_1`..`R_9`, `R_V_S`, `R_1_S`..`R_6_S`. Test-amalg drift is the
-  most likely regression vector; ensure `tools/amalgamate.c` does not need
-  changes (it shouldn't — the new symbol is named under the existing
-  per-mock convention).
-- The `__return_fn` signature exactly mirrors `__callback`'s plus a
-  return type. Documentation should treat the two as a pair: same
-  call-site visibility (param history is already populated by the time
-  either runs in the proposed order), same lifecycle (NULL'd by reset,
-  set per-test).
-- Ordering inside the new mock body: `__return_fn` resolves `ret`
-  *before* `_MOCK_ACTION_LOOP` and `_MOCK_CALLBACK_N`. This matches the
-  current ordering relative to `__return_queue[i]`. Param-actions and
-  callback continue to operate on (potentially mutated) parameter
-  buffers and observe the final `ret` indirectly through subsequent
-  state checks, not through their signatures.
+  `R_V`, `R_1`..`R_9`, `R_V_S`, `R_1_S`..`R_6_S`. Test-amalg drift is
+  the most likely regression vector; ensure `tools/amalgamate.c` does
+  not need changes (it shouldn't — only typedef and invocation forms
+  change, no new symbols cross the amalgamation boundary).
+- The current `_MOCK_CALLBACK_N` invocation helpers in
+  `lfg-ctest-mock.h` are shared by V- and R-style mocks. Splitting
+  them — `_MOCK_CALLBACK_V_N` for void-return invocation,
+  `_MOCK_CALLBACK_R_N` for rtype-return-and-assign — keeps the
+  `DEFINE_MOCK_*` bodies symmetric with today.
+- Ordering inside the mock body: the callback continues to run after
+  `_MOCK_ACTION_LOOP`, so a state-driven callback sees param-actions'
+  effects on parameter buffers if any are configured. Param values
+  themselves are unchanged across the action loop, so the common case
+  (state lookup keyed on a parameter) doesn't depend on this ordering.
+- `__mock_reset` already NULLs `__callback`; no change needed.
