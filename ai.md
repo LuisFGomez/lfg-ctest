@@ -62,6 +62,7 @@ to the code.
 |-----|--------|
 | [.ai/architecture.md](.ai/architecture.md) | Core runner state, mock macro fanout, `_S` vs non-`_S`, param-action chain, reset registry, `LFG_CTEST_SELF_TEST`, expect-failures mode. |
 | [.ai/build-and-test.md](.ai/build-and-test.md) | Build, run a single self-test, add new self-test cases (including the expect-failures pattern), formatting. |
+| [.ai/state-driven-mocks.md](.ai/state-driven-mocks.md) | Design note on the queue-vs-state mismatch in R-style mocks; recommends an opt-in `__return_fn` framework hook plus a downstream cweb-side fake-fs helper. |
 | [README.md](README.md) | Public API. Mirror user-visible changes here. |
 
 ## Commands
