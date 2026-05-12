@@ -146,6 +146,26 @@ is never called is never registered.
 zeros the count — so mocks re-register on their next call. This lets a
 teardown drop every known mock's state without maintaining an explicit list.
 
+### Consumer cleanup hooks (`mock_register_cleanup`)
+
+`_mock_register_reset` is private — the macro chain feeds it `__mock_reset`
+thunks and nothing else. Consumers reach the same registry through the public
+wrapper `mock_register_cleanup(void (*)(void))`, declared in
+`lfg-ctest-mock.h`, which forwards directly into `_mock_register_reset`. The
+two share dedup, the `MOCK_REGISTRY_MAX` budget, and the registry walk.
+
+The intended use is a mock TU whose mock owns nontrivial heap state that the
+framework can't reach — return queues holding allocated blobs, for example.
+The TU registers a `free_unconsumed` walker once at TU init (constructor
+attribute, or piggybacked on the consuming mock's first call) and
+`mock_reset_all()` then covers the framework-generated thunks **and** the
+consumer hook in one call. Single-function teardown contract; no two-step
+ritual for test authors to forget.
+
+Because `mock_reset_all()` clears the registry, cleanup hooks must
+re-register after each reset cycle — same lifecycle as the auto-registered
+`__mock_reset` thunks. Ordering between the two classes is unspecified.
+
 ## Amalgamation (`tools/amalgamate.c`)
 
 The framework ships in two forms: the split sources (default) and a generated

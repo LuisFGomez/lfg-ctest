@@ -125,6 +125,19 @@ void mock_param_destroy(mock_param_action_t action);
  */
 void _mock_register_reset(void (*reset_fn)(void));
 
+/** Register a consumer-supplied cleanup hook for bulk reset.
+ * Use to attach mock-TU-specific teardown (e.g. freeing heap-allocated entries
+ * still queued in a return queue) so a single mock_reset_all() covers it.
+ * The hook is invoked by mock_reset_all() alongside auto-registered mock reset
+ * thunks; ordering between the two classes is unspecified. Registration
+ * deduplicates: the same @p cleanup_fn registered twice yields a single entry.
+ * mock_reset_all() clears the registry, so cleanup hooks must be re-registered
+ * after each reset cycle (typically via a constructor attribute or a one-shot
+ * guard piggybacked on the consuming mock TU's first call).
+ * @param[in] cleanup_fn  pointer to the consumer cleanup function.
+ */
+void mock_register_cleanup(void (*cleanup_fn)(void));
+
 /** Reset all mocks that have been invoked since the last call to mock_reset_all().
  * Iterates the auto-populated registry and calls each registered reset function,
  * then clears the registry.

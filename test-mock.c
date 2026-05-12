@@ -1996,6 +1996,107 @@ static void suite_mock_reset_all(void)
 }
 
 /*============================================================================
+ *  Test: mock_register_cleanup - public on-ramp for consumer cleanup hooks
+ *==========================================================================*/
+
+static int _cleanup_a_calls;
+static int _cleanup_b_calls;
+
+static void _cleanup_a(void)
+{
+    _cleanup_a_calls++;
+}
+
+static void _cleanup_b(void)
+{
+    _cleanup_b_calls++;
+}
+
+static void test_mock_register_cleanup_invoked_by_reset_all(void)
+{
+    _cleanup_a_calls = 0;
+
+    mock_register_cleanup(_cleanup_a);
+    mock_reset_all();
+
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+}
+
+static void test_mock_register_cleanup_dedup(void)
+{
+    _cleanup_a_calls = 0;
+
+    /* same pointer registered three times via the public API */
+    mock_register_cleanup(_cleanup_a);
+    mock_register_cleanup(_cleanup_a);
+    mock_register_cleanup(_cleanup_a);
+
+    mock_reset_all();
+
+    /* fires exactly once: dedup folds repeats to a single entry */
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+}
+
+static void test_mock_register_cleanup_multiple_distinct(void)
+{
+    _cleanup_a_calls = 0;
+    _cleanup_b_calls = 0;
+
+    mock_register_cleanup(_cleanup_a);
+    mock_register_cleanup(_cleanup_b);
+    mock_reset_all();
+
+    /* both distinct hooks fire (order is implementation-defined) */
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+    ASSERT_INT_EQUAL(1, _cleanup_b_calls);
+}
+
+static void test_mock_register_cleanup_re_register_after_reset(void)
+{
+    _cleanup_a_calls = 0;
+
+    mock_register_cleanup(_cleanup_a);
+    mock_reset_all();
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+
+    /* registry was cleared - a second reset without re-registering is a no-op */
+    mock_reset_all();
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+
+    /* re-register and fire again on the next cycle */
+    mock_register_cleanup(_cleanup_a);
+    mock_reset_all();
+    ASSERT_INT_EQUAL(2, _cleanup_a_calls);
+}
+
+static void test_mock_register_cleanup_alongside_mock_reset(void)
+{
+    _cleanup_a_calls = 0;
+
+    /* invoke a mock so its auto-generated __mock_reset registers */
+    simple_void_func__mock();
+    ASSERT_INT_EQUAL(1, simple_void_func__call_count);
+
+    /* register a consumer cleanup via the public on-ramp */
+    mock_register_cleanup(_cleanup_a);
+
+    mock_reset_all();
+
+    /* mock_reset_all() covers BOTH the framework thunk and the consumer hook */
+    ASSERT_INT_EQUAL(0, simple_void_func__call_count);
+    ASSERT_INT_EQUAL(1, _cleanup_a_calls);
+}
+
+static void suite_mock_register_cleanup(void)
+{
+    lfg_ctest(test_mock_register_cleanup_invoked_by_reset_all);
+    lfg_ctest(test_mock_register_cleanup_dedup);
+    lfg_ctest(test_mock_register_cleanup_multiple_distinct);
+    lfg_ctest(test_mock_register_cleanup_re_register_after_reset);
+    lfg_ctest(test_mock_register_cleanup_alongside_mock_reset);
+}
+
+/*============================================================================
  *  Main
  *==========================================================================*/
 
@@ -2025,6 +2126,9 @@ int main(void)
 
     printf("\n--- SUITE 6: Reset All ---\n");
     lfg_ct_suite(suite_mock_reset_all);
+
+    printf("\n--- SUITE 7: Register Cleanup ---\n");
+    lfg_ct_suite(suite_mock_register_cleanup);
 
     printf("\n");
     lfg_ct_print_summary();

@@ -148,6 +148,11 @@ void _mock_register_reset(void (*reset_fn)(void))
     _mock_reset_registry[_mock_reset_registry_count++] = reset_fn;
 }
 
+void mock_register_cleanup(void (*cleanup_fn)(void))
+{
+    _mock_register_reset(cleanup_fn);
+}
+
 void mock_reset_all(void)
 {
     size_t i;
