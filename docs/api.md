@@ -98,14 +98,14 @@ lfg-ctest does not impose any setup/teardown mechanism. They're just functions y
 static void setup(void)
 {
     // initialize test state
-    my_mock__mock_reset();
+    mock_reset_all();
     global_state = initial_value;
 }
 
 static void teardown(void)
 {
     // cleanup after test
-    my_mock__mock_reset();
+    mock_reset_all();
     free(allocated_memory);
 }
 
@@ -368,7 +368,7 @@ Each mock generates these symbols (using `get_value` as example):
 | Symbol | Type | Description |
 |--------|------|-------------|
 | `get_value__mock(...)` | function | The mock function to call |
-| `get_value__mock_reset()` | function | Reset all mock state |
+| `get_value__mock_reset()` | function | Reset this mock's state. Auto-registered with the framework's reset registry on first call; prefer `mock_reset_all()` in teardown. |
 | `get_value__call_count` | `size_t` | Number of times mock was called |
 | `get_value__param_history[]` | array | Captured parameters from each call |
 | `get_value__return_queue[]` | array | Return values (for R_* mocks) |
@@ -376,6 +376,25 @@ Each mock generates these symbols (using `get_value` as example):
 | `get_value__callback` | function pointer | Optional callback invoked each call |
 | `get_value__callback_t` | typedef | Callback function pointer type |
 | `get_value_params` | typedef | Struct type for captured parameters |
+
+### Resetting Mock State
+
+`mock_reset_all()` (declared in `<lfg-ctest-mock.h>`) is the canonical teardown
+call. Every `DEFINE_MOCK_*` invocation auto-registers its `__mock_reset` thunk
+with the framework's reset registry the first time the mock is called, so a
+single `mock_reset_all()` sweeps every mock the test TU defined — no per-mock
+bookkeeping. Mocks that own non-trivial heap state can opt their custom walker
+into the same sweep via `mock_register_cleanup(void (*)(void))`; one call then
+runs both the auto-generated thunks and the consumer hooks (see
+[Consumer Cleanup Hooks](#consumer-cleanup-hooks)).
+
+Always reach for `mock_reset_all()` in teardown. Forgetting to add a matching
+per-mock reset after introducing a new `DEFINE_MOCK_*` silently leaks state
+across tests; `mock_reset_all()` removes the entire class of bug.
+
+Per-mock `foo__mock_reset()` remains a lower-level escape hatch for the rare
+case where a single mock must be reset mid-test without disturbing others — not
+the recommended teardown pattern.
 
 ### Storage Limits
 
@@ -432,7 +451,7 @@ void test_function_calls_dependency(void)
     ASSERT_STR_EQUAL("test", get_value__param_history[0].p1);  // first call, second param
     ASSERT_EQ(100, result);
 
-    get_value__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -451,7 +470,7 @@ void test_callback_registration(void)
 
     captured_cb(99);  // simulate callback invocation
 
-    register_callback__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -492,7 +511,7 @@ void test_capture_buffer_contents(void)
     ASSERT_UINT8_EQUAL(0x01, captured_data[0]);
     ASSERT_UINT8_EQUAL(0x80, captured_data[1]);
 
-    i2c_write__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -513,7 +532,7 @@ void test_inject_read_data(void)
 
     function_under_test();  // calls i2c_read, receives injected data
 
-    i2c_read__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -546,7 +565,7 @@ void test_captures_directory_names(void)
     ASSERT_STR_EQUAL("src/lib", cap[1]);
     ASSERT_STR_EQUAL("src/bin", cap[2]);
 
-    mkdir__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -582,14 +601,14 @@ static void on_perform(size_t call_index, CURLcode *return_override, CURL *handl
 
 void test_http_request(void)
 {
-    curl_easy_perform__mock_reset();
+    mock_reset_all();
     curl_easy_perform__return_queue[0] = CURLE_OK;
     curl_easy_perform__callback = on_perform;
 
     function_under_test();
 
     ASSERT_EQ(1, curl_easy_perform__call_count);
-    curl_easy_perform__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -603,13 +622,13 @@ static void on_is_file(size_t call_index, int *ret, const char *path)
 
 void test_state_driven_query(void)
 {
-    is_file__mock_reset();
+    mock_reset_all();
     is_file__callback = on_is_file;
 
     seed_state("a");        /* "a" exists, "c" does not */
     process_manifest("ab,c");
 
-    is_file__mock_reset();
+    mock_reset_all();
 }
 ```
 
@@ -650,7 +669,7 @@ void test_with_struct_param(void)
     ASSERT_EQ(3, calculate_distance__param_history[0].p0.x);
     ASSERT_EQ(4, calculate_distance__param_history[0].p0.y);
 
-    calculate_distance__mock_reset();
+    mock_reset_all();
 }
 ```
 

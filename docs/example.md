@@ -143,7 +143,7 @@ static void _teardown(void)
 {
     _callback_status = -1;
     _callback_ctx = NULL;
-    i2c_write__mock_reset();
+    mock_reset_all();
 }
 
 /* Test: led_reset sends correct I2C command */

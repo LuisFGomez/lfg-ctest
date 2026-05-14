@@ -110,13 +110,15 @@ static void test_widget_read_captures_params(void)
     ASSERT_EQ(1, widget_read__call_count);
     ASSERT_UINT8_EQUAL(0x42, widget_read__param_history[0].p0);
 
-    widget_read__mock_reset();
+    mock_reset_all();
 }
 ```
 
-Register in the appropriate suite. Reset at the end of each test (or in a
-per-test teardown helper) — state is file-scope and persists across tests
-otherwise.
+Register in the appropriate suite. Call `mock_reset_all()` at the end of each
+test (or in a per-test teardown helper) — state is file-scope and persists
+across tests otherwise. Every `DEFINE_MOCK_*` auto-registers its
+`__mock_reset` thunk, so the single call sweeps every mock the TU defined;
+see [api.md — Resetting Mock State](api.md#resetting-mock-state).
 
 ## Amalgamation
 

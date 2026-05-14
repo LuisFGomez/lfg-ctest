@@ -11,8 +11,11 @@ read/write actions, and a per-call callback hook.
 - Mock macros (`DECLARE_MOCK_*` / `DEFINE_MOCK_*`) generate `__mock`,
   `__mock_reset`, `__call_count`, `__param_history[]`, `__return_queue[]`,
   `__param_actions`, `__callback` per target.
+- Single-call teardown: every `DEFINE_MOCK_*` auto-registers its `__mock_reset`
+  thunk, so `mock_reset_all()` sweeps every mock the test TU defined — no
+  per-mock bookkeeping.
 - Consumer-cleanup-hook on-ramp (`mock_register_cleanup`) so mocks that own
-  heap state can share the framework's single-call teardown.
+  heap state can share that same single-call teardown.
 - CMake `add_subdirectory` integration, or single-header amalgamation
   (`dist/lfg-ctest.h`) for drop-in use without CMake or vendored sources.
 
