@@ -1,7 +1,7 @@
 # architecture.md — lfg-ctest internals
 
 This doc describes how the framework itself is put together. For the public
-API, see `README.md`.
+API, see [api.md](api.md).
 
 ## Two concerns, one static library
 

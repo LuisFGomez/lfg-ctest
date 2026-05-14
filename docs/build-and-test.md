@@ -157,7 +157,7 @@ produced by `tools/mkversion.c` at build time. The tool runs
 version. The CMake side pipes stdout through `copy_if_different` so a rebuild
 only retriggers downstream compilation when the version actually changed.
 
-Public surface (see `README.md`):
+Public surface (see [api.md](api.md)):
 
 - `LFG_CTEST_VERSION` / `LFG_CTEST_VERSION_FULL` / `LFG_CTEST_VERSION_MAJOR|_MINOR|_PATCH`
   (compile-time).
