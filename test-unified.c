@@ -456,44 +456,262 @@ static void test_double_failure_detection(void)
 #endif
 
 /* ============================================================================
+ * SETUP/TEARDOWN HOOK LIFECYCLE TESTS
+ *
+ * Verify the framework's setup -> body -> teardown sequencing on both
+ * lfg_ct_test and lfg_ct_suite: happy path, body failure (teardown still
+ * runs), NULL setup, NULL teardown, setup failure (body skipped, teardown
+ * still runs), and the suite-wraps-test nesting order.
+ *
+ * Each hook stamps a single character into _hook_trace so order is
+ * preserved end-to-end. Outer self-tests wrap the inner framework calls
+ * in expect-failures mode so intentional setup/body failures don't fail
+ * this binary's own result.
+ * ============================================================================ */
+
+static char _hook_trace[64];
+static size_t _hook_trace_len;
+
+static void _hook_trace_reset(void)
+{
+    _hook_trace_len = 0;
+    _hook_trace[0] = '\0';
+}
+
+static void _hook_trace_push(char c)
+{
+    if (_hook_trace_len + 1 < sizeof(_hook_trace))
+    {
+        _hook_trace[_hook_trace_len++] = c;
+        _hook_trace[_hook_trace_len] = '\0';
+    }
+}
+
+/* Phase callbacks: each appends a tag and (where indicated) fails an
+ * assertion. Tags: S/B/T for setup/body/teardown on the test-level
+ * happy/failure paths; s/t for suite-level setup/teardown in the nested
+ * ordering test. _body_unreachable stamps 'X' which the assertions
+ * verify never appears (i.e. the body was skipped). */
+static void _hook_setup_ok(void)         { _hook_trace_push('S'); }
+static void _hook_setup_fail(void)       { _hook_trace_push('S'); ASSERT_FAIL("intentional setup failure"); }
+static void _hook_body_ok(void)          { _hook_trace_push('B'); }
+static void _hook_body_fail(void)        { _hook_trace_push('B'); ASSERT_FAIL("intentional body failure"); }
+static void _hook_body_unreachable(void) { _hook_trace_push('X'); }
+static void _hook_teardown_ok(void)      { _hook_trace_push('T'); }
+
+static void _nested_suite_setup(void)    { _hook_trace_push('s'); }
+static void _nested_suite_teardown(void) { _hook_trace_push('t'); }
+static void _nested_suite_body(void)
+{
+    lfg_ct_test(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+}
+
+/* ---- lfg_ct_test variants ------------------------------------------------ */
+
+static void test_test_hooks_happy_path(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("SBT", _hook_trace);
+}
+
+static void test_test_hooks_body_failure_still_runs_teardown(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test(_hook_setup_ok, _hook_body_fail, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(1, observed);
+    ASSERT_STR_EQUAL("SBT", _hook_trace);
+}
+
+static void test_test_hooks_null_setup_skips_setup_phase(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test(NULL, _hook_body_ok, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("BT", _hook_trace);
+}
+
+static void test_test_hooks_null_teardown_skips_teardown_phase(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test(_hook_setup_ok, _hook_body_ok, NULL);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("SB", _hook_trace);
+}
+
+static void test_test_hooks_setup_failure_skips_body_runs_teardown(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test(_hook_setup_fail, _hook_body_unreachable, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    /* Exactly one failure (the setup), the body never recorded its tag,
+     * and teardown still ran. */
+    ASSERT_INT_EQUAL(1, observed);
+    ASSERT_STR_EQUAL("ST", _hook_trace);
+}
+
+/* ---- lfg_ct_suite variants ----------------------------------------------- */
+
+static void test_suite_hooks_happy_path(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("SBT", _hook_trace);
+}
+
+static void test_suite_hooks_body_failure_still_runs_teardown(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(_hook_setup_ok, _hook_body_fail, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(1, observed);
+    ASSERT_STR_EQUAL("SBT", _hook_trace);
+}
+
+static void test_suite_hooks_null_setup_skips_setup_phase(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(NULL, _hook_body_ok, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("BT", _hook_trace);
+}
+
+static void test_suite_hooks_null_teardown_skips_teardown_phase(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(_hook_setup_ok, _hook_body_ok, NULL);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    ASSERT_STR_EQUAL("SB", _hook_trace);
+}
+
+static void test_suite_hooks_setup_failure_skips_body_runs_teardown(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(_hook_setup_fail, _hook_body_unreachable, _hook_teardown_ok);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(1, observed);
+    ASSERT_STR_EQUAL("ST", _hook_trace);
+}
+
+/* ---- suite wraps test: nesting order ------------------------------------- */
+
+static void test_suite_wrapping_test_fires_hooks_in_nesting_order(void)
+{
+    int observed;
+
+    _hook_trace_reset();
+    lfg_ct_expect_failures_begin();
+    lfg_ct_suite(_nested_suite_setup, _nested_suite_body, _nested_suite_teardown);
+    observed = lfg_ct_expect_failures_end();
+
+    ASSERT_INT_EQUAL(0, observed);
+    /* suite-setup -> test-setup -> test-body -> test-teardown -> suite-teardown */
+    ASSERT_STR_EQUAL("sSBTt", _hook_trace);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
 static void suite_passing_tests(void)
 {
-    lfg_ctest(test_pointer_assertions_pass);
-    lfg_ctest(test_boolean_assertions_pass);
-    lfg_ctest(test_integer_assertions_pass);
-    lfg_ctest(test_string_assertions_pass);
-    lfg_ctest(test_memory_assertions_pass);
-    lfg_ctest(test_comparison_assertions_pass);
-    lfg_ctest(test_range_assertion_pass);
-    lfg_ctest(test_bit_assertions_pass);
+    lfg_ct_test(NULL, test_pointer_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_boolean_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_integer_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_string_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_memory_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_comparison_assertions_pass, NULL);
+    lfg_ct_test(NULL, test_range_assertion_pass, NULL);
+    lfg_ct_test(NULL, test_bit_assertions_pass, NULL);
 #ifdef LFG_CTEST_HAS_FLOAT
-    lfg_ctest(test_float_assertions_pass);
+    lfg_ct_test(NULL, test_float_assertions_pass, NULL);
 #endif
 #ifdef LFG_CTEST_HAS_DOUBLE
-    lfg_ctest(test_double_assertions_pass);
+    lfg_ct_test(NULL, test_double_assertions_pass, NULL);
 #endif
+}
+
+static void suite_hook_lifecycle_tests(void)
+{
+    lfg_ct_test(NULL, test_test_hooks_happy_path, NULL);
+    lfg_ct_test(NULL, test_test_hooks_body_failure_still_runs_teardown, NULL);
+    lfg_ct_test(NULL, test_test_hooks_null_setup_skips_setup_phase, NULL);
+    lfg_ct_test(NULL, test_test_hooks_null_teardown_skips_teardown_phase, NULL);
+    lfg_ct_test(NULL, test_test_hooks_setup_failure_skips_body_runs_teardown, NULL);
+    lfg_ct_test(NULL, test_suite_hooks_happy_path, NULL);
+    lfg_ct_test(NULL, test_suite_hooks_body_failure_still_runs_teardown, NULL);
+    lfg_ct_test(NULL, test_suite_hooks_null_setup_skips_setup_phase, NULL);
+    lfg_ct_test(NULL, test_suite_hooks_null_teardown_skips_teardown_phase, NULL);
+    lfg_ct_test(NULL, test_suite_hooks_setup_failure_skips_body_runs_teardown, NULL);
+    lfg_ct_test(NULL, test_suite_wrapping_test_fires_hooks_in_nesting_order, NULL);
 }
 
 static void suite_failure_detection_tests(void)
 {
-    lfg_ctest(test_pointer_failure_detection);
-    lfg_ctest(test_boolean_failure_detection);
-    lfg_ctest(test_integer_failure_detection);
-    lfg_ctest(test_integer64_failure_detection);
-    lfg_ctest(test_string_failure_detection);
-    lfg_ctest(test_memory_failure_detection);
-    lfg_ctest(test_comparison_failure_detection);
-    lfg_ctest(test_range_failure_detection);
-    lfg_ctest(test_bit_failure_detection);
-    lfg_ctest(test_explicit_fail_detection);
+    lfg_ct_test(NULL, test_pointer_failure_detection, NULL);
+    lfg_ct_test(NULL, test_boolean_failure_detection, NULL);
+    lfg_ct_test(NULL, test_integer_failure_detection, NULL);
+    lfg_ct_test(NULL, test_integer64_failure_detection, NULL);
+    lfg_ct_test(NULL, test_string_failure_detection, NULL);
+    lfg_ct_test(NULL, test_memory_failure_detection, NULL);
+    lfg_ct_test(NULL, test_comparison_failure_detection, NULL);
+    lfg_ct_test(NULL, test_range_failure_detection, NULL);
+    lfg_ct_test(NULL, test_bit_failure_detection, NULL);
+    lfg_ct_test(NULL, test_explicit_fail_detection, NULL);
 #ifdef LFG_CTEST_HAS_FLOAT
-    lfg_ctest(test_float_failure_detection);
+    lfg_ct_test(NULL, test_float_failure_detection, NULL);
 #endif
 #ifdef LFG_CTEST_HAS_DOUBLE
-    lfg_ctest(test_double_failure_detection);
+    lfg_ct_test(NULL, test_double_failure_detection, NULL);
 #endif
 }
 
@@ -515,11 +733,15 @@ int main(void)
     printf("\n");
 
     printf("--- SUITE 1: PASSING TESTS ---\n");
-    lfg_ct_suite(suite_passing_tests);
+    lfg_ct_suite(NULL, suite_passing_tests, NULL);
 
     printf("\n--- SUITE 2: FAILURE DETECTION TESTS ---\n");
     printf("(Verifies the framework correctly detects assertion failures)\n");
-    lfg_ct_suite(suite_failure_detection_tests);
+    lfg_ct_suite(NULL, suite_failure_detection_tests, NULL);
+
+    printf("\n--- SUITE 3: SETUP/TEARDOWN HOOK LIFECYCLE TESTS ---\n");
+    printf("(Verifies setup -> body -> teardown sequencing and NULL handling)\n");
+    lfg_ct_suite(NULL, suite_hook_lifecycle_tests, NULL);
 
     printf("\n");
     printf("================================================================================\n");

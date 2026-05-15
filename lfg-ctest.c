@@ -111,21 +111,73 @@ void lfg_ct_end(void)
 {
 }
 
-void lfg_ct_suite_impl(void (*fn)(void), const char *name)
+/* Setup-failure detector: any assertion failure flips
+ * _assertions_failed (normal mode) or _expected_failures_count
+ * (expect-failures self-test mode). Summing both lets the lifecycle
+ * helper notice setup failures regardless of which mode is active.
+ */
+static int
+_lifecycle_failure_total(void)
 {
+#ifdef LFG_CTEST_SELF_TEST
+    return _assertions_failed + _expected_failures_count;
+#else
+    return _assertions_failed;
+#endif
+}
+
+/* Shared setup -> body -> teardown lifecycle. Teardown runs whenever
+ * provided, even if the body or its assertions failed. If setup itself
+ * fails an assertion the body is skipped but teardown still runs --
+ * setup may have partially acquired resources before failing.
+ */
+static void
+_lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(void))
+{
+    int setup_failures_before = 0;
+    int setup_failed = 0;
+
+    if (setup)
+    {
+        setup_failures_before = _lifecycle_failure_total();
+        setup();
+        setup_failed = (_lifecycle_failure_total() > setup_failures_before);
+    }
+
+    if (!setup_failed && body)
+    {
+        body();
+    }
+
+    if (teardown)
+    {
+        teardown();
+    }
+}
+
+void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+{
+    /* Suite-level setup/teardown failures aren't owned by any test, so
+     * track real assertion failures across the whole suite scope to
+     * decide whether to print "suite FAILURE". Use _assertions_failed
+     * (not _lifecycle_failure_total) so the print stays quiet when
+     * self-tests intentionally drive suite-level failures inside
+     * expect-failures mode. */
+    int suite_assertions_failed_before = _assertions_failed;
+
     _current_suite_failures = 0;
-    fn();
-    if (_current_suite_failures > 0)
+    _lfg_ct_run_lifecycle(setup, fn, teardown);
+    if (_current_suite_failures > 0 || _assertions_failed > suite_assertions_failed_before)
     {
         printf("*** suite FAILURE: %s\r\n", name);
     }
 }
 
-void lfg_ct_impl(void (*fn)(void), const char *name)
+void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
     _tests_executed++;
     _current_test_failures = 0;
-    fn();
+    _lfg_ct_run_lifecycle(setup, fn, teardown);
     if (_current_test_failures > 0)
     {
         _current_suite_failures++;

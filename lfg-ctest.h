@@ -260,9 +260,18 @@
 #define ASSERT_NULL(_a) ASSERT_PTR_NULL(_a)
 #define ASSERT_NOT_NULL(_a) ASSERT_PTR_NOT_NULL(_a)
 
-#define lfg_ct_suite(_suite) lfg_ct_suite_impl(_suite, #_suite)
+/** Execute a suite of tests with optional setup/teardown hooks.
+ *  Pass NULL for @p _setup or @p _teardown to skip that phase.
+ *  Teardown runs even if the body or its assertions fail; if @p _setup
+ *  itself triggers an assertion failure the body is skipped but teardown
+ *  still runs. All three callbacks are @c void(void).
+ */
+#define lfg_ct_suite(_setup, _suite, _teardown) lfg_ct_suite_impl((_setup), (_suite), (_teardown), #_suite)
 
-#define lfg_ctest(_test) lfg_ct_impl(_test, #_test)
+/** Execute a single unit test with optional setup/teardown hooks.
+ *  Same lifecycle semantics as @ref lfg_ct_suite.
+ */
+#define lfg_ct_test(_setup, _test, _teardown) lfg_ct_test_impl((_setup), (_test), (_teardown), #_test)
 
 /*============================================================================
  *  Public API
@@ -282,13 +291,17 @@ void lfg_ct_start(void);
  */
 void lfg_ct_end(void);
 
-/** Execute a suite of tests.
+/** Execute a suite of tests with optional setup/teardown hooks.
+ *  See @ref lfg_ct_suite for lifecycle semantics. Pass @c NULL for any
+ *  hook that should be skipped.
  */
-void lfg_ct_suite_impl(void (*fn)(void), const char *name);
+void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
 
-/** Execute a single unit test.
+/** Execute a single unit test with optional setup/teardown hooks.
+ *  See @ref lfg_ct_test for lifecycle semantics. Pass @c NULL for any
+ *  hook that should be skipped.
  */
-void lfg_ct_impl(void (*fn)(void), const char *name);
+void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
 
 /** Print test summary.
  */
