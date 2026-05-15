@@ -179,8 +179,6 @@ static void test_led_reset_sends_correct_command(void)
     /* Verify our callback was invoked correctly */
     ASSERT_EQ(0, _callback_status);
     ASSERT_PTR_EQUAL(&dummy_ctx, _callback_ctx);
-
-    _teardown();
 }
 
 /* Test: led_set_brightness sends correct I2C command */
@@ -197,22 +195,20 @@ static void test_led_set_brightness(void)
     ASSERT_UINT8_EQUAL(0x15, captured_buf[0]);  /* register 0x10 + channel 5 */
     ASSERT_UINT8_EQUAL(0xBC, captured_buf[1]);  /* brightness low byte */
     ASSERT_UINT8_EQUAL(0x0A, captured_buf[2]);  /* brightness high byte */
-
-    _teardown();
 }
 
-/* Test suite */
+/* Test suite — _teardown runs after each test, even on assertion failure */
 void led_driver_suite(void)
 {
-    lfg_ctest(test_led_reset_sends_correct_command);
-    lfg_ctest(test_led_set_brightness);
+    lfg_ct_test(NULL, test_led_reset_sends_correct_command, _teardown);
+    lfg_ct_test(NULL, test_led_set_brightness, _teardown);
 }
 
 /* Test runner */
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_suite(led_driver_suite);
+    lfg_ct_suite(NULL, led_driver_suite, NULL);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

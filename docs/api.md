@@ -22,7 +22,7 @@ void test_example(void)
 int main(void)
 {
     lfg_ct_start();
-    lfg_ctest(test_example);
+    lfg_ct_test(NULL, test_example, NULL);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -35,16 +35,16 @@ Suites are also `void` functions that group related tests:
 ```c
 void math_suite(void)
 {
-    lfg_ctest(test_addition);
-    lfg_ctest(test_subtraction);
-    lfg_ctest(test_multiplication);
+    lfg_ct_test(NULL, test_addition, NULL);
+    lfg_ct_test(NULL, test_subtraction, NULL);
+    lfg_ct_test(NULL, test_multiplication, NULL);
 }
 
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_suite(math_suite);
-    lfg_ct_suite(string_suite);
+    lfg_ct_suite(NULL, math_suite, NULL);
+    lfg_ct_suite(NULL, string_suite, NULL);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -56,8 +56,8 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ctest(fn)` | Execute a single test function (`void fn(void)`) |
-| `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`) |
+| `lfg_ct_test(setup, fn, teardown)` | Execute a single test (`void fn(void)`) with optional `setup` / `teardown` hooks (pass `NULL` to skip). Teardown runs even if the body or setup fails. |
+| `lfg_ct_suite(setup, fn, teardown)` | Execute a test suite (`void fn(void)`) with optional `setup` / `teardown` hooks; same lifecycle as `lfg_ct_test`. |
 | `lfg_ct_print_summary()` | Print pass/fail summary |
 | `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
@@ -92,56 +92,47 @@ prompts before creating it, and opens `$EDITOR` for the annotation message.
 
 ### Setup and Teardown
 
-lfg-ctest does not impose any setup/teardown mechanism. They're just functions you call however you like:
+Both `lfg_ct_test` and `lfg_ct_suite` take a `setup` and a `teardown`
+callback alongside the body. Lifecycle, with `body` being the suite or test
+function:
+
+1. `setup()` runs first, if non-`NULL`.
+2. `body()` runs next — **skipped** if `setup()` triggered an assertion failure.
+3. `teardown()` runs last, if non-`NULL`. **Always** runs, even if the body
+   or its assertions failed, and even if `setup()` failed.
+
+Callbacks take no arguments and return `void`. Pass `NULL` for any phase
+you don't need:
 
 ```c
-static void setup(void)
-{
-    // initialize test state
-    mock_reset_all();
-    global_state = initial_value;
-}
-
-static void teardown(void)
-{
-    // cleanup after test
-    mock_reset_all();
-    free(allocated_memory);
-}
+static void setup(void)    { mock_reset_all(); global_state = initial_value; }
+static void teardown(void) { mock_reset_all(); free(allocated_memory); }
 
 void test_something(void)
 {
-    setup();
+    ASSERT_EQ(expected, some_function());
+}
 
-    // ... test logic ...
-    ASSERT_EQ(expected, actual);
-
-    teardown();
+int main(void)
+{
+    lfg_ct_start();
+    lfg_ct_test(setup, test_something, teardown);
+    lfg_ct_print_summary();
+    return lfg_ct_return();
 }
 ```
 
-Call them per-test, per-suite, or not at all—your choice:
+When `lfg_ct_suite` wraps `lfg_ct_test` calls, hooks fire in standard
+nesting order:
 
-```c
-void my_suite(void)
-{
-    setup();  // once for the whole suite
-
-    lfg_ctest(test_case_1);
-    lfg_ctest(test_case_2);
-    lfg_ctest(test_case_3);
-
-    teardown();
-}
-
-// Or per-test if each needs isolation:
-void test_with_isolation(void)
-{
-    setup();
-    ASSERT_TRUE(condition);
-    teardown();
-}
 ```
+suite-setup -> test-setup -> test -> test-teardown -> suite-teardown
+```
+
+Apply setup/teardown at whichever level fits the resource's scope: per-test
+when each case needs isolation, per-suite when one acquisition is shared
+across the whole batch, or skip the argument entirely (`NULL`) when no
+fixture is required.
 
 ### Assertion Reference
 

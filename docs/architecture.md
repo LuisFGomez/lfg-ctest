@@ -17,9 +17,31 @@ the runner without ever pulling in the mock macros.
 ## Core runner (`lfg-ctest.c`)
 
 State lives in a small set of file-scope statics (pass/fail counters, current
-test name, etc.). All public entry points (`lfg_ct_start`, `lfg_ctest`,
+test name, etc.). All public entry points (`lfg_ct_start`, `lfg_ct_test`,
 `lfg_ct_suite`, `lfg_ct_print_summary`, `lfg_ct_return`) mutate this state.
 There is no reentrancy guarantee — one test run at a time.
+
+### Setup / teardown lifecycle
+
+Both `lfg_ct_test_impl` and `lfg_ct_suite_impl` route through a single
+internal helper, `_lfg_ct_run_lifecycle`, that drives the
+`setup -> body -> teardown` sequence:
+
+1. If `setup` is non-`NULL`, snapshot the total observed failures
+   (`_assertions_failed`, plus `_expected_failures_count` when self-test
+   mode is on), then run `setup`. A delta in that total marks the setup as
+   failed.
+2. If the setup did not fail (or there was no setup), run `body`.
+3. If `teardown` is non-`NULL`, run it — always, regardless of body or
+   setup outcome. Teardown's job is resource cleanup, so the framework
+   guarantees it runs whenever the consumer asked for it.
+
+The framework already continues past failed assertions (assertion impls
+return `-1` and bump a counter; they don't abort), so no `setjmp`/signal
+boundary is needed to keep teardown reachable after a body failure. The
+setup-failure detector exists only so the body can be skipped — a failing
+setup may have left partially acquired resources, but the rest of the
+body's work is no longer meaningful.
 
 Every assertion macro in `lfg-ctest.h` ultimately routes to an internal
 failure path that:
