@@ -291,6 +291,56 @@ void lfg_ct_start(void);
  */
 void lfg_ct_end(void);
 
+/** Parse command-line flags consumed by the runner.
+ *
+ *  Recognized flags:
+ *   - @c --list                  : print every test/suite name encountered
+ *                                  (one per line, on stdout) without executing
+ *                                  their bodies. Setup/teardown of tests and
+ *                                  suites are skipped; a suite's body is still
+ *                                  invoked so the names of contained tests
+ *                                  can be listed.
+ *   - @c --filter \<glob\>         : only run entries whose registered name
+ *                                  matches the shell-style glob (@c fnmatch(3)
+ *                                  syntax: @c *, @c ?, @c [...]). Repeating
+ *                                  the flag OR-combines the patterns. If a
+ *                                  suite's name matches, every entry inside
+ *                                  the suite is considered matched.
+ *   - @c --filter-exclude \<glob\> : skip entries whose registered name
+ *                                  matches the glob. Inverse of @c --filter,
+ *                                  same repeat / OR semantics. Exclude wins
+ *                                  on overlap with @c --filter.
+ *
+ *  An unmatched filter is not an error -- zero tests execute and the program
+ *  exits 0. Unknown flags print a short usage message to stderr and produce
+ *  a non-zero return value; callers should propagate that to @c main.
+ *
+ *  Calling @c lfg_ct_parse_args again replaces any previously parsed state.
+ *
+ *  @param argc Standard @c main argc.
+ *  @param argv Standard @c main argv (referenced for filter glob strings;
+ *              must outlive subsequent test/suite invocations).
+ *  @return     0 on success, non-zero on a malformed or unknown flag.
+ */
+int lfg_ct_parse_args(int argc, char *argv[]);
+
+/** Query whether the runner is currently in @c --list mode.
+ *  @return 1 if @c --list was parsed, 0 otherwise.
+ */
+int lfg_ct_is_list_mode(void);
+
+/** Query whether a hypothetical test/suite with @p name would be executed by
+ *  the runner under the currently parsed filter/exclude rules.
+ *
+ *  Useful to short-circuit expensive setup outside the framework, or to test
+ *  the matching logic in isolation. List-mode is treated as "no execution"
+ *  for the purpose of this query (returns 0 when @c --list is active).
+ *
+ *  @param name Registered test/suite name to check.
+ *  @return 1 if the entry would run, 0 if filtered, excluded, or in list mode.
+ */
+int lfg_ct_name_runs(const char *name);
+
 /** Execute a suite of tests with optional setup/teardown hooks.
  *  See @ref lfg_ct_suite for lifecycle semantics. Pass @c NULL for any
  *  hook that should be skipped.

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <fnmatch.h>
 #if defined(LFG_CTEST_HAS_FLOAT) || defined(LFG_CTEST_HAS_DOUBLE)
 #include <math.h>
 #endif
@@ -35,6 +36,21 @@ static int _tests_failed = 0;
 static int _tests_passed = 0;
 static int _current_test_failures = 0;
 static int _current_suite_failures = 0;
+
+/* lfg_ct_parse_args() runtime state. The glob arrays hold borrowed pointers
+ * into the caller's argv (which has program lifetime under standard main()
+ * usage), so no string copies or frees are needed. */
+#define LFG_CT_FILTER_MAX 64
+
+static int _list_mode = 0;
+static const char *_filter_globs[LFG_CT_FILTER_MAX];
+static int _filter_glob_count = 0;
+static const char *_exclude_globs[LFG_CT_FILTER_MAX];
+static int _exclude_glob_count = 0;
+/* Depth of nested suites whose name matched the filter. Tests inside such
+ * a suite inherit the filter-pass (so "--filter suite_foo*" runs every test
+ * the suite holds without each test having to match individually). */
+static int _filter_inherited_depth = 0;
 
 /*============================================================================
  *  Self-Test Support (internal only)
@@ -102,13 +118,152 @@ lfg_ct_version(void)
 void lfg_ct_start(void)
 {
     unsigned rand_seed = time(NULL) % 1000;
-    printf("*** begin unit test\r\n");
-    printf("*** random seed is %u\r\n", rand_seed);
+    /* List mode wants stdout to be a clean newline-separated list of names;
+     * skip the banner and the seed announcement. srand still runs so any
+     * deterministic-by-seed test behavior stays consistent if the user
+     * combines --list with other operations. */
+    if (!_list_mode)
+    {
+        printf("*** begin unit test\r\n");
+        printf("*** random seed is %u\r\n", rand_seed);
+    }
     srand(rand_seed);
 }
 
 void lfg_ct_end(void)
 {
+}
+
+/* Match @p name against any glob in @p globs (length @p count) using
+ * fnmatch(3) shell-glob semantics. */
+static int
+_glob_list_matches(const char *name, const char *const *globs, int count)
+{
+    int i;
+
+    if (NULL == name)
+    {
+        return 0;
+    }
+    for (i = 0; i < count; i++)
+    {
+        if (0 == fnmatch(globs[i], name, 0))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void
+_filter_state_reset(void)
+{
+    _list_mode = 0;
+    _filter_glob_count = 0;
+    _exclude_glob_count = 0;
+    _filter_inherited_depth = 0;
+}
+
+static void
+_filter_print_usage(const char *progname)
+{
+    fprintf(stderr,
+            "Usage: %s [options]\r\n"
+            "  --list                   List registered test/suite names and exit 0\r\n"
+            "  --filter <glob>          Run only entries whose name matches <glob>\r\n"
+            "  --filter-exclude <glob>  Skip entries whose name matches <glob>\r\n"
+            "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
+            "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
+            progname ? progname : "test");
+}
+
+int
+lfg_ct_parse_args(int argc, char *argv[])
+{
+    const char *progname;
+    int i;
+
+    _filter_state_reset();
+    progname = (argc > 0 && argv && argv[0]) ? argv[0] : "test";
+
+    for (i = 1; i < argc; i++)
+    {
+        const char *a = argv[i];
+
+        const char **slot = NULL;
+        int *count = NULL;
+
+        if (0 == strcmp(a, "--list"))
+        {
+            _list_mode = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "--filter"))
+        {
+            slot = _filter_globs;
+            count = &_filter_glob_count;
+        }
+        else if (0 == strcmp(a, "--filter-exclude"))
+        {
+            slot = _exclude_globs;
+            count = &_exclude_glob_count;
+        }
+        else
+        {
+            fprintf(stderr, "%s: unrecognized option: %s\r\n", progname, a);
+            _filter_print_usage(progname);
+            _filter_state_reset();
+            return -1;
+        }
+
+        if (i + 1 >= argc)
+        {
+            fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+            _filter_print_usage(progname);
+            _filter_state_reset();
+            return -1;
+        }
+        if (*count >= LFG_CT_FILTER_MAX)
+        {
+            fprintf(stderr, "%s: too many %s patterns (max %d)\r\n", progname, a, LFG_CT_FILTER_MAX);
+            _filter_state_reset();
+            return -1;
+        }
+        slot[(*count)++] = argv[++i];
+    }
+    return 0;
+}
+
+int
+lfg_ct_is_list_mode(void)
+{
+    return _list_mode ? 1 : 0;
+}
+
+/* Pure name predicate -- ignores list mode (which suppresses execution
+ * regardless of filter state). */
+static int
+_filter_admits(const char *name)
+{
+    if (_exclude_glob_count > 0 && _glob_list_matches(name, _exclude_globs, _exclude_glob_count))
+    {
+        return 0;
+    }
+    if (0 == _filter_glob_count || _filter_inherited_depth > 0)
+    {
+        return 1;
+    }
+    return _glob_list_matches(name, _filter_globs, _filter_glob_count);
+}
+
+int
+lfg_ct_name_runs(const char *name)
+{
+    if (_list_mode)
+    {
+        return 0;
+    }
+    return _filter_admits(name);
 }
 
 /* Setup-failure detector: any assertion failure flips
@@ -157,13 +312,43 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
 
 void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
+    int suite_assertions_failed_before;
+    int inherited_pushed = 0;
+
+    if (_list_mode)
+    {
+        /* Print the suite name and recurse into the body without setup/
+         * teardown so contained lfg_ct_test() calls can list themselves. */
+        printf("%s\r\n", name);
+        if (fn)
+        {
+            fn();
+        }
+        return;
+    }
+
+    /* Exclude is checked first and is decisive: a matched suite is skipped
+     * entirely, no descent. Filter is checked second; a non-match still
+     * descends so inner tests can be evaluated individually. A suite that
+     * matches the filter propagates the pass to every descendant. */
+    if (_exclude_glob_count > 0 && _glob_list_matches(name, _exclude_globs, _exclude_glob_count))
+    {
+        return;
+    }
+    if (_filter_glob_count > 0 && 0 == _filter_inherited_depth
+            && _glob_list_matches(name, _filter_globs, _filter_glob_count))
+    {
+        _filter_inherited_depth++;
+        inherited_pushed = 1;
+    }
+
     /* Suite-level setup/teardown failures aren't owned by any test, so
      * track real assertion failures across the whole suite scope to
      * decide whether to print "suite FAILURE". Use _assertions_failed
      * (not _lifecycle_failure_total) so the print stays quiet when
      * self-tests intentionally drive suite-level failures inside
      * expect-failures mode. */
-    int suite_assertions_failed_before = _assertions_failed;
+    suite_assertions_failed_before = _assertions_failed;
 
     _current_suite_failures = 0;
     _lfg_ct_run_lifecycle(setup, fn, teardown);
@@ -171,10 +356,25 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
     {
         printf("*** suite FAILURE: %s\r\n", name);
     }
+
+    if (inherited_pushed)
+    {
+        _filter_inherited_depth--;
+    }
 }
 
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
+    if (_list_mode)
+    {
+        printf("%s\r\n", name);
+        return;
+    }
+    if (!_filter_admits(name))
+    {
+        return;
+    }
+
     _tests_executed++;
     _current_test_failures = 0;
     _lfg_ct_run_lifecycle(setup, fn, teardown);
@@ -192,6 +392,11 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
 
 void lfg_ct_print_summary(void)
 {
+    if (_list_mode)
+    {
+        /* No tests ran; reporting "0 assertions / 0 tests" is misleading. */
+        return;
+    }
     printf("*** Executed %d assertions in %d tests. Failures: %d\r\n"
            "*** Testing complete. Result: %s\r\n",
             _assertions_executed, _tests_executed, _tests_failed, _tests_failed ? "FAIL" : "PASS");
