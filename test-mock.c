@@ -2100,8 +2100,12 @@ static void suite_mock_register_cleanup(void)
  *  Main
  *==========================================================================*/
 
-int main(void)
+int main(int argc, char *argv[])
 {
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
     lfg_ct_start();
 
     printf("\n");

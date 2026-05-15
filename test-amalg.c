@@ -92,8 +92,12 @@ smoke_suite(void)
 }
 
 int
-main(void)
+main(int argc, char *argv[])
 {
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
     lfg_ct_start();
     lfg_ct_suite(NULL, smoke_suite, NULL);
     lfg_ct_print_summary();

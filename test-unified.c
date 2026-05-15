@@ -659,6 +659,245 @@ static void test_suite_wrapping_test_fires_hooks_in_nesting_order(void)
 }
 
 /* ============================================================================
+ * --list / --filter / --filter-exclude argument-parsing tests
+ *
+ * These exercise lfg_ct_parse_args() and its consumption by the runner.
+ * The nested lfg_ct_test_impl() calls in the body-skipping tests rely on
+ * lfg_ct_test_impl() being a no-op when the name is filtered out -- in
+ * that case it does not touch _current_test_failures, so the outer test's
+ * assertion state is preserved.
+ * ============================================================================ */
+
+static int _filter_body_called;
+
+static void _filter_body(void)
+{
+    _filter_body_called = 1;
+}
+
+static void test_filter_parse_no_args_runs_everything(void)
+{
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_list_mode());
+    ASSERT_TRUE(lfg_ct_name_runs("anything"));
+    ASSERT_TRUE(lfg_ct_name_runs("suite_xyz"));
+}
+
+static void test_filter_parse_filter_basic(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"test_*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_name_runs("test_foo"));
+    ASSERT_FALSE(lfg_ct_name_runs("suite_bar"));
+}
+
+static void test_filter_parse_exclude_basic(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter-exclude", (char *)"*_skip"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_FALSE(lfg_ct_name_runs("test_skip"));
+    ASSERT_TRUE(lfg_ct_name_runs("test_run"));
+}
+
+static void test_filter_parse_exclude_wins_over_filter(void)
+{
+    char *argv[] = {
+        (char *)"prog", (char *)"--filter", (char *)"test_*", (char *)"--filter-exclude", (char *)"*_skip"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_FALSE(lfg_ct_name_runs("test_skip")); /* both match, exclude wins */
+    ASSERT_TRUE(lfg_ct_name_runs("test_run"));
+    ASSERT_FALSE(lfg_ct_name_runs("suite_bar")); /* filter doesn't match */
+}
+
+static void test_filter_parse_repeated_filter_ors(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"alpha*", (char *)"--filter", (char *)"beta*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_TRUE(lfg_ct_name_runs("alpha_x"));
+    ASSERT_TRUE(lfg_ct_name_runs("beta_y"));
+    ASSERT_FALSE(lfg_ct_name_runs("gamma"));
+}
+
+static void test_filter_parse_repeated_exclude_ors(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter-exclude", (char *)"alpha*", (char *)"--filter-exclude",
+            (char *)"beta*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_FALSE(lfg_ct_name_runs("alpha_x"));
+    ASSERT_FALSE(lfg_ct_name_runs("beta_y"));
+    ASSERT_TRUE(lfg_ct_name_runs("gamma"));
+}
+
+static void test_filter_parse_unmatched_filter_runs_nothing(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"no_match*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_FALSE(lfg_ct_name_runs("test_foo"));
+    ASSERT_FALSE(lfg_ct_name_runs("suite_bar"));
+}
+
+static void test_filter_parse_list_mode_set(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--list"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_list_mode());
+    /* list mode reports name_runs == 0 because the body would not execute */
+    ASSERT_FALSE(lfg_ct_name_runs("anything"));
+}
+
+static void test_filter_parse_unknown_flag_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--bogus"};
+    /* prints usage to stderr by design; we only check the return value */
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    /* state must be reset on error so subsequent calls start clean */
+    ASSERT_INT_EQUAL(0, lfg_ct_is_list_mode());
+}
+
+static void test_filter_parse_missing_filter_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+}
+
+static void test_filter_parse_missing_exclude_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter-exclude"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+}
+
+static void test_filter_parse_glob_wildcards(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"suite_?ma_*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_name_runs("suite_sma_basic"));
+    ASSERT_TRUE(lfg_ct_name_runs("suite_ema_basic"));
+    ASSERT_FALSE(lfg_ct_name_runs("suite_xx_basic"));
+    ASSERT_FALSE(lfg_ct_name_runs("suite_sma")); /* trailing _* requires an _ */
+}
+
+static void test_filter_parse_charclass_globs(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"test_[ab]*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_name_runs("test_apple"));
+    ASSERT_TRUE(lfg_ct_name_runs("test_banana"));
+    ASSERT_FALSE(lfg_ct_name_runs("test_cherry"));
+}
+
+static void test_filter_runner_skips_filtered_test_body(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"match_me*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+
+    _filter_body_called = 0;
+    lfg_ct_test_impl(NULL, _filter_body, NULL, "no_match");
+    ASSERT_INT_EQUAL(0, _filter_body_called);
+
+    _filter_body_called = 0;
+    lfg_ct_test_impl(NULL, _filter_body, NULL, "match_me_yes");
+    ASSERT_INT_EQUAL(1, _filter_body_called);
+}
+
+static void test_filter_runner_skips_excluded_test_body(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter-exclude", (char *)"skip_*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+
+    _filter_body_called = 0;
+    lfg_ct_test_impl(NULL, _filter_body, NULL, "skip_me");
+    ASSERT_INT_EQUAL(0, _filter_body_called);
+
+    _filter_body_called = 0;
+    lfg_ct_test_impl(NULL, _filter_body, NULL, "run_me");
+    ASSERT_INT_EQUAL(1, _filter_body_called);
+}
+
+static void test_filter_runner_skips_all_bodies_in_list_mode(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--list"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+
+    _filter_body_called = 0;
+    /* list mode prints "anything\r\n" to stdout but skips the body */
+    lfg_ct_test_impl(NULL, _filter_body, NULL, "anything");
+    ASSERT_INT_EQUAL(0, _filter_body_called);
+}
+
+static int _filter_inner_called;
+
+static void _filter_inner_body(void)
+{
+    _filter_inner_called = 1;
+}
+
+static void _filter_inheriting_suite_body(void)
+{
+    /* The inner test's name does NOT match "inheriting_suite_filter*"; it
+     * runs only because the outer suite's name matched and the match was
+     * inherited down through _filter_inherited_depth. */
+    lfg_ct_test_impl(NULL, _filter_inner_body, NULL, "unrelated_inner_test");
+}
+
+static void _filter_non_matching_suite_body(void)
+{
+    /* Used to verify the negative case: no suite-match, so the inner test
+     * must match the filter on its own. Its name doesn't match either, so
+     * the body must NOT run. */
+    lfg_ct_test_impl(NULL, _filter_inner_body, NULL, "unrelated_inner_test");
+}
+
+static void test_filter_runner_suite_match_propagates_to_inner_tests(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"inheriting_suite_filter*"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+
+    /* Positive: matching outer suite -> inner test runs by inheritance. */
+    _filter_inner_called = 0;
+    lfg_ct_suite_impl(NULL, _filter_inheriting_suite_body, NULL, "inheriting_suite_filter_demo");
+    ASSERT_INT_EQUAL(1, _filter_inner_called);
+
+    /* Negative: non-matching outer suite -> still descends, but inner test
+     * has to match on its own. It doesn't, so body stays unrun. */
+    _filter_inner_called = 0;
+    lfg_ct_suite_impl(NULL, _filter_non_matching_suite_body, NULL, "unrelated_outer_suite");
+    ASSERT_INT_EQUAL(0, _filter_inner_called);
+}
+
+static void test_filter_reset_state_for_remaining_tests(void)
+{
+    /* The final test in this suite restores default state so subsequent
+     * suites in this binary run unfiltered. */
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_list_mode());
+    ASSERT_TRUE(lfg_ct_name_runs("anything"));
+}
+
+static void suite_filter_args_tests(void)
+{
+    lfg_ct_test(NULL, test_filter_parse_no_args_runs_everything, NULL);
+    lfg_ct_test(NULL, test_filter_parse_filter_basic, NULL);
+    lfg_ct_test(NULL, test_filter_parse_exclude_basic, NULL);
+    lfg_ct_test(NULL, test_filter_parse_exclude_wins_over_filter, NULL);
+    lfg_ct_test(NULL, test_filter_parse_repeated_filter_ors, NULL);
+    lfg_ct_test(NULL, test_filter_parse_repeated_exclude_ors, NULL);
+    lfg_ct_test(NULL, test_filter_parse_unmatched_filter_runs_nothing, NULL);
+    lfg_ct_test(NULL, test_filter_parse_list_mode_set, NULL);
+    lfg_ct_test(NULL, test_filter_parse_unknown_flag_fails, NULL);
+    lfg_ct_test(NULL, test_filter_parse_missing_filter_arg_fails, NULL);
+    lfg_ct_test(NULL, test_filter_parse_missing_exclude_arg_fails, NULL);
+    lfg_ct_test(NULL, test_filter_parse_glob_wildcards, NULL);
+    lfg_ct_test(NULL, test_filter_parse_charclass_globs, NULL);
+    lfg_ct_test(NULL, test_filter_runner_skips_filtered_test_body, NULL);
+    lfg_ct_test(NULL, test_filter_runner_skips_excluded_test_body, NULL);
+    lfg_ct_test(NULL, test_filter_runner_skips_all_bodies_in_list_mode, NULL);
+    lfg_ct_test(NULL, test_filter_runner_suite_match_propagates_to_inner_tests, NULL);
+    lfg_ct_test(NULL, test_filter_reset_state_for_remaining_tests, NULL);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
@@ -719,8 +958,13 @@ static void suite_failure_detection_tests(void)
  * MAIN
  * ============================================================================ */
 
-int main(void)
+int main(int argc, char *argv[])
 {
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
+
     lfg_ct_start();
 
     printf("\n");
@@ -742,6 +986,10 @@ int main(void)
     printf("\n--- SUITE 3: SETUP/TEARDOWN HOOK LIFECYCLE TESTS ---\n");
     printf("(Verifies setup -> body -> teardown sequencing and NULL handling)\n");
     lfg_ct_suite(NULL, suite_hook_lifecycle_tests, NULL);
+
+    printf("\n--- SUITE 4: --list / --filter / --filter-exclude ARG PARSING ---\n");
+    printf("(Verifies lfg_ct_parse_args and the runner's filter-state consumption)\n");
+    lfg_ct_suite(NULL, suite_filter_args_tests, NULL);
 
     printf("\n");
     printf("================================================================================\n");
