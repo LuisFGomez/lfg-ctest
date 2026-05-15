@@ -56,11 +56,61 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering). |
+| `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
+| `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). |
 | `lfg_ct_test(setup, fn, teardown)` | Execute a single test (`void fn(void)`) with optional `setup` / `teardown` hooks (pass `NULL` to skip). Teardown runs even if the body or setup fails. |
 | `lfg_ct_suite(setup, fn, teardown)` | Execute a test suite (`void fn(void)`) with optional `setup` / `teardown` hooks; same lifecycle as `lfg_ct_test`. |
 | `lfg_ct_print_summary()` | Print pass/fail summary |
 | `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
+
+### Listing and filtering
+
+`lfg_ct_parse_args(argc, argv)` lets a single test binary expose the
+registered names and a name-glob selector — the natural pairing for
+CMake-driven `ctest --parallel` workloads where one binary backs many
+`add_test` entries:
+
+```cmake
+foreach(ind sma ema wma)
+  add_test(NAME test_ind_${ind} COMMAND test_indicators --filter "suite_${ind}_*")
+endforeach()
+```
+
+Recognized flags:
+
+| Flag | Effect |
+|------|--------|
+| `--list` | Print every test/suite name encountered (one per line, on stdout). Suite bodies are still invoked so their contained tests can list themselves; setup/teardown of suites and tests are skipped. |
+| `--filter <glob>` | Run only entries whose registered name matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite name matches, every entry inside the suite inherits the match — useful with the `add_test` pattern above. |
+| `--filter-exclude <glob>` | Skip entries whose name matches the glob. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same name. |
+
+An unmatched filter is not an error: zero tests run, the binary exits 0.
+Unknown flags print usage to stderr and return non-zero — `main` should
+propagate that. Wire it once at the top of `main`:
+
+```c
+int main(int argc, char *argv[])
+{
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
+    lfg_ct_start();
+    /* ... lfg_ct_suite / lfg_ct_test calls ... */
+    lfg_ct_print_summary();
+    return lfg_ct_return();
+}
+```
+
+`lfg_ct_name_runs(name)` lets a consumer short-circuit expensive setup
+outside the framework (e.g. opening a database connection) when the
+current filter state would skip the test anyway. `lfg_ct_is_list_mode()`
+exposes the `--list` bit directly — gate your own diagnostic prints on
+`!lfg_ct_is_list_mode()` if you want stdout to be a clean
+newline-separated list of names. Each call to `lfg_ct_parse_args`
+replaces any previously parsed state.
 
 ### Version Macros
 
