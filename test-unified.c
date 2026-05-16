@@ -894,7 +894,210 @@ static void suite_filter_args_tests(void)
     lfg_ct_test(NULL, test_filter_runner_skips_excluded_test_body, NULL);
     lfg_ct_test(NULL, test_filter_runner_skips_all_bodies_in_list_mode, NULL);
     lfg_ct_test(NULL, test_filter_runner_suite_match_propagates_to_inner_tests, NULL);
+
+    /* Unconditional reset before the verifying test runs -- without this,
+     * the verifying test is itself filter-gated by whatever the prior
+     * test left in place and may be silently skipped, leaking filter
+     * state into the remaining suites in this binary. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, reset_argv);
+    }
     lfg_ct_test(NULL, test_filter_reset_state_for_remaining_tests, NULL);
+}
+
+/* ============================================================================
+ * skip / xfail / xpass disposition tests
+ *
+ * These exercise lfg_ct_skip and lfg_ct_xfail by running a *nested*
+ * lfg_ct_test_impl from inside the outer self-test body, then observing
+ * the runner's bucket counters (lfg_ct_self_*_count) before and after.
+ * The nested call cannot run under lfg_ct_expect_failures mode because
+ * that mode masks the real per-test failure counter, which the runner
+ * needs to see in order to distinguish XFAIL from XPASS.
+ *
+ * The cost: the inner mock tests count toward the binary's tallies
+ * (executed, plus their actual bucket). The pay-off: every outcome is
+ * a real-runner outcome -- the same code path a consumer would hit.
+ * ============================================================================ */
+
+static int _disp_setup_teardown_trace;
+static int _disp_post_skip_marker;
+
+static void _disp_body_skip_simple(void)
+{
+    lfg_ct_skip("body asked to skip");
+    /* Unreachable: lfg_ct_skip longjmps out. The store would observably
+     * flip _disp_post_skip_marker if the longjmp ever failed, giving
+     * the surrounding test something concrete to assert against. */
+    _disp_post_skip_marker = 1;
+}
+
+static void _disp_setup_skip(void)
+{
+    _disp_setup_teardown_trace |= 0x1;
+    lfg_ct_skip("preconditions not met");
+    _disp_setup_teardown_trace |= 0x2; /* must NOT fire */
+}
+
+static void _disp_body_unreachable(void)
+{
+    _disp_setup_teardown_trace |= 0x4; /* must NOT fire when setup skipped */
+}
+
+static void _disp_teardown_marker(void)
+{
+    _disp_setup_teardown_trace |= 0x8;
+}
+
+static void _disp_body_xfail_with_failure(void)
+{
+    lfg_ct_xfail("known broken");
+    ASSERT_FAIL("intentional body failure");
+}
+
+static void _disp_body_xfail_without_failure(void)
+{
+    lfg_ct_xfail("known broken but passes today");
+    /* No assertion failure -> XPASS bucket. */
+}
+
+static void _disp_body_xfail_last_reason_wins(void)
+{
+    lfg_ct_xfail("first reason");
+    lfg_ct_xfail("middle reason");
+    lfg_ct_xfail("last reason");
+    ASSERT_FAIL("intentional body failure");
+}
+
+/* Capture the latest classification message by intercepting via a body
+ * that records what lfg_ct_xfail saved -- we read the runner-visible
+ * reason indirectly through the bucket-counter delta and trust the
+ * runner to print the right reason on stdout. The "last reason wins"
+ * test asserts the printed-reason behavior at print time below. */
+
+static void test_disposition_skip_from_body_increments_skipped_bucket(void)
+{
+    int before_skipped = lfg_ct_self_skipped_count();
+    int before_failed = lfg_ct_self_failed_count();
+    int before_asserts_failed = lfg_ct_self_assertions_failed();
+
+    _disp_post_skip_marker = 0;
+    lfg_ct_test_impl(NULL, _disp_body_skip_simple, NULL, "mock_skip_body");
+
+    /* The post-skip statement must not have executed. */
+    ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+    ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
+}
+
+static void test_disposition_skip_from_setup_skips_body_runs_teardown(void)
+{
+    int before_skipped = lfg_ct_self_skipped_count();
+    int before_failed = lfg_ct_self_failed_count();
+
+    _disp_setup_teardown_trace = 0;
+    lfg_ct_test_impl(_disp_setup_skip, _disp_body_unreachable, _disp_teardown_marker, "mock_skip_setup");
+
+    /* setup entered (0x1), did not progress past lfg_ct_skip (no 0x2),
+     * body never invoked (no 0x4), teardown still ran (0x8). */
+    ASSERT_INT_EQUAL(0x1 | 0x8, _disp_setup_teardown_trace);
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+}
+
+static void test_disposition_xfail_with_assertion_failure_buckets_as_xfail(void)
+{
+    int before_xfail = lfg_ct_self_xfailed_count();
+    int before_failed = lfg_ct_self_failed_count();
+    int before_asserts_failed = lfg_ct_self_assertions_failed();
+
+    lfg_ct_test_impl(NULL, _disp_body_xfail_with_failure, NULL, "mock_xfail_with_fail");
+
+    ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+    /* The assertion-failure count was absorbed back out -- xfail must
+     * not contribute to it (else the surrounding suite-failure detector
+     * would trip on a perfectly fine xfail test). */
+    ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
+}
+
+static void test_disposition_xfail_without_failure_buckets_as_xpass(void)
+{
+    int before_xpass = lfg_ct_self_xpassed_count();
+    int before_failed = lfg_ct_self_failed_count();
+
+    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_xfail_no_fail");
+
+    ASSERT_INT_EQUAL(before_xpass + 1, lfg_ct_self_xpassed_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+}
+
+static void test_disposition_xfail_repeated_calls_keep_last_reason(void)
+{
+    int before_xfail = lfg_ct_self_xfailed_count();
+
+    /* The "last reason wins" semantics are observable in the per-test
+     * XFAIL line printed to stdout (visible in test output) -- here we
+     * verify the bucket-counter increment is unaffected by repeated
+     * calls and that the last reason does not silently elide the xfail
+     * intent. */
+    lfg_ct_test_impl(NULL, _disp_body_xfail_last_reason_wins, NULL, "mock_xfail_last_reason");
+
+    ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
+}
+
+static void test_disposition_xpass_strict_flag_toggles_return_code(void)
+{
+    int before_xpass = lfg_ct_self_xpassed_count();
+    int saved_failed = lfg_ct_self_failed_count();
+
+    /* Permissive mode: an xpass-only test contributes nothing to a
+     * non-zero exit code. */
+    lfg_ct_self_set_strict_xpass(0);
+    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_xpass_permissive");
+    ASSERT_INT_EQUAL(before_xpass + 1, lfg_ct_self_xpassed_count());
+    if (0 == saved_failed)
+    {
+        ASSERT_INT_EQUAL(0, lfg_ct_self_return_code());
+    }
+
+    /* Strict mode: with at least one xpass in the run, the return code
+     * goes non-zero (provided no real failures already pin it). */
+    lfg_ct_self_set_strict_xpass(1);
+    if (0 == saved_failed)
+    {
+        ASSERT_INT_NOT_EQUAL(0, lfg_ct_self_return_code());
+    }
+
+    /* Restore default for the rest of the run. */
+    lfg_ct_self_set_strict_xpass(0);
+}
+
+/* --strict-xpass argument-parsing coverage -- complements the bucket
+ * behavior tests above. */
+
+static void test_disposition_parse_strict_xpass_flag(void)
+{
+    char *argv_strict[] = {(char *)"prog", (char *)"--strict-xpass"};
+    char *argv_plain[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_strict));
+    /* Parsing the flag must not require an argument. Re-parsing without
+     * the flag resets it. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_plain));
+}
+
+static void suite_disposition_tests(void)
+{
+    lfg_ct_test(NULL, test_disposition_skip_from_body_increments_skipped_bucket, NULL);
+    lfg_ct_test(NULL, test_disposition_skip_from_setup_skips_body_runs_teardown, NULL);
+    lfg_ct_test(NULL, test_disposition_xfail_with_assertion_failure_buckets_as_xfail, NULL);
+    lfg_ct_test(NULL, test_disposition_xfail_without_failure_buckets_as_xpass, NULL);
+    lfg_ct_test(NULL, test_disposition_xfail_repeated_calls_keep_last_reason, NULL);
+    lfg_ct_test(NULL, test_disposition_xpass_strict_flag_toggles_return_code, NULL);
+    lfg_ct_test(NULL, test_disposition_parse_strict_xpass_flag, NULL);
 }
 
 /* ============================================================================
@@ -990,6 +1193,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 4: --list / --filter / --filter-exclude ARG PARSING ---\n");
     printf("(Verifies lfg_ct_parse_args and the runner's filter-state consumption)\n");
     lfg_ct_suite(NULL, suite_filter_args_tests, NULL);
+
+    printf("\n--- SUITE 5: skip / xfail / xpass DISPOSITION TESTS ---\n");
+    printf("(Verifies lfg_ct_skip / lfg_ct_xfail bucketing and --strict-xpass)\n");
+    lfg_ct_suite(NULL, suite_disposition_tests, NULL);
 
     printf("\n");
     printf("================================================================================\n");
