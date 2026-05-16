@@ -56,13 +56,15 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering) and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). |
 | `lfg_ct_test(setup, fn, teardown)` | Execute a single test (`void fn(void)`) with optional `setup` / `teardown` hooks (pass `NULL` to skip). Teardown runs even if the body or setup fails. |
 | `lfg_ct_suite(setup, fn, teardown)` | Execute a test suite (`void fn(void)`) with optional `setup` / `teardown` hooks; same lifecycle as `lfg_ct_test`. |
-| `lfg_ct_print_summary()` | Print pass/fail summary |
-| `lfg_ct_return()` | Get overall return code (0=pass, non-zero=fail) |
+| `lfg_ct_skip(reason)` | Mark current test as SKIP and return from the body immediately. Legal in setup (body skipped, teardown still runs). See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_xfail(reason)` | Mark current test as expected-to-fail; body runs to completion. Subsequent assertion failure -> XFAIL, no failure -> XPASS. Last reason wins on repeated calls. See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_print_summary()` | Print pass/fail/skip/xfail/xpass summary |
+| `lfg_ct_return()` | Get overall return code (0=clean, non-zero=fail or xpass-with-`--strict-xpass`) |
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
 
 ### Listing and filtering
@@ -85,6 +87,7 @@ Recognized flags:
 | `--list` | Print every test/suite name encountered (one per line, on stdout). Suite bodies are still invoked so their contained tests can list themselves; setup/teardown of suites and tests are skipped. |
 | `--filter <glob>` | Run only entries whose registered name matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite name matches, every entry inside the suite inherits the match — useful with the `add_test` pattern above. |
 | `--filter-exclude <glob>` | Skip entries whose name matches the glob. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same name. |
+| `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 
 An unmatched filter is not an error: zero tests run, the binary exits 0.
 Unknown flags print usage to stderr and return non-zero — `main` should
@@ -111,6 +114,59 @@ exposes the `--list` bit directly — gate your own diagnostic prints on
 `!lfg_ct_is_list_mode()` if you want stdout to be a clean
 newline-separated list of names. Each call to `lfg_ct_parse_args`
 replaces any previously parsed state.
+
+### Skip, xfail, xpass
+
+Tests that are known-failing for a tracked reason (a deferred fix, an
+environment-specific path, a flake under investigation) can declare
+their expected disposition inline. Two macros, callable from inside a
+test body (and from `setup`, where `lfg_ct_skip` is the natural way to
+express "preconditions not met"):
+
+```c
+lfg_ct_skip("waiting on driver fix");
+lfg_ct_xfail("known flaky under valgrind");
+```
+
+| Macro | Effect |
+|-------|--------|
+| `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately. From `setup`, the body is not invoked but `teardown` still runs. SKIP does not count toward pass or fail. |
+| `lfg_ct_xfail(reason)` | Mark the test as expected-to-fail and continue executing. After the body completes: if any assertion failed, the test is **XFAIL** (separate bucket); if none failed, the test is **XPASS** (separate bucket). Repeated calls keep the latest reason. |
+
+Outside a test context (e.g. from `main`, between tests, or in
+`teardown`) both macros print a warning to stderr and otherwise do
+nothing — they are not fatal.
+
+Per-test reporting:
+
+```
+*** test SKIP: <name>: <reason>
+*** test XFAIL: <name>: <reason>
+*** test XPASS: <name>: <reason>
+*** test FAILURE: <name>
+```
+
+Final summary (the `Failures:` count is `tests_failed` as before; the
+three trailing counts are the new buckets):
+
+```
+*** Executed N assertions in M tests. Failures: F, Skipped: S, XFail: XF, XPass: XP
+*** Testing complete. Result: PASS|FAIL
+```
+
+Exit-code rules (`lfg_ct_return()`):
+
+| Outcome | Exit |
+|---------|------|
+| Only PASS / SKIP / XFAIL outcomes | 0 |
+| Any FAIL | non-zero |
+| Any XPASS **and** `--strict-xpass` was parsed | non-zero |
+| Any XPASS without `--strict-xpass` | 0 (warning only) |
+
+Use `lfg_ct_xfail` when a test is documented as broken but you want to
+keep exercising the code path; promote to a real failure later by
+deleting the `lfg_ct_xfail` call (or pass `--strict-xpass` in CI to
+catch the moment the bug fixes itself).
 
 ### Version Macros
 

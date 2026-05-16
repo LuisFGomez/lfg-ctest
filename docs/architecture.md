@@ -29,19 +29,25 @@ internal helper, `_lfg_ct_run_lifecycle`, that drives the
 
 1. If `setup` is non-`NULL`, snapshot the total observed failures
    (`_assertions_failed`, plus `_expected_failures_count` when self-test
-   mode is on), then run `setup`. A delta in that total marks the setup as
-   failed.
-2. If the setup did not fail (or there was no setup), run `body`.
+   mode is on), wrap the call in a `setjmp(_skip_env)` boundary so
+   `lfg_ct_skip` has somewhere to unwind to, then run `setup`. A delta
+   in that total marks the setup as failed.
+2. If the setup did not fail (and the disposition is not already
+   `SKIPPED`), run `body` inside its own `setjmp(_skip_env)` boundary.
 3. If `teardown` is non-`NULL`, run it — always, regardless of body or
-   setup outcome. Teardown's job is resource cleanup, so the framework
-   guarantees it runs whenever the consumer asked for it.
+   setup outcome. Teardown is intentionally outside any `setjmp`
+   boundary; its job is resource cleanup, so the framework guarantees
+   it runs whenever the consumer asked for it.
 
-The framework already continues past failed assertions (assertion impls
-return `-1` and bump a counter; they don't abort), so no `setjmp`/signal
-boundary is needed to keep teardown reachable after a body failure. The
-setup-failure detector exists only so the body can be skipped — a failing
-setup may have left partially acquired resources, but the rest of the
-body's work is no longer meaningful.
+Assertion failures themselves do not need the boundary: assertion impls
+return `-1` and bump a counter; they don't abort, so teardown stays
+reachable after a body failure without any unwinding. The `setjmp`
+boundary exists for the `lfg_ct_skip` "return from the body
+immediately" semantics (see [Skip / xfail dispositions](#skip--xfail-dispositions)
+below) and is the only path that uses `longjmp`. The setup-failure
+detector exists so the body can be skipped — a failing setup may have
+left partially acquired resources, but the rest of the body's work is
+no longer meaningful.
 
 Every assertion macro in `lfg-ctest.h` ultimately routes to an internal
 failure path that:
@@ -90,6 +96,51 @@ normal behavior.
 
 Every "does assertion X fail correctly?" self-test in `test-unified.c` uses
 this pattern.
+
+## Skip / xfail dispositions
+
+Per-test disposition is tracked in three statics in `lfg-ctest.c`:
+
+- `_current_disposition` (`NORMAL` / `SKIPPED`),
+- `_current_skip_reason`,
+- `_current_xfail_set` + `_current_xfail_reason`.
+
+`lfg_ct_skip(reason)` sets the disposition, records the reason, and
+`longjmp`s through `_skip_env` to the closest `_lfg_ct_run_lifecycle`
+boundary (the setup or body boundary, whichever is active). `_skip_env`
+is a single static `jmp_buf` reused between the setup and body
+boundaries — the lifecycle helper sets `_skip_env_active = 1` only
+while a boundary is live, and the skip impl no-ops with a stderr
+warning when called outside that window (e.g. from teardown or `main`).
+
+`lfg_ct_xfail(reason)` does not unwind; it sets `_current_xfail_set`
+and overwrites `_current_xfail_reason` (last call wins). The body runs
+to completion and the test's classification at the end of
+`lfg_ct_test_impl` reads the flags to decide which bucket the test
+falls into:
+
+| Final state | Bucket | Counter bumped |
+|-------------|--------|----------------|
+| `_current_disposition == SKIPPED` | SKIP | `_tests_skipped` |
+| `_current_xfail_set && _current_test_failures > 0` | XFAIL | `_tests_xfailed` |
+| `_current_xfail_set && _current_test_failures == 0` | XPASS | `_tests_xpassed` |
+| `_current_test_failures > 0` (no xfail) | FAIL | `_tests_failed` |
+| otherwise | PASS | `_tests_passed` |
+
+For SKIP and XFAIL the classification also subtracts
+`_current_test_failures` from the global `_assertions_failed` -- the
+absorbed failures must not trip the surrounding suite-failure detector
+(which compares `_assertions_failed` snapshots around the suite body).
+After classification the per-test state is reset to `NORMAL` / 0 /
+`NULL` so a *nested* `lfg_ct_test_impl` call (the pattern the
+framework's own self-tests use to drive mock tests through the real
+runner) does not leak its disposition into the calling test's
+classification.
+
+`--strict-xpass` flips the exit-code calculation in `lfg_ct_return`:
+when set and `_tests_xpassed > 0` and no real failures occurred, return
+`-1` instead of `0`. The summary line shows `XPass: N` regardless of
+the flag; only the exit code changes.
 
 ## Mock system (`lfg-ctest-mock.[ch]`)
 
