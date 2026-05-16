@@ -14,6 +14,12 @@ Consumers include `lfg-ctest.h` for assertions/runner and optionally
 `lfg-ctest-mock.h` for mocking. The two headers are independent; you can use
 the runner without ever pulling in the mock macros.
 
+A `contrib/` subtree holds optional packages that build against the core
+library but never become part of it -- the contract is "pluggable reporter
+plus whatever the package wants". `contrib/junit-xml/` is the first such
+package; see [api.md — Reporter callback](api.md#reporter-callback) for the
+hook it consumes.
+
 ## Core runner (`lfg-ctest.c`)
 
 State lives in a small set of file-scope statics (pass/fail counters, current

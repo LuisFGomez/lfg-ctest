@@ -171,6 +171,48 @@ keep exercising the code path; promote to a real failure later by
 deleting the `lfg_ct_xfail` call (or pass `--strict-xpass` in CI to
 catch the moment the bug fixes itself).
 
+### Reporter callback
+
+`lfg_ct_set_reporter(const lfg_ct_reporter_t *)` installs a pluggable
+hook that observes each test's classified outcome plus run completion.
+Default reporter is `NULL` -- the core stays format-agnostic and zero
+footprint by default. One slot, by design; fan-out is a downstream
+concern.
+
+```c
+typedef enum {
+    LFG_CT_PASSED, LFG_CT_FAILED,
+    LFG_CT_SKIPPED, LFG_CT_XFAIL, LFG_CT_XPASS
+} lfg_ct_outcome_t;
+
+typedef struct {
+    const char *suite_name;     /* enclosing lfg_ct_suite, or NULL */
+    const char *test_name;
+    double time_sec;
+    lfg_ct_outcome_t outcome;
+    const char *message;        /* failure text / skip reason / xfail reason */
+} lfg_ct_record_t;
+
+typedef struct {
+    void (*on_record)(const lfg_ct_record_t *, void *userdata);
+    void (*on_run_complete)(void *userdata);
+    void *userdata;
+} lfg_ct_reporter_t;
+```
+
+`on_record` fires once per classified test, at the end of
+`lfg_ct_test_impl`. `on_run_complete` fires once at the end of
+`lfg_ct_print_summary` -- the natural flush point for a buffering
+reporter.
+
+String fields on the record (`suite_name`, `test_name`, `message`) are
+**borrowed** -- valid only for the duration of the callback. Buffer
+them if you need them past that.
+
+See `contrib/junit-xml/lfg-ctest-junit.[ch]` for a reference consumer.
+Drop the contrib in via `add_subdirectory(deps/lfg-ctest/contrib/junit-xml)`
+or omit it entirely if you don't need JUnit output.
+
 ### Version Macros
 
 `lfg-ctest.h` transitively includes a generated `lfg-ctest-version.h`

@@ -202,6 +202,11 @@ endif()
 # ==============================================================================
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    # Optional contrib packages -- only built standalone, never when this
+    # repo is consumed via add_subdirectory. Embedded users get zero
+    # footprint from contrib code.
+    add_subdirectory(contrib/junit-xml)
+
     # Test executables
     set(TEST_TARGETS
         test-unified

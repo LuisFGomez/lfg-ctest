@@ -64,6 +64,7 @@ int main(void)
 |------|--------------|
 | `lfg-ctest.[ch]` | Test runner + assertion macros. |
 | `lfg-ctest-mock.[ch]` | Mock-generation macros, param-action runtime, reset registry. |
+| `contrib/junit-xml/` | Opt-in JUnit-XML reporter (registers via `lfg_ct_set_reporter`). Builds standalone only. |
 | `test-unified.c` / `test-mock.c` / `test-amalg.c` | Self-tests (built only when this repo is the top-level CMake source). |
 | `tools/` | C99 amalgamator (`amalgamate.c` + `amalgamate.manifest`), version stamper (`mkversion.c`), release helper (`mkrelease.c`). |
 | `dist/` | Generated single-header (gitignored; built by `cmake --build build --target amalgamate`). |
