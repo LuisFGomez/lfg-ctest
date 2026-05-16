@@ -275,9 +275,14 @@
 
 /** Mark the current test as skipped, record @p _reason, and return from
  *  the test body immediately. Buckets the test as SKIP (separate from
- *  pass/fail). Legal in setup; the body is then not invoked but
- *  @c teardown still runs (same guarantee as a setup-failure path).
- *  Outside a test context this is a no-op with a warning to stderr.
+ *  pass/fail). Legal in a per-test setup; the body is then not invoked
+ *  but @c teardown still runs (same guarantee as a setup-failure path).
+ *
+ *  @b Scope: per-test only. Calling from a suite-level setup/body, from
+ *  teardown, or from any other point outside an active test context is
+ *  a no-op with a warning to stderr -- suite-level skip is intentionally
+ *  not supported and would need its own design pass before being
+ *  exposed as a first-class feature.
  */
 #define lfg_ct_skip(_reason) lfg_ct_skip_impl((_reason), __FILE__, __LINE__, LFG_CT_FUNCTION)
 

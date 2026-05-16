@@ -328,75 +328,40 @@ _lifecycle_failure_total(void)
 /* Shared setup -> body -> teardown lifecycle. Teardown runs whenever
  * provided, even if the body or its assertions failed. If setup itself
  * fails an assertion the body is skipped but teardown still runs --
- * setup may have partially acquired resources before failing. Setup and
- * body are each wrapped in a setjmp boundary so lfg_ct_skip() can
- * unwind to the lifecycle without running the remaining body; teardown
- * is intentionally outside any boundary so it always runs to completion.
+ * setup may have partially acquired resources before failing. The
+ * skip-aware setjmp boundary lives in lfg_ct_test_impl (skip is a
+ * per-test gesture; suite-context skips are intentionally a no-op
+ * warning -- see lfg_ct_suite_impl).
  */
 static void
 _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(void))
 {
     int setup_failures_before = 0;
     int setup_failed = 0;
-    /* Save/restore the skip boundary so a nested lfg_ct_test_impl call
-     * (run from inside an outer test body, the self-test pattern) does
-     * not strand an in-progress outer body with an overwritten _skip_env
-     * and a cleared _skip_env_active. The jmp_buf is an array type, so
-     * memcpy is the portable way to snapshot it. */
-    jmp_buf saved_env;
-    int saved_active = _skip_env_active;
-
-    memcpy(saved_env, _skip_env, sizeof(jmp_buf));
-
-    /* Reset the body-gate disposition unconditionally. test_impl already
-     * resets on entry, but suite_impl does not -- without this, an
-     * lfg_ct_skip fired from a suite-level setup would leave SKIPPED
-     * set past the suite's return and silently skip the next top-level
-     * suite's body. Reset before the setup setjmp; a skip during this
-     * call's setup writes disposition *after* this reset, so the
-     * within-call setup -> body propagation still works. */
-    _current_disposition = LFG_CT_DISP_NORMAL;
-    _current_skip_reason = NULL;
 
     if (setup)
     {
         setup_failures_before = _lifecycle_failure_total();
-        _skip_env_active = 1;
-        if (0 == setjmp(_skip_env))
-        {
-            setup();
-        }
-        _skip_env_active = 0;
+        setup();
         setup_failed = (_lifecycle_failure_total() > setup_failures_before);
     }
 
-    /* lfg_ct_skip in setup propagates by setting _current_disposition;
-     * the body is skipped in that case so callers see the same
-     * "preconditions not met" semantics whether the skip fired in setup
-     * or in the body. */
-    if (LFG_CT_DISP_SKIPPED != _current_disposition && !setup_failed && body)
+    if (!setup_failed && body)
     {
-        _skip_env_active = 1;
-        if (0 == setjmp(_skip_env))
-        {
-            body();
-        }
-        _skip_env_active = 0;
+        body();
     }
 
     if (teardown)
     {
         teardown();
     }
-
-    memcpy(_skip_env, saved_env, sizeof(jmp_buf));
-    _skip_env_active = saved_active;
 }
 
 void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
     int suite_assertions_failed_before;
     int inherited_pushed = 0;
+    int saved_skip_active;
 
     if (_list_mode)
     {
@@ -433,8 +398,21 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
      * expect-failures mode. */
     suite_assertions_failed_before = _assertions_failed;
 
+    /* lfg_ct_skip is a per-test gesture; suite-context skips are
+     * intentionally unsupported. Force the skip boundary off across the
+     * suite's setup/body/teardown so a stray lfg_ct_skip from a
+     * suite-level callback warns to stderr and no-ops rather than
+     * longjmping to a stale outer boundary or silently skipping the
+     * suite body. lfg_ct_test calls inside the body re-enable the
+     * boundary themselves on entry. */
+    saved_skip_active = _skip_env_active;
+    _skip_env_active = 0;
+
     _current_suite_failures = 0;
     _lfg_ct_run_lifecycle(setup, fn, teardown);
+
+    _skip_env_active = saved_skip_active;
+
     if (_current_suite_failures > 0 || _assertions_failed > suite_assertions_failed_before)
     {
         printf("*** suite FAILURE: %s\r\n", name);
@@ -448,6 +426,16 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
 
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
+    int setup_failures_before = 0;
+    int setup_failed = 0;
+    /* Save/restore the outer skip boundary so a nested lfg_ct_test_impl
+     * (the self-test pattern that drives mock tests through the real
+     * runner) cannot strand an in-progress outer body with an
+     * overwritten _skip_env. The jmp_buf is an array type, so memcpy
+     * is the portable way to snapshot it. */
+    jmp_buf saved_env;
+    int saved_active;
+
     if (_list_mode)
     {
         printf("%s\r\n", name);
@@ -465,7 +453,42 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     _current_xfail_set = 0;
     _current_xfail_reason = NULL;
 
-    _lfg_ct_run_lifecycle(setup, fn, teardown);
+    memcpy(saved_env, _skip_env, sizeof(jmp_buf));
+    saved_active = _skip_env_active;
+
+    if (setup)
+    {
+        setup_failures_before = _lifecycle_failure_total();
+        _skip_env_active = 1;
+        if (0 == setjmp(_skip_env))
+        {
+            setup();
+        }
+        _skip_env_active = 0;
+        setup_failed = (_lifecycle_failure_total() > setup_failures_before);
+    }
+
+    /* lfg_ct_skip in setup propagates by setting _current_disposition;
+     * the body is skipped in that case so callers see the same
+     * "preconditions not met" semantics whether the skip fired in setup
+     * or in the body. */
+    if (LFG_CT_DISP_SKIPPED != _current_disposition && !setup_failed && fn)
+    {
+        _skip_env_active = 1;
+        if (0 == setjmp(_skip_env))
+        {
+            fn();
+        }
+        _skip_env_active = 0;
+    }
+
+    if (teardown)
+    {
+        teardown();
+    }
+
+    memcpy(_skip_env, saved_env, sizeof(jmp_buf));
+    _skip_env_active = saved_active;
 
     /* Classification. SKIP wins over a stray failure that may have
      * occurred before the skip call -- the test author signalled intent
