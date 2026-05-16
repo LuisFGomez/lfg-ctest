@@ -970,6 +970,18 @@ static void _disp_body_xfail_last_reason_wins(void)
     ASSERT_FAIL("intentional body failure");
 }
 
+/* Outer body that runs a nested lfg_ct_test_impl and *then* calls
+ * lfg_ct_skip. The single-buffer skip boundary used to lose the outer
+ * frame on the nested return (overwriting _skip_env, clearing
+ * _skip_env_active) -- the lifecycle helper now save/restores both so
+ * the outer skip still unwinds. */
+static void _disp_body_after_nested_then_skip(void)
+{
+    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_nested_inner");
+    lfg_ct_skip("outer skip after nested test");
+    _disp_post_skip_marker = 1; /* must NOT execute -- outer must unwind */
+}
+
 /* Capture the latest classification message by intercepting via a body
  * that records what lfg_ct_xfail saved -- we read the runner-visible
  * reason indirectly through the bucket-counter delta and trust the
@@ -1038,14 +1050,29 @@ static void test_disposition_xfail_repeated_calls_keep_last_reason(void)
 {
     int before_xfail = lfg_ct_self_xfailed_count();
 
-    /* The "last reason wins" semantics are observable in the per-test
-     * XFAIL line printed to stdout (visible in test output) -- here we
-     * verify the bucket-counter increment is unaffected by repeated
-     * calls and that the last reason does not silently elide the xfail
-     * intent. */
     lfg_ct_test_impl(NULL, _disp_body_xfail_last_reason_wins, NULL, "mock_xfail_last_reason");
 
     ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
+    /* The body called lfg_ct_xfail three times with different reasons;
+     * classification must have kept the latest. */
+    ASSERT_STR_EQUAL("last reason", lfg_ct_self_last_xfail_reason());
+}
+
+static void test_disposition_skip_after_nested_test_impl_still_unwinds(void)
+{
+    int before_skipped = lfg_ct_self_skipped_count();
+    int before_xpassed = lfg_ct_self_xpassed_count();
+
+    _disp_post_skip_marker = 0;
+    lfg_ct_test_impl(NULL, _disp_body_after_nested_then_skip, NULL, "mock_outer_skip_after_nested");
+
+    /* Nested mock contributed one xpass; outer contributed one skip. */
+    ASSERT_INT_EQUAL(before_xpassed + 1, lfg_ct_self_xpassed_count());
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    /* The outer skip must have unwound -- the post-skip store stays
+     * untouched. This is the regression guard for the save/restore of
+     * _skip_env around nested lifecycles. */
+    ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
 }
 
 static void test_disposition_xpass_strict_flag_toggles_return_code(void)
@@ -1096,6 +1123,7 @@ static void suite_disposition_tests(void)
     lfg_ct_test(NULL, test_disposition_xfail_with_assertion_failure_buckets_as_xfail, NULL);
     lfg_ct_test(NULL, test_disposition_xfail_without_failure_buckets_as_xpass, NULL);
     lfg_ct_test(NULL, test_disposition_xfail_repeated_calls_keep_last_reason, NULL);
+    lfg_ct_test(NULL, test_disposition_skip_after_nested_test_impl_still_unwinds, NULL);
     lfg_ct_test(NULL, test_disposition_xpass_strict_flag_toggles_return_code, NULL);
     lfg_ct_test(NULL, test_disposition_parse_strict_xpass_flag, NULL);
 }
