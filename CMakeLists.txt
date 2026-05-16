@@ -33,6 +33,13 @@ option(LFG_CTEST_ENABLE_FLOAT
 option(LFG_CTEST_ENABLE_DOUBLE
     "Enable 64-bit double assertions (requires fabs from math library)" ON)
 
+# Fork-per-test isolation (LFG_CT_ISOLATE_FORK). On by default. Set OFF to
+# build the lfg-ctest static lib without any fork/waitpid/signal-handling
+# code linked in -- consumers can still reference the enum value, but
+# lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK) returns the documented error.
+option(LFG_CTEST_ENABLE_FORK
+    "Enable fork-per-test isolation runtime support (Unix-family only)" ON)
+
 set(LFG_CTEST_HAS_FLOAT OFF)
 set(LFG_CTEST_HAS_DOUBLE OFF)
 set(LFG_CTEST_NEEDS_LIBM OFF)
@@ -116,6 +123,7 @@ add_custom_target(lfg_ct_version_header ALL
 set(LFG_CTEST_SOURCES
     lfg-ctest.c
     lfg-ctest-mock.c
+    lfg-ctest-fork.c
 )
 
 # Create static library
@@ -143,6 +151,16 @@ endif()
 # Link math library only if needed
 if(LFG_CTEST_NEEDS_LIBM)
     target_link_libraries(lfg-ctest PUBLIC m)
+endif()
+
+# Fork-mode opt-out. PRIVATE -- only lfg-ctest-fork.c checks this macro.
+# Consumers that need to query whether fork support is compiled in should
+# use lfg_ct_set_isolation()'s return value rather than testing the macro.
+if(NOT LFG_CTEST_ENABLE_FORK)
+    target_compile_definitions(lfg-ctest PRIVATE LFG_CT_DISABLE_FORK=1)
+    message(STATUS "lfg-ctest: fork-per-test isolation DISABLED (build option)")
+else()
+    message(STATUS "lfg-ctest: fork-per-test isolation ENABLED (Unix-family runtime)")
 endif()
 
 # ==============================================================================
@@ -213,6 +231,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         test-mock
     )
 
+    # Add the fork-mode test only when the library was built with fork
+    # support; otherwise the runtime check at the top of test-fork.c
+    # would short-circuit every test into a no-op.
+    if(LFG_CTEST_ENABLE_FORK)
+        list(APPEND TEST_TARGETS test-fork)
+    endif()
+
     # Build each test executable
     foreach(TEST_TARGET ${TEST_TARGETS})
         add_executable(${TEST_TARGET} ${TEST_TARGET}.c)
@@ -224,6 +249,37 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         # Enable self-test mode for framework's own tests
         target_compile_definitions(${TEST_TARGET} PRIVATE LFG_CTEST_SELF_TEST=1)
     endforeach()
+
+    # test-fork-disabled rebuilds the framework sources with the
+    # compile-time opt-out flag so the binary exercises the
+    # "no fork support linked in" path. Does NOT link against the
+    # lfg-ctest static lib (which has fork enabled by default); pattern
+    # mirrors test-amalg's self-contained build.
+    add_executable(test-fork-disabled
+        test-fork-disabled.c
+        lfg-ctest.c
+        lfg-ctest-mock.c
+        lfg-ctest-fork.c
+    )
+    target_compile_definitions(test-fork-disabled PRIVATE
+        LFG_CTEST_SELF_TEST=1
+        LFG_CT_DISABLE_FORK=1
+    )
+    target_include_directories(test-fork-disabled PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_dependencies(test-fork-disabled lfg_ct_version_header)
+    if(LFG_CTEST_HAS_FLOAT)
+        target_compile_definitions(test-fork-disabled PRIVATE LFG_CTEST_HAS_FLOAT=1)
+    endif()
+    if(LFG_CTEST_HAS_DOUBLE)
+        target_compile_definitions(test-fork-disabled PRIVATE LFG_CTEST_HAS_DOUBLE=1)
+    endif()
+    if(LFG_CTEST_NEEDS_LIBM)
+        target_link_libraries(test-fork-disabled PRIVATE m)
+    endif()
+    list(APPEND TEST_TARGETS test-fork-disabled)
 
     # Smoke test for the amalgamated header -- catches drift between the
     # split sources and dist/lfg-ctest.h. Self-contained (defines
@@ -250,6 +306,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_test(NAME test-unified COMMAND test-unified)
     add_test(NAME test-mock COMMAND test-mock)
     add_test(NAME test-amalg COMMAND test-amalg)
+    if(LFG_CTEST_ENABLE_FORK)
+        add_test(NAME test-fork COMMAND test-fork)
+    endif()
+    add_test(NAME test-fork-disabled COMMAND test-fork-disabled)
 
     # Custom target to run all tests
     add_custom_target(run_all_tests
@@ -290,6 +350,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
     message(STATUS "Float (32-bit): ${LFG_CTEST_HAS_FLOAT}")
     message(STATUS "Double (64-bit): ${LFG_CTEST_HAS_DOUBLE}")
+    message(STATUS "Fork isolation: ${LFG_CTEST_ENABLE_FORK}")
     message(STATUS "Tests: ${TEST_TARGETS}")
     message(STATUS "====================================")
     message(STATUS "")

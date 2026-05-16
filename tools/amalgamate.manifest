@@ -12,4 +12,5 @@ lfg-ctest-mock.h
 @impl_begin
 lfg-ctest.c
 lfg-ctest-mock.c
+lfg-ctest-fork.c
 @impl_end

@@ -95,6 +95,24 @@ static const char *_current_suite_name = NULL;
  * (file-static in the consumer is the intended usage). */
 static const lfg_ct_reporter_t *_reporter = NULL;
 
+/* Isolation mode + per-test timeout for fork mode. Both are runtime
+ * settings; the platform gate and the LFG_CT_DISABLE_FORK opt-out are
+ * confined to lfg-ctest-fork.c. set_isolation calls into that TU to
+ * validate availability before committing the mode here. */
+static lfg_ct_isolation_t _isolation = LFG_CT_ISOLATE_NONE;
+static unsigned _fork_timeout_ms = 0;
+
+/* Provided by lfg-ctest-fork.c. The fork TU always defines both --
+ * the compile-time opt-out / unsupported-platform path provides a
+ * stub returning 0 / -1 with no fork-related code linked in. */
+extern int _lfg_ct_fork_available(void);
+extern int _lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        unsigned timeout_ms);
+
+/* Forward declaration for the in-process dispatch helper -- definition
+ * lives below; the isolation shim in lfg_ct_test_impl calls into it. */
+void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+
 /* lfg_ct_parse_args() runtime state. The glob arrays hold borrowed pointers
  * into the caller's argv (which has program lifetime under standard main()
  * usage), so no string copies or frees are needed. */
@@ -501,7 +519,35 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
     }
 }
 
+/* Public dispatch. List-mode and filter checks are name-only and have
+ * to happen in the parent regardless of isolation, so they sit here.
+ * Fork mode delegates the rest to lfg-ctest-fork.c, which manages
+ * fork/wait/payload and re-enters _lfg_ct_test_impl_inproc inside the
+ * child. The in-process branch is the original code path, untouched. */
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+{
+    if (_list_mode)
+    {
+        printf("%s\r\n", name);
+        return;
+    }
+    if (!_filter_admits(name))
+    {
+        return;
+    }
+    if (LFG_CT_ISOLATE_FORK == _isolation)
+    {
+        _lfg_ct_fork_run_test(setup, fn, teardown, name, _fork_timeout_ms);
+        return;
+    }
+    _lfg_ct_test_impl_inproc(setup, fn, teardown, name);
+}
+
+/* Internal in-process dispatch. Was lfg_ct_test_impl historically; the
+ * isolation shim now sits between the user and this entry point. Also
+ * called directly by the fork TU from inside the child after the swap
+ * to a capture reporter. */
+void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
     int setup_failures_before = 0;
     int setup_failed = 0;
@@ -703,6 +749,149 @@ void lfg_ct_print_summary(void)
 void lfg_ct_set_reporter(const lfg_ct_reporter_t *reporter)
 {
     _reporter = reporter;
+}
+
+int lfg_ct_set_isolation(lfg_ct_isolation_t mode)
+{
+    if (LFG_CT_ISOLATE_FORK == mode && !_lfg_ct_fork_available())
+    {
+        return -1;
+    }
+    _isolation = mode;
+    return 0;
+}
+
+lfg_ct_isolation_t lfg_ct_get_isolation(void)
+{
+    return _isolation;
+}
+
+void lfg_ct_set_fork_timeout_ms(unsigned timeout_ms)
+{
+    _fork_timeout_ms = timeout_ms;
+}
+
+unsigned lfg_ct_get_fork_timeout_ms(void)
+{
+    return _fork_timeout_ms;
+}
+
+/* Internal bridges consumed by lfg-ctest-fork.c. Not part of the
+ * public API; kept out of lfg-ctest.h on purpose. Declared here so
+ * the fork TU sees the prototypes via extern declarations local to
+ * its own source file. */
+
+const lfg_ct_reporter_t *_lfg_ct_get_reporter(void)
+{
+    return _reporter;
+}
+
+void _lfg_ct_counter_snapshot(int *executed, int *passed, int *failed)
+{
+    if (executed)
+    {
+        *executed = _assertions_executed;
+    }
+    if (passed)
+    {
+        *passed = _assertions_passed;
+    }
+    if (failed)
+    {
+        *failed = _assertions_failed;
+    }
+}
+
+/* Project a forked-child's classified outcome onto the parent's
+ * bookkeeping. Mirrors the post-classification side of
+ * _lfg_ct_test_impl_inproc: bumps the right counters, increments
+ * suite-failure tracking on FAIL, fires the active reporter. When
+ * @p print_outcome_line is non-zero the parent also emits the
+ * per-test outcome banner (used for signal/timeout/payload-missing
+ * paths where the child died before its own print landed); the
+ * normal payload path passes 0 because the child already printed
+ * via inherited stdout. */
+void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t outcome, const char *message,
+        int assertions_executed_delta, int assertions_passed_delta, int assertions_failed_delta,
+        int print_outcome_line)
+{
+#ifdef LFG_CTEST_SELF_TEST
+    int suppress_failure = _expect_failures_mode && (LFG_CT_FAILED == outcome);
+#else
+    int suppress_failure = 0;
+#endif
+
+    _tests_executed++;
+    _assertions_executed += assertions_executed_delta;
+    _assertions_passed += assertions_passed_delta;
+    if (!suppress_failure)
+    {
+        _assertions_failed += assertions_failed_delta;
+    }
+
+    switch (outcome)
+    {
+        case LFG_CT_PASSED:
+            _tests_passed++;
+            break;
+        case LFG_CT_FAILED:
+            if (suppress_failure)
+            {
+#ifdef LFG_CTEST_SELF_TEST
+                /* Self-test driver intentionally produced this FAILED
+                 * outcome (e.g. drove an inner fork-mode test that
+                 * crashes / times out / aborts). Mirror the assertion
+                 * counter's expect-failures behavior: count it as
+                 * expected and leave the global pass/fail tallies
+                 * alone so the binary still exits 0. */
+                _expected_failures_count++;
+#endif
+                break;
+            }
+            _tests_failed++;
+            _current_suite_failures++;
+            if (print_outcome_line)
+            {
+                printf("*** test FAILURE: %s\r\n", name);
+                if (message)
+                {
+                    printf("*** %s\r\n", message);
+                }
+            }
+            break;
+        case LFG_CT_SKIPPED:
+            _tests_skipped++;
+            if (print_outcome_line)
+            {
+                printf("*** test SKIP: %s: %s\r\n", name, message ? message : "(no reason)");
+            }
+            break;
+        case LFG_CT_XFAIL:
+            _tests_xfailed++;
+            if (print_outcome_line)
+            {
+                printf("*** test XFAIL: %s: %s\r\n", name, message ? message : "(no reason)");
+            }
+            break;
+        case LFG_CT_XPASS:
+            _tests_xpassed++;
+            if (print_outcome_line)
+            {
+                printf("*** test XPASS: %s: %s\r\n", name, message ? message : "(no reason)");
+            }
+            break;
+    }
+
+    if (_reporter && _reporter->on_record)
+    {
+        lfg_ct_record_t rec;
+        rec.suite_name = _current_suite_name;
+        rec.test_name = name;
+        rec.time_sec = time_sec;
+        rec.outcome = outcome;
+        rec.message = message;
+        _reporter->on_record(&rec, _reporter->userdata);
+    }
 }
 
 int lfg_ct_return(void)

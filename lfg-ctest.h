@@ -404,6 +404,56 @@ void lfg_ct_xfail_impl(const char *reason, const char *file, int line, const cha
 void lfg_ct_print_summary(void);
 
 /*============================================================================
+ *  Isolation modes
+ *
+ *  Selects how the runner dispatches the body of every subsequent
+ *  @ref lfg_ct_test invocation. Default is @ref LFG_CT_ISOLATE_NONE
+ *  (in-process; historical behavior). @ref LFG_CT_ISOLATE_FORK runs
+ *  every test body in a fresh @c fork(2)'d child, so a crashing or
+ *  hung test does not take down the runner and does not pollute
+ *  state for the next test. See @c docs/api.md for the full contract.
+ *
+ *  @c LFG_CT_ISOLATE_FORK is part of the public ABI unconditionally,
+ *  regardless of build flags. Whether it can be selected at runtime
+ *  depends on the platform (Unix-family @c fork(2) only) and on the
+ *  compile-time @c LFG_CT_DISABLE_FORK opt-out -- both confined to
+ *  the implementation TU. @ref lfg_ct_set_isolation returns a non-zero
+ *  error when an unavailable mode is requested; the previously
+ *  configured mode is left unchanged. No silent fallback.
+ *==========================================================================*/
+
+typedef enum
+{
+    LFG_CT_ISOLATE_NONE = 0, /**< In-process dispatch (default, historical). */
+    LFG_CT_ISOLATE_FORK = 1  /**< Fork-per-test isolation. Unix-family only. */
+} lfg_ct_isolation_t;
+
+/** Select the dispatch mode used for subsequent @ref lfg_ct_test calls.
+ *  Returns 0 on success, non-zero if @p mode is recognised but the
+ *  runtime support is unavailable (e.g. @ref LFG_CT_ISOLATE_FORK on a
+ *  non-Unix host, or any consumer build with @c LFG_CT_DISABLE_FORK
+ *  defined). On error the previously configured mode is unchanged.
+ */
+int lfg_ct_set_isolation(lfg_ct_isolation_t mode);
+
+/** Query the currently configured isolation mode. */
+lfg_ct_isolation_t lfg_ct_get_isolation(void);
+
+/** Configure the per-test timeout used when @ref LFG_CT_ISOLATE_FORK is
+ *  active. A child that has not exited within @p timeout_ms milliseconds
+ *  is sent @c SIGKILL by the parent and the test is recorded as failed
+ *  with a timeout diagnostic. @p timeout_ms of 0 disables the timeout
+ *  (parent blocks until the child reaps naturally). Default is 0.
+ *
+ *  No-op when the active isolation is not @ref LFG_CT_ISOLATE_FORK; the
+ *  setting persists across mode changes.
+ */
+void lfg_ct_set_fork_timeout_ms(unsigned timeout_ms);
+
+/** Query the current fork-mode per-test timeout (milliseconds). */
+unsigned lfg_ct_get_fork_timeout_ms(void);
+
+/*============================================================================
  *  Reporter callback contract
  *
  *  Pluggable hook that lets a downstream package observe each test's
