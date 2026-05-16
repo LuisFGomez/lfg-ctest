@@ -403,6 +403,83 @@ void lfg_ct_xfail_impl(const char *reason, const char *file, int line, const cha
  */
 void lfg_ct_print_summary(void);
 
+/*============================================================================
+ *  Reporter callback contract
+ *
+ *  Pluggable hook that lets a downstream package observe each test's
+ *  classified outcome and run-end without growing the core's surface for
+ *  every conceivable report format. The runner fires the registered
+ *  reporter (if any) from one site -- the classification block at the end
+ *  of every test -- and a second site at the tail of @ref lfg_ct_print_summary.
+ *
+ *  Default reporter is @c NULL (no-op). One reporter slot, by design --
+ *  fan-out is a downstream concern; if you need TAP + JUnit + something
+ *  else, write a reporter that demuxes. Keeping the contract single-slot
+ *  is what stops the core from growing a registry it doesn't need.
+ *
+ *  The contrib JUnit-XML emitter under @c contrib/junit-xml/ is the
+ *  reference consumer; consult it for the wiring pattern.
+ *==========================================================================*/
+
+/** Classified outcome bucket. Mirrors the runner's internal disposition
+ *  + assertion-failure tally; one of these is set on every executed test.
+ */
+typedef enum
+{
+    LFG_CT_PASSED,
+    LFG_CT_FAILED,
+    LFG_CT_SKIPPED,
+    LFG_CT_XFAIL,
+    LFG_CT_XPASS
+} lfg_ct_outcome_t;
+
+/** One classified test, handed to the reporter's @c on_record callback at
+ *  the end of @ref lfg_ct_test_impl.
+ *
+ *  String fields are @b borrowed -- valid for the duration of the callback
+ *  only. A reporter that buffers records across tests must copy these
+ *  strings (the runner overwrites @c message at the next test's entry).
+ */
+typedef struct
+{
+    const char *suite_name;  /**< Enclosing @ref lfg_ct_suite, or @c NULL for top-level tests. */
+    const char *test_name;   /**< Registered test name; never @c NULL. */
+    double time_sec;         /**< Elapsed wall-clock seconds (fractional). */
+    lfg_ct_outcome_t outcome;
+    const char *message;     /**< Outcome-specific annotation:
+                              *   - @c FAILED: first assertion-failure text,
+                              *     formatted as @c "file:line: in fn(): expr"
+                              *   - @c SKIPPED: the reason from @c lfg_ct_skip
+                              *   - @c XFAIL / @c XPASS: the reason from @c lfg_ct_xfail
+                              *   - @c PASSED: @c NULL
+                              */
+} lfg_ct_record_t;
+
+/** Reporter callback bundle. Both function pointers are optional (NULL =
+ *  ignored). @c userdata is opaquely forwarded; the runner does not
+ *  interpret it.
+ */
+typedef struct
+{
+    /** Invoked once per classified test, after the runner has bucketed
+     *  the test but before the next test begins. */
+    void (*on_record)(const lfg_ct_record_t *record, void *userdata);
+
+    /** Invoked once at the tail of @ref lfg_ct_print_summary. Use this to
+     *  flush a buffering reporter (e.g. the contrib JUnit emitter writes
+     *  its XML file here). */
+    void (*on_run_complete)(void *userdata);
+
+    void *userdata;
+} lfg_ct_reporter_t;
+
+/** Install or replace the active reporter. @p reporter is borrowed (the
+ *  caller must keep the struct alive across runner calls); pass @c NULL
+ *  to disable. The runner stores the pointer, not a copy -- file-static
+ *  reporter structs in a downstream package are the intended usage.
+ */
+void lfg_ct_set_reporter(const lfg_ct_reporter_t *reporter);
+
 /** Retrieve the return code for the main unittest function. This is intended
  * to be called by the main() function such as:
  *      int main(int argc, char *argv[]) {

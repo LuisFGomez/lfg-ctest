@@ -7,6 +7,7 @@
  *  Includes
  *==========================================================================*/
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
@@ -73,6 +74,26 @@ static int _skip_env_active = 0;
 /* --strict-xpass: flip an otherwise-clean run that contains xpass
  * outcomes to a non-zero exit code. */
 static int _strict_xpass = 0;
+
+/* Per-test message capture: holds the first assertion-failure text
+ * observed in the running test, formatted as "<file>:<line>: in
+ * <function>(): <expr>". Reset at every lfg_ct_test_impl entry,
+ * read by the reporter callback at the test's classification site
+ * (the downstream package copies it if it wants to buffer beyond
+ * the callback's lifetime). */
+#define LFG_CT_FAILURE_MSG_MAX 768
+static char _current_failure_msg[LFG_CT_FAILURE_MSG_MAX] = {0};
+
+/* Current suite name surfaced as the reporter record's classname.
+ * NULL when no suite is active (top-level tests). Tracked via
+ * save/restore in lfg_ct_suite_impl so nested suites unwind
+ * cleanly. */
+static const char *_current_suite_name = NULL;
+
+/* Reporter slot. Single pointer; one downstream consumer at a time.
+ * Borrowed -- caller keeps the struct alive across runner calls
+ * (file-static in the consumer is the intended usage). */
+static const lfg_ct_reporter_t *_reporter = NULL;
 
 /* lfg_ct_parse_args() runtime state. The glob arrays hold borrowed pointers
  * into the caller's argv (which has program lifetime under standard main()
@@ -141,6 +162,54 @@ static int _expected_failures_count = 0;
     } while (0)
 
 #endif /* LFG_CTEST_SELF_TEST */
+
+/* Consolidated assertion-failure helper. Formats @p fmt into a
+ * scratch buffer, prints the standard "*** <file>: <line>:
+ * FAILURE in <fn>(): <buf>" line to stdout (unchanged behavior),
+ * bumps the per-test + global failure counters, and snapshots the
+ * first failure per test into @c _current_failure_msg so the
+ * reporter callback can surface the assertion text on the record
+ * it hands downstream.
+ *
+ * Expect-failures self-test mode bypasses both the counter bumps
+ * and the message capture -- those failures are intentional and
+ * shouldn't appear in a downstream report. The stdout line still
+ * emits so the framework's own "did this assertion fail" tests
+ * remain visibly noisy when something genuinely breaks.
+ *
+ * Existence rationale: every assertion impl used to inline the
+ * same "printf(...) + RECORD_FAILURE();" pair, which was the
+ * natural place to also stash the message text. Routing every
+ * failure through one site keeps the data flow honest. */
+static void
+_lfg_ct_fail(const char *file, int line, const char *function, const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    printf("*** %s: %d: FAILURE in %s(): %s\r\n", file ? file : "(unknown)", line,
+            function ? function : "(unknown)", buf);
+
+#ifdef LFG_CTEST_SELF_TEST
+    if (_expect_failures_mode)
+    {
+        _expected_failures_count++;
+        return;
+    }
+#endif
+    _current_test_failures++;
+    _assertions_failed++;
+
+    if ('\0' == _current_failure_msg[0])
+    {
+        snprintf(_current_failure_msg, sizeof(_current_failure_msg), "%s:%d: in %s(): %s",
+                file ? file : "(unknown)", line, function ? function : "(unknown)", buf);
+    }
+}
 
 /*============================================================================
  *  Public API
@@ -362,6 +431,7 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
     int suite_assertions_failed_before;
     int inherited_pushed = 0;
     int saved_skip_active;
+    const char *saved_suite_name;
 
     if (_list_mode)
     {
@@ -408,9 +478,16 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
     saved_skip_active = _skip_env_active;
     _skip_env_active = 0;
 
+    /* Save/restore the suite-name baton. A nested lfg_ct_suite surfaces
+     * the innermost suite as the reporter record's suite_name; on
+     * return the outer suite's name is restored. */
+    saved_suite_name = _current_suite_name;
+    _current_suite_name = name;
+
     _current_suite_failures = 0;
     _lfg_ct_run_lifecycle(setup, fn, teardown);
 
+    _current_suite_name = saved_suite_name;
     _skip_env_active = saved_skip_active;
 
     if (_current_suite_failures > 0 || _assertions_failed > suite_assertions_failed_before)
@@ -435,6 +512,9 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
      * is the portable way to snapshot it. */
     jmp_buf saved_env;
     int saved_active;
+    char saved_failure_msg[LFG_CT_FAILURE_MSG_MAX];
+    clock_t time_start;
+    double elapsed;
 
     if (_list_mode)
     {
@@ -452,6 +532,15 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     _current_skip_reason = NULL;
     _current_xfail_set = 0;
     _current_xfail_reason = NULL;
+
+    /* Save/restore the failure-message slot so a nested test_impl call
+     * doesn't smear its captured message over the outer test's. After
+     * the nested call returns, the outer body may still log its own
+     * assertion failure -- that must be the message the outer test
+     * reports, not the nested one's. */
+    memcpy(saved_failure_msg, _current_failure_msg, sizeof(saved_failure_msg));
+    _current_failure_msg[0] = '\0';
+    time_start = clock();
 
     memcpy(saved_env, _skip_env, sizeof(jmp_buf));
     saved_active = _skip_env_active;
@@ -490,47 +579,83 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     memcpy(_skip_env, saved_env, sizeof(jmp_buf));
     _skip_env_active = saved_active;
 
+    elapsed = (double)(clock() - time_start) / (double)CLOCKS_PER_SEC;
+    if (elapsed < 0.0)
+    {
+        elapsed = 0.0;
+    }
+
     /* Classification. SKIP wins over a stray failure that may have
      * occurred before the skip call -- the test author signalled intent
      * to skip, so honor it. XFAIL/XPASS only apply when no skip fired.
      * For XFAIL/XPASS/SKIP we absorb the per-test assertion failures
      * back out of the global _assertions_failed so the surrounding
-     * suite-failure detector doesn't trip on them. */
-    if (LFG_CT_DISP_SKIPPED == _current_disposition)
+     * suite-failure detector doesn't trip on them.
+     *
+     * After bucketing, hand a record to the reporter (if any) -- one
+     * fire per classified test, with all the facts the downstream
+     * consumer needs to render whatever report format it cares about. */
     {
-        if (_current_test_failures > 0)
+        lfg_ct_outcome_t outcome = LFG_CT_PASSED;
+        const char *message = NULL;
+
+        if (LFG_CT_DISP_SKIPPED == _current_disposition)
         {
-            _assertions_failed -= _current_test_failures;
+            if (_current_test_failures > 0)
+            {
+                _assertions_failed -= _current_test_failures;
+            }
+            _tests_skipped++;
+            printf("*** test SKIP: %s: %s\r\n", name, _current_skip_reason ? _current_skip_reason : "(no reason)");
+            outcome = LFG_CT_SKIPPED;
+            message = _current_skip_reason;
         }
-        _tests_skipped++;
-        printf("*** test SKIP: %s: %s\r\n", name, _current_skip_reason ? _current_skip_reason : "(no reason)");
-    }
-    else if (_current_xfail_set)
-    {
-        _last_classified_xfail_reason = _current_xfail_reason;
-        if (_current_test_failures > 0)
+        else if (_current_xfail_set)
         {
-            _assertions_failed -= _current_test_failures;
-            _tests_xfailed++;
-            printf("*** test XFAIL: %s: %s\r\n", name,
-                    _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+            _last_classified_xfail_reason = _current_xfail_reason;
+            if (_current_test_failures > 0)
+            {
+                _assertions_failed -= _current_test_failures;
+                _tests_xfailed++;
+                printf("*** test XFAIL: %s: %s\r\n", name,
+                        _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                outcome = LFG_CT_XFAIL;
+                message = _current_xfail_reason;
+            }
+            else
+            {
+                _tests_xpassed++;
+                printf("*** test XPASS: %s: %s\r\n", name,
+                        _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                outcome = LFG_CT_XPASS;
+                message = _current_xfail_reason;
+            }
+        }
+        else if (_current_test_failures > 0)
+        {
+            _current_suite_failures++;
+            _tests_failed++;
+            printf("*** test FAILURE: %s\r\n", name);
+            outcome = LFG_CT_FAILED;
+            message = _current_failure_msg[0] ? _current_failure_msg : NULL;
         }
         else
         {
-            _tests_xpassed++;
-            printf("*** test XPASS: %s: %s\r\n", name,
-                    _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+            _tests_passed++;
+            outcome = LFG_CT_PASSED;
+            message = NULL;
         }
-    }
-    else if (_current_test_failures > 0)
-    {
-        _current_suite_failures++;
-        _tests_failed++;
-        printf("*** test FAILURE: %s\r\n", name);
-    }
-    else
-    {
-        _tests_passed++;
+
+        if (_reporter && _reporter->on_record)
+        {
+            lfg_ct_record_t rec;
+            rec.suite_name = _current_suite_name;
+            rec.test_name = name;
+            rec.time_sec = elapsed;
+            rec.outcome = outcome;
+            rec.message = message;
+            _reporter->on_record(&rec, _reporter->userdata);
+        }
     }
 
     /* Reset per-test state so a nested test_impl call doesn't leave its
@@ -541,6 +666,7 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     _current_skip_reason = NULL;
     _current_xfail_set = 0;
     _current_xfail_reason = NULL;
+    memcpy(_current_failure_msg, saved_failure_msg, sizeof(_current_failure_msg));
 }
 
 void lfg_ct_print_summary(void)
@@ -562,6 +688,21 @@ void lfg_ct_print_summary(void)
            "*** Testing complete. Result: %s\r\n",
             _assertions_executed, _tests_executed, _tests_failed, _tests_skipped, _tests_xfailed, _tests_xpassed,
             verdict);
+
+    /* Reporter's run-complete hook. A buffering reporter (e.g. the
+     * contrib JUnit emitter) flushes its accumulated state here. A
+     * failure inside the hook is the reporter's concern -- the
+     * runner's exit-code contract is unchanged by reporter side
+     * effects. */
+    if (_reporter && _reporter->on_run_complete)
+    {
+        _reporter->on_run_complete(_reporter->userdata);
+    }
+}
+
+void lfg_ct_set_reporter(const lfg_ct_reporter_t *reporter)
+{
+    _reporter = reporter;
 }
 
 int lfg_ct_return(void)
@@ -671,8 +812,7 @@ int lfg_ct_assert_false_impl(
     _assertions_executed++;
     if (condition)
     {
-        printf("*** %s: %u: FAILURE: in %s(): %s should be false\r\n", filename, line_no, function, condition_str);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should be false", condition_str);
         return -1;
     }
     RECORD_PASS();
@@ -685,8 +825,7 @@ int lfg_ct_assert_true_impl(
     _assertions_executed++;
     if (!condition)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should be true\r\n", filename, line_no, function, condition_str);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should be true", condition_str);
         return -1;
     }
     RECORD_PASS();
@@ -699,9 +838,7 @@ int lfg_ct_assert_int_equal_impl(
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should equal %d", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -714,9 +851,7 @@ int lfg_ct_assert_int_not_equal_impl(
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %d", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -729,9 +864,7 @@ int lfg_ct_assert_uint_equal_impl(unsigned expected, unsigned actual, char *file
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%u) should equal %u\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%u) should equal %u", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -744,9 +877,7 @@ int lfg_ct_assert_uint_not_equal_impl(unsigned expected, unsigned actual, char *
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %u\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %u", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -759,9 +890,7 @@ int lfg_ct_assert_uint8_equal_impl(uint8_t expected, uint8_t actual, char *filen
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%02X) should equal 0x%02X\r\n", filename, line_no, function,
-                actual_expr_str, actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%02X) should equal 0x%02X", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -774,9 +903,7 @@ int lfg_ct_assert_uint8_not_equal_impl(uint8_t expected, uint8_t actual, char *f
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%02X\r\n", filename, line_no, function,
-                actual_expr_str, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal 0x%02X", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -789,9 +916,7 @@ int lfg_ct_assert_uint16_equal_impl(uint16_t expected, uint16_t actual, char *fi
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%04X) should equal 0x%04X\r\n", filename, line_no, function,
-                actual_expr_str, actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%04X) should equal 0x%04X", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -804,9 +929,7 @@ int lfg_ct_assert_uint16_not_equal_impl(uint16_t expected, uint16_t actual, char
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%04X\r\n", filename, line_no, function,
-                actual_expr_str, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal 0x%04X", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -819,9 +942,7 @@ int lfg_ct_assert_uint32_equal_impl(uint32_t expected, uint32_t actual, char *fi
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should equal 0x%08X\r\n", filename, line_no, function,
-                actual_expr_str, actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%08X) should equal 0x%08X", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -834,9 +955,7 @@ int lfg_ct_assert_uint32_not_equal_impl(uint32_t expected, uint32_t actual, char
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%08X\r\n", filename, line_no, function,
-                actual_expr_str, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal 0x%08X", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -849,9 +968,7 @@ int lfg_ct_assert_ptr_equal_impl(void *expected, void *actual, const char *filen
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%p) should equal %p", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -864,9 +981,7 @@ int lfg_ct_assert_ptr_not_equal_impl(void *expected, void *actual, const char *f
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %p\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %p", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -879,8 +994,7 @@ int lfg_ct_assert_ptr_not_null(
     _assertions_executed++;
     if (NULL == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not be NULL\r\n", filename, line_no, function, actual_expr_str);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not be NULL", actual_expr_str);
         return -1;
     }
     RECORD_PASS();
@@ -893,9 +1007,7 @@ int lfg_ct_assert_ptr_null(
     _assertions_executed++;
     if (NULL != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should be NULL but is %p\r\n", filename, line_no, function,
-                actual_expr_str, actual);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should be NULL but is %p", actual_expr_str, actual);
         return -1;
     }
     RECORD_PASS();
@@ -908,9 +1020,7 @@ int lfg_ct_assert_int8_equal_impl(
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should equal %d", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -923,9 +1033,7 @@ int lfg_ct_assert_int8_not_equal_impl(
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %d", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -938,9 +1046,7 @@ int lfg_ct_assert_int16_equal_impl(int16_t expected, int16_t actual, char *filen
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should equal %d", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -953,9 +1059,7 @@ int lfg_ct_assert_int16_not_equal_impl(int16_t expected, int16_t actual, char *f
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %d", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -968,9 +1072,7 @@ int lfg_ct_assert_int32_equal_impl(int32_t expected, int32_t actual, char *filen
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should equal %d\r\n", filename, line_no, function, actual_expr_str,
-                actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should equal %d", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -983,9 +1085,7 @@ int lfg_ct_assert_int32_not_equal_impl(int32_t expected, int32_t actual, char *f
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %d\r\n", filename, line_no, function, actual_expr_str,
-                expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %d", actual_expr_str, expected);
         return -1;
     }
     RECORD_PASS();
@@ -998,9 +1098,8 @@ int lfg_ct_assert_int64_equal_impl(int64_t expected, int64_t actual, char *filen
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%lld) should equal %lld\r\n", filename, line_no, function,
-                actual_expr_str, (long long)actual, (long long)expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%lld) should equal %lld", actual_expr_str, (long long)actual,
+                (long long)expected);
         return -1;
     }
     RECORD_PASS();
@@ -1013,9 +1112,7 @@ int lfg_ct_assert_int64_not_equal_impl(int64_t expected, int64_t actual, char *f
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal %lld\r\n", filename, line_no, function,
-                actual_expr_str, (long long)expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal %lld", actual_expr_str, (long long)expected);
         return -1;
     }
     RECORD_PASS();
@@ -1028,9 +1125,8 @@ int lfg_ct_assert_uint64_equal_impl(uint64_t expected, uint64_t actual, char *fi
     _assertions_executed++;
     if (expected != actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%016llX) should equal 0x%016llX\r\n", filename, line_no, function,
-                actual_expr_str, (unsigned long long)actual, (unsigned long long)expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%016llX) should equal 0x%016llX", actual_expr_str,
+                (unsigned long long)actual, (unsigned long long)expected);
         return -1;
     }
     RECORD_PASS();
@@ -1043,9 +1139,8 @@ int lfg_ct_assert_uint64_not_equal_impl(uint64_t expected, uint64_t actual, char
     _assertions_executed++;
     if (expected == actual)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal 0x%016llX\r\n", filename, line_no, function,
-                actual_expr_str, (unsigned long long)expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal 0x%016llX", actual_expr_str,
+                (unsigned long long)expected);
         return -1;
     }
     RECORD_PASS();
@@ -1060,17 +1155,14 @@ int lfg_ct_assert_str_equal_impl(const char *expected, const char *actual, char 
     {
         if (expected != actual)
         {
-            printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n", filename, line_no,
-                    function, actual_expr_str, (void *)actual, (void *)expected);
-            RECORD_FAILURE();
+            _lfg_ct_fail(filename, line_no, function, "%s (%p) should equal %p (NULL mismatch)", actual_expr_str,
+                    (void *)actual, (void *)expected);
             return -1;
         }
     }
     else if (strcmp(expected, actual) != 0)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (\"%s\") should equal \"%s\"\r\n", filename, line_no, function,
-                actual_expr_str, actual, expected);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (\"%s\") should equal \"%s\"", actual_expr_str, actual, expected);
         return -1;
     }
     RECORD_PASS();
@@ -1083,9 +1175,8 @@ int lfg_ct_assert_str_not_equal_impl(const char *expected, const char *actual, c
     _assertions_executed++;
     if ((NULL == expected && NULL == actual) || (expected != NULL && actual != NULL && strcmp(expected, actual) == 0))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s should not equal \"%s\"\r\n", filename, line_no, function,
-                actual_expr_str, expected ? expected : "(null)");
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s should not equal \"%s\"", actual_expr_str,
+                expected ? expected : "(null)");
         return -1;
     }
     RECORD_PASS();
@@ -1100,17 +1191,14 @@ int lfg_ct_assert_strn_equal_impl(const char *expected, const char *actual, size
     {
         if (expected != actual)
         {
-            printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n", filename, line_no,
-                    function, actual_expr_str, (void *)actual, (void *)expected);
-            RECORD_FAILURE();
+            _lfg_ct_fail(filename, line_no, function, "%s (%p) should equal %p (NULL mismatch)", actual_expr_str,
+                    (void *)actual, (void *)expected);
             return -1;
         }
     }
     else if (strncmp(expected, actual, n) != 0)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (first %zu chars) does not match expected\r\n", filename, line_no,
-                function, actual_expr_str, n);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (first %zu chars) does not match expected", actual_expr_str, n);
         return -1;
     }
     RECORD_PASS();
@@ -1125,17 +1213,14 @@ int lfg_ct_assert_mem_equal_impl(const void *expected, const void *actual, size_
     {
         if (expected != actual)
         {
-            printf("*** %s: %u: FAILURE in %s(): %s (%p) should equal %p (NULL mismatch)\r\n", filename, line_no,
-                    function, actual_expr_str, actual, expected);
-            RECORD_FAILURE();
+            _lfg_ct_fail(filename, line_no, function, "%s (%p) should equal %p (NULL mismatch)", actual_expr_str,
+                    actual, expected);
             return -1;
         }
     }
     else if (memcmp(expected, actual, n) != 0)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s memory (%zu bytes) does not match expected\r\n", filename, line_no,
-                function, actual_expr_str, n);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s memory (%zu bytes) does not match expected", actual_expr_str, n);
         return -1;
     }
     RECORD_PASS();
@@ -1149,9 +1234,7 @@ int lfg_ct_assert_mem_not_equal_impl(const void *expected, const void *actual, s
     if ((NULL == expected && NULL == actual) ||
             (expected != NULL && actual != NULL && memcmp(expected, actual, n) == 0))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s memory (%zu bytes) should not match\r\n", filename, line_no, function,
-                actual_expr_str, n);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s memory (%zu bytes) should not match", actual_expr_str, n);
         return -1;
     }
     RECORD_PASS();
@@ -1164,9 +1247,7 @@ int lfg_ct_assert_greater_than_impl(
     _assertions_executed++;
     if (!(a > b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should be > %s (%d)\r\n", filename, line_no, function, a_expr_str,
-                a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should be > %s (%d)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1179,9 +1260,7 @@ int lfg_ct_assert_less_than_impl(
     _assertions_executed++;
     if (!(a < b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should be < %s (%d)\r\n", filename, line_no, function, a_expr_str,
-                a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should be < %s (%d)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1194,9 +1273,7 @@ int lfg_ct_assert_greater_or_equal_impl(
     _assertions_executed++;
     if (!(a >= b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should be >= %s (%d)\r\n", filename, line_no, function, a_expr_str,
-                a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should be >= %s (%d)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1209,9 +1286,7 @@ int lfg_ct_assert_less_or_equal_impl(
     _assertions_executed++;
     if (!(a <= b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should be <= %s (%d)\r\n", filename, line_no, function, a_expr_str,
-                a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should be <= %s (%d)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1224,9 +1299,7 @@ int lfg_ct_assert_in_range_impl(
     _assertions_executed++;
     if (!(val >= min && val <= max))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%d) should be in range [%d, %d]\r\n", filename, line_no, function,
-                val_expr_str, val, min, max);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%d) should be in range [%d, %d]", val_expr_str, val, min, max);
         return -1;
     }
     RECORD_PASS();
@@ -1239,9 +1312,7 @@ int lfg_ct_assert_bit_set_impl(unsigned val, unsigned bit, char *filename, int l
     _assertions_executed++;
     if (!(val & (1u << bit)))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bit %u set\r\n", filename, line_no, function,
-                val_expr_str, val, bit_num);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%08X) should have bit %u set", val_expr_str, val, bit_num);
         return -1;
     }
     RECORD_PASS();
@@ -1254,9 +1325,7 @@ int lfg_ct_assert_bit_clear_impl(unsigned val, unsigned bit, char *filename, int
     _assertions_executed++;
     if (val & (1u << bit))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bit %u clear\r\n", filename, line_no, function,
-                val_expr_str, val, bit_num);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (0x%08X) should have bit %u clear", val_expr_str, val, bit_num);
         return -1;
     }
     RECORD_PASS();
@@ -1269,9 +1338,8 @@ int lfg_ct_assert_bits_set_impl(unsigned val, unsigned mask, char *filename, int
     _assertions_executed++;
     if ((val & mask) != mask)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bits 0x%08X set\r\n", filename, line_no, function,
-                val_expr_str, val, mask_val);
-        RECORD_FAILURE();
+        _lfg_ct_fail(
+                filename, line_no, function, "%s (0x%08X) should have bits 0x%08X set", val_expr_str, val, mask_val);
         return -1;
     }
     RECORD_PASS();
@@ -1284,9 +1352,8 @@ int lfg_ct_assert_bits_clear_impl(unsigned val, unsigned mask, char *filename, i
     _assertions_executed++;
     if (val & mask)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (0x%08X) should have bits 0x%08X clear\r\n", filename, line_no,
-                function, val_expr_str, val, mask_val);
-        RECORD_FAILURE();
+        _lfg_ct_fail(
+                filename, line_no, function, "%s (0x%08X) should have bits 0x%08X clear", val_expr_str, val, mask_val);
         return -1;
     }
     RECORD_PASS();
@@ -1296,8 +1363,7 @@ int lfg_ct_assert_bits_clear_impl(unsigned val, unsigned mask, char *filename, i
 int lfg_ct_assert_fail_impl(char *filename, int line_no, const char *function, const char *message)
 {
     _assertions_executed++;
-    printf("*** %s: %u: FAILURE in %s(): %s\r\n", filename, line_no, function, message ? message : "Explicit failure");
-    RECORD_FAILURE();
+    _lfg_ct_fail(filename, line_no, function, "%s", message ? message : "Explicit failure");
     return -1;
 }
 
@@ -1314,10 +1380,8 @@ int lfg_ct_assert_float_equal_impl(float expected, float actual, float epsilon, 
     float diff = fabsf(expected - actual);
     if (diff > epsilon)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should equal %.6g "
-               "(diff=%.6g, eps=%.6g)\r\n",
-                filename, line_no, function, actual_expr_str, actual, expected, diff, epsilon);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should equal %.6g (diff=%.6g, eps=%.6g)", actual_expr_str,
+                actual, expected, diff, epsilon);
         return -1;
     }
     RECORD_PASS();
@@ -1331,10 +1395,8 @@ int lfg_ct_assert_float_not_equal_impl(float expected, float actual, float epsil
     float diff = fabsf(expected - actual);
     if (diff <= epsilon)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should not equal %.6g "
-               "(diff=%.6g, eps=%.6g)\r\n",
-                filename, line_no, function, actual_expr_str, actual, expected, diff, epsilon);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should not equal %.6g (diff=%.6g, eps=%.6g)",
+                actual_expr_str, actual, expected, diff, epsilon);
         return -1;
     }
     RECORD_PASS();
@@ -1347,9 +1409,7 @@ int lfg_ct_assert_float_greater_impl(float a, float b, const char *filename, int
     _assertions_executed++;
     if (!(a > b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be > %s (%.6g)\r\n", filename, line_no, function,
-                a_expr_str, a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should be > %s (%.6g)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1362,9 +1422,7 @@ int lfg_ct_assert_float_less_impl(float a, float b, const char *filename, int li
     _assertions_executed++;
     if (!(a < b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be < %s (%.6g)\r\n", filename, line_no, function,
-                a_expr_str, a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should be < %s (%.6g)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1377,9 +1435,7 @@ int lfg_ct_assert_float_ge_impl(float a, float b, const char *filename, int line
     _assertions_executed++;
     if (!(a >= b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be >= %s (%.6g)\r\n", filename, line_no, function,
-                a_expr_str, a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should be >= %s (%.6g)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1392,9 +1448,7 @@ int lfg_ct_assert_float_le_impl(float a, float b, const char *filename, int line
     _assertions_executed++;
     if (!(a <= b))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be <= %s (%.6g)\r\n", filename, line_no, function,
-                a_expr_str, a, b_expr_str, b);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.6g) should be <= %s (%.6g)", a_expr_str, a, b_expr_str, b);
         return -1;
     }
     RECORD_PASS();
@@ -1407,10 +1461,8 @@ int lfg_ct_assert_float_in_range_impl(float val, float min, float max, const cha
     _assertions_executed++;
     if (!(val >= min && val <= max))
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.6g) should be in range "
-               "[%.6g, %.6g]\r\n",
-                filename, line_no, function, val_expr_str, val, min, max);
-        RECORD_FAILURE();
+        _lfg_ct_fail(
+                filename, line_no, function, "%s (%.6g) should be in range [%.6g, %.6g]", val_expr_str, val, min, max);
         return -1;
     }
     RECORD_PASS();
@@ -1432,10 +1484,8 @@ int lfg_ct_assert_double_equal_impl(double expected, double actual, double epsil
     double diff = fabs(expected - actual);
     if (diff > epsilon)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.10g) should equal %.10g "
-               "(diff=%.10g, eps=%.10g)\r\n",
-                filename, line_no, function, actual_expr_str, actual, expected, diff, epsilon);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.10g) should equal %.10g (diff=%.10g, eps=%.10g)",
+                actual_expr_str, actual, expected, diff, epsilon);
         return -1;
     }
     RECORD_PASS();
@@ -1449,10 +1499,8 @@ int lfg_ct_assert_double_not_equal_impl(double expected, double actual, double e
     double diff = fabs(expected - actual);
     if (diff <= epsilon)
     {
-        printf("*** %s: %u: FAILURE in %s(): %s (%.10g) should not equal %.10g "
-               "(diff=%.10g, eps=%.10g)\r\n",
-                filename, line_no, function, actual_expr_str, actual, expected, diff, epsilon);
-        RECORD_FAILURE();
+        _lfg_ct_fail(filename, line_no, function, "%s (%.10g) should not equal %.10g (diff=%.10g, eps=%.10g)",
+                actual_expr_str, actual, expected, diff, epsilon);
         return -1;
     }
     RECORD_PASS();
