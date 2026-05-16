@@ -54,12 +54,19 @@ static const char *_current_skip_reason = NULL;
 static int _current_xfail_set = 0;
 static const char *_current_xfail_reason = NULL;
 
+/* Snapshot of the xfail reason at classification time. _current_xfail_reason
+ * is reset to NULL right after classification so a nested test cannot taint
+ * the calling test's state; this keeps the last-classified value visible to
+ * self-tests so they can verify "last call wins" semantics. */
+static const char *_last_classified_xfail_reason = NULL;
+
 /* Boundary for lfg_ct_skip's "return from body immediately" semantics.
  * Set up around setup() and body() invocations in the lifecycle helper;
- * lfg_ct_skip longjmps out when active and no-ops otherwise. There is
- * intentionally one buffer (and the lifecycle never re-enters itself --
- * tests are serial), so a nested skip from a recursive context would
- * land at the innermost setjmp, which is the desired behavior. */
+ * lfg_ct_skip longjmps out when active and no-ops otherwise. The
+ * lifecycle helper save/restores this buffer + active flag so a nested
+ * lfg_ct_test_impl (the pattern the framework's own self-tests use to
+ * drive mock tests through the real runner) cannot strand the outer
+ * test's body without a working boundary. */
 static jmp_buf _skip_env;
 static int _skip_env_active = 0;
 
@@ -331,6 +338,15 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
 {
     int setup_failures_before = 0;
     int setup_failed = 0;
+    /* Save/restore the skip boundary so a nested lfg_ct_test_impl call
+     * (run from inside an outer test body, the self-test pattern) does
+     * not strand an in-progress outer body with an overwritten _skip_env
+     * and a cleared _skip_env_active. The jmp_buf is an array type, so
+     * memcpy is the portable way to snapshot it. */
+    jmp_buf saved_env;
+    int saved_active = _skip_env_active;
+
+    memcpy(saved_env, _skip_env, sizeof(jmp_buf));
 
     if (setup)
     {
@@ -362,6 +378,9 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
     {
         teardown();
     }
+
+    memcpy(_skip_env, saved_env, sizeof(jmp_buf));
+    _skip_env_active = saved_active;
 }
 
 void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
@@ -455,6 +474,7 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     }
     else if (_current_xfail_set)
     {
+        _last_classified_xfail_reason = _current_xfail_reason;
         if (_current_test_failures > 0)
         {
             _assertions_failed -= _current_test_failures;
@@ -603,6 +623,11 @@ void lfg_ct_self_set_strict_xpass(int enabled)
 int lfg_ct_self_return_code(void)
 {
     return lfg_ct_return();
+}
+
+const char *lfg_ct_self_last_xfail_reason(void)
+{
+    return _last_classified_xfail_reason;
 }
 
 #endif /* LFG_CTEST_SELF_TEST */

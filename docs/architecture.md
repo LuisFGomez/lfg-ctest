@@ -112,6 +112,13 @@ is a single static `jmp_buf` reused between the setup and body
 boundaries — the lifecycle helper sets `_skip_env_active = 1` only
 while a boundary is live, and the skip impl no-ops with a stderr
 warning when called outside that window (e.g. from teardown or `main`).
+The lifecycle helper snapshots `_skip_env` + `_skip_env_active` on
+entry and restores both on exit so a nested `_lfg_ct_run_lifecycle`
+call (the self-test pattern that drives mock tests through the real
+runner) cannot strand an in-progress outer body with an overwritten
+buffer or a cleared active flag — an outer test body can call
+`lfg_ct_skip` after a nested `lfg_ct_test_impl` returns and still
+unwind correctly.
 
 `lfg_ct_xfail(reason)` does not unwind; it sets `_current_xfail_set`
 and overwrites `_current_xfail_reason` (last call wins). The body runs

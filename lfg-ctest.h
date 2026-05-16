@@ -621,6 +621,15 @@ void lfg_ct_self_set_strict_xpass(int enabled);
  */
 int lfg_ct_self_return_code(void);
 
+/** Self-test accessor: the @c xfail reason captured at the most recent
+ *  XFAIL/XPASS classification. Snapshotted before the per-test reset
+ *  clears @c _current_xfail_reason, so self-tests can verify that
+ *  repeated @c lfg_ct_xfail calls keep the latest reason ("last one
+ *  wins"). Pointer is borrowed from the caller's argument; lifetime is
+ *  the caller's responsibility.
+ */
+const char *lfg_ct_self_last_xfail_reason(void);
+
 #endif /* LFG_CTEST_SELF_TEST */
 
 #endif /* LFG_CTEST_H_ */
