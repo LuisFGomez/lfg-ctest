@@ -982,6 +982,27 @@ static void _disp_body_after_nested_then_skip(void)
     _disp_post_skip_marker = 1; /* must NOT execute -- outer must unwind */
 }
 
+/* Suite-level setup that calls lfg_ct_skip. Pre-fix, the resulting
+ * SKIPPED disposition leaked past lfg_ct_suite_impl's return and
+ * silently disabled the next top-level suite's body. */
+static int _disp_suite_skipped_body_ran;
+static int _disp_suite_followup_body_ran;
+
+static void _disp_suite_setup_skips(void)
+{
+    lfg_ct_skip("suite preconditions not met");
+}
+
+static void _disp_suite_body_marker(void)
+{
+    _disp_suite_skipped_body_ran = 1;
+}
+
+static void _disp_suite_followup_body(void)
+{
+    _disp_suite_followup_body_ran = 1;
+}
+
 /* Capture the latest classification message by intercepting via a body
  * that records what lfg_ct_xfail saved -- we read the runner-visible
  * reason indirectly through the bucket-counter delta and trust the
@@ -1075,6 +1096,23 @@ static void test_disposition_skip_after_nested_test_impl_still_unwinds(void)
     ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
 }
 
+static void test_disposition_suite_setup_skip_does_not_leak_to_next_suite(void)
+{
+    _disp_suite_skipped_body_ran = 0;
+    _disp_suite_followup_body_ran = 0;
+
+    /* First suite: setup calls lfg_ct_skip -> body must not run. */
+    lfg_ct_suite_impl(_disp_suite_setup_skips, _disp_suite_body_marker, NULL, "mock_suite_setup_skip");
+    ASSERT_INT_EQUAL(0, _disp_suite_skipped_body_ran);
+
+    /* Second suite, immediately after, with no setup: body must run.
+     * Pre-fix, _current_disposition was still SKIPPED from the prior
+     * suite's setup-skip and _lfg_ct_run_lifecycle's body-gate check
+     * silently swallowed this body. */
+    lfg_ct_suite_impl(NULL, _disp_suite_followup_body, NULL, "mock_suite_followup");
+    ASSERT_INT_EQUAL(1, _disp_suite_followup_body_ran);
+}
+
 static void test_disposition_xpass_strict_flag_toggles_return_code(void)
 {
     int before_xpass = lfg_ct_self_xpassed_count();
@@ -1124,6 +1162,7 @@ static void suite_disposition_tests(void)
     lfg_ct_test(NULL, test_disposition_xfail_without_failure_buckets_as_xpass, NULL);
     lfg_ct_test(NULL, test_disposition_xfail_repeated_calls_keep_last_reason, NULL);
     lfg_ct_test(NULL, test_disposition_skip_after_nested_test_impl_still_unwinds, NULL);
+    lfg_ct_test(NULL, test_disposition_suite_setup_skip_does_not_leak_to_next_suite, NULL);
     lfg_ct_test(NULL, test_disposition_xpass_strict_flag_toggles_return_code, NULL);
     lfg_ct_test(NULL, test_disposition_parse_strict_xpass_flag, NULL);
 }
