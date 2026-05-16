@@ -118,7 +118,11 @@ call (the self-test pattern that drives mock tests through the real
 runner) cannot strand an in-progress outer body with an overwritten
 buffer or a cleared active flag — an outer test body can call
 `lfg_ct_skip` after a nested `lfg_ct_test_impl` returns and still
-unwind correctly.
+unwind correctly. The helper also resets `_current_disposition` to
+`NORMAL` right after the save/restore block so a suite-level setup
+that calls `lfg_ct_skip` cannot leak `SKIPPED` past
+`lfg_ct_suite_impl`'s return (which would otherwise silently disable
+the body of the next top-level suite via the body-gate check).
 
 `lfg_ct_xfail(reason)` does not unwind; it sets `_current_xfail_set`
 and overwrites `_current_xfail_reason` (last call wins). The body runs

@@ -348,6 +348,16 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
 
     memcpy(saved_env, _skip_env, sizeof(jmp_buf));
 
+    /* Reset the body-gate disposition unconditionally. test_impl already
+     * resets on entry, but suite_impl does not -- without this, an
+     * lfg_ct_skip fired from a suite-level setup would leave SKIPPED
+     * set past the suite's return and silently skip the next top-level
+     * suite's body. Reset before the setup setjmp; a skip during this
+     * call's setup writes disposition *after* this reset, so the
+     * within-call setup -> body propagation still works. */
+    _current_disposition = LFG_CT_DISP_NORMAL;
+    _current_skip_reason = NULL;
+
     if (setup)
     {
         setup_failures_before = _lifecycle_failure_total();
