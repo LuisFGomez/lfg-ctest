@@ -24,30 +24,33 @@ There is no reentrancy guarantee — one test run at a time.
 ### Setup / teardown lifecycle
 
 Both `lfg_ct_test_impl` and `lfg_ct_suite_impl` route through a single
-internal helper, `_lfg_ct_run_lifecycle`, that drives the
+internal helper, `_lfg_ct_run_lifecycle`, that drives a plain
 `setup -> body -> teardown` sequence:
 
 1. If `setup` is non-`NULL`, snapshot the total observed failures
    (`_assertions_failed`, plus `_expected_failures_count` when self-test
-   mode is on), wrap the call in a `setjmp(_skip_env)` boundary so
-   `lfg_ct_skip` has somewhere to unwind to, then run `setup`. A delta
-   in that total marks the setup as failed.
-2. If the setup did not fail (and the disposition is not already
-   `SKIPPED`), run `body` inside its own `setjmp(_skip_env)` boundary.
+   mode is on), then run `setup`. A delta in that total marks the setup
+   as failed.
+2. If the setup did not fail (or there was no setup), run `body`.
 3. If `teardown` is non-`NULL`, run it — always, regardless of body or
-   setup outcome. Teardown is intentionally outside any `setjmp`
-   boundary; its job is resource cleanup, so the framework guarantees
-   it runs whenever the consumer asked for it.
+   setup outcome. Teardown's job is resource cleanup, so the framework
+   guarantees it runs whenever the consumer asked for it.
 
-Assertion failures themselves do not need the boundary: assertion impls
-return `-1` and bump a counter; they don't abort, so teardown stays
-reachable after a body failure without any unwinding. The `setjmp`
-boundary exists for the `lfg_ct_skip` "return from the body
-immediately" semantics (see [Skip / xfail dispositions](#skip--xfail-dispositions)
-below) and is the only path that uses `longjmp`. The setup-failure
-detector exists so the body can be skipped — a failing setup may have
-left partially acquired resources, but the rest of the body's work is
-no longer meaningful.
+Assertion failures themselves do not need any kind of unwinding:
+assertion impls return `-1` and bump a counter; they don't abort, so
+teardown stays reachable after a body failure without any
+`setjmp`/`longjmp` machinery. The setup-failure detector exists so the
+body can be skipped — a failing setup may have left partially acquired
+resources, but the rest of the body's work is no longer meaningful.
+
+`lfg_ct_test_impl` wraps the lifecycle's setup and body calls in its
+own `setjmp(_skip_env)` boundaries so `lfg_ct_skip` has somewhere to
+unwind to — see [Skip / xfail dispositions](#skip--xfail-dispositions)
+below. `lfg_ct_suite_impl` does *not* install the boundary; it
+explicitly forces `_skip_env_active = 0` across the suite's lifecycle
+so a stray `lfg_ct_skip` from a suite-level callback warns to stderr
+and no-ops rather than unwinding (suite-level skip is intentionally
+out of scope for now).
 
 Every assertion macro in `lfg-ctest.h` ultimately routes to an internal
 failure path that:
@@ -106,23 +109,20 @@ Per-test disposition is tracked in three statics in `lfg-ctest.c`:
 - `_current_xfail_set` + `_current_xfail_reason`.
 
 `lfg_ct_skip(reason)` sets the disposition, records the reason, and
-`longjmp`s through `_skip_env` to the closest `_lfg_ct_run_lifecycle`
-boundary (the setup or body boundary, whichever is active). `_skip_env`
+`longjmp`s through `_skip_env` to the closest test-level boundary
+(the setup or body boundary `lfg_ct_test_impl` installed). `_skip_env`
 is a single static `jmp_buf` reused between the setup and body
-boundaries — the lifecycle helper sets `_skip_env_active = 1` only
-while a boundary is live, and the skip impl no-ops with a stderr
-warning when called outside that window (e.g. from teardown or `main`).
-The lifecycle helper snapshots `_skip_env` + `_skip_env_active` on
-entry and restores both on exit so a nested `_lfg_ct_run_lifecycle`
-call (the self-test pattern that drives mock tests through the real
-runner) cannot strand an in-progress outer body with an overwritten
-buffer or a cleared active flag — an outer test body can call
-`lfg_ct_skip` after a nested `lfg_ct_test_impl` returns and still
-unwind correctly. The helper also resets `_current_disposition` to
-`NORMAL` right after the save/restore block so a suite-level setup
-that calls `lfg_ct_skip` cannot leak `SKIPPED` past
-`lfg_ct_suite_impl`'s return (which would otherwise silently disable
-the body of the next top-level suite via the body-gate check).
+boundaries — `lfg_ct_test_impl` sets `_skip_env_active = 1` only while
+a boundary is live, and the skip impl no-ops with a stderr warning
+when called outside that window (e.g. from a per-test teardown, from
+any suite-level callback — `lfg_ct_suite_impl` explicitly forces
+`_skip_env_active = 0` for the duration of the suite — or from
+`main`). `lfg_ct_test_impl` snapshots `_skip_env` + `_skip_env_active`
+on entry and restores both on exit so a nested `lfg_ct_test_impl` (the
+self-test pattern that drives mock tests through the real runner)
+cannot strand an in-progress outer body with an overwritten buffer or
+a cleared active flag — an outer test body can call `lfg_ct_skip`
+after a nested `lfg_ct_test_impl` returns and still unwind correctly.
 
 `lfg_ct_xfail(reason)` does not unwind; it sets `_current_xfail_set`
 and overwrites `_current_xfail_reason` (last call wins). The body runs

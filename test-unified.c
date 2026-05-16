@@ -982,11 +982,11 @@ static void _disp_body_after_nested_then_skip(void)
     _disp_post_skip_marker = 1; /* must NOT execute -- outer must unwind */
 }
 
-/* Suite-level setup that calls lfg_ct_skip. Pre-fix, the resulting
- * SKIPPED disposition leaked past lfg_ct_suite_impl's return and
- * silently disabled the next top-level suite's body. */
-static int _disp_suite_skipped_body_ran;
-static int _disp_suite_followup_body_ran;
+/* Suite-level skip is intentionally out of scope: lfg_ct_skip is a
+ * per-test gesture. A skip call from inside a suite-level setup must
+ * warn to stderr and be a benign no-op so the suite continues
+ * normally. */
+static int _disp_suite_body_ran;
 
 static void _disp_suite_setup_skips(void)
 {
@@ -995,12 +995,7 @@ static void _disp_suite_setup_skips(void)
 
 static void _disp_suite_body_marker(void)
 {
-    _disp_suite_skipped_body_ran = 1;
-}
-
-static void _disp_suite_followup_body(void)
-{
-    _disp_suite_followup_body_ran = 1;
+    _disp_suite_body_ran = 1;
 }
 
 /* Capture the latest classification message by intercepting via a body
@@ -1096,21 +1091,22 @@ static void test_disposition_skip_after_nested_test_impl_still_unwinds(void)
     ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
 }
 
-static void test_disposition_suite_setup_skip_does_not_leak_to_next_suite(void)
+static void test_disposition_suite_context_skip_is_benign_no_op(void)
 {
-    _disp_suite_skipped_body_ran = 0;
-    _disp_suite_followup_body_ran = 0;
+    int before_skipped = lfg_ct_self_skipped_count();
 
-    /* First suite: setup calls lfg_ct_skip -> body must not run. */
-    lfg_ct_suite_impl(_disp_suite_setup_skips, _disp_suite_body_marker, NULL, "mock_suite_setup_skip");
-    ASSERT_INT_EQUAL(0, _disp_suite_skipped_body_ran);
+    /* Suite-level skip is out of scope -- lfg_ct_skip is a per-test
+     * gesture. lfg_ct_suite_impl explicitly turns the skip boundary
+     * off across its lifecycle, so a stray lfg_ct_skip from a suite
+     * setup must warn to stderr (suppressed for test cleanliness via
+     * NOT being captured here -- we only check the observable
+     * consequence) and let the suite body run normally. */
+    _disp_suite_body_ran = 0;
+    lfg_ct_suite_impl(_disp_suite_setup_skips, _disp_suite_body_marker, NULL, "mock_suite_skip_in_setup");
 
-    /* Second suite, immediately after, with no setup: body must run.
-     * Pre-fix, _current_disposition was still SKIPPED from the prior
-     * suite's setup-skip and _lfg_ct_run_lifecycle's body-gate check
-     * silently swallowed this body. */
-    lfg_ct_suite_impl(NULL, _disp_suite_followup_body, NULL, "mock_suite_followup");
-    ASSERT_INT_EQUAL(1, _disp_suite_followup_body_ran);
+    ASSERT_INT_EQUAL(1, _disp_suite_body_ran);
+    /* No test was bucketed -- suites do not bucket as SKIP. */
+    ASSERT_INT_EQUAL(before_skipped, lfg_ct_self_skipped_count());
 }
 
 static void test_disposition_xpass_strict_flag_toggles_return_code(void)
@@ -1162,7 +1158,7 @@ static void suite_disposition_tests(void)
     lfg_ct_test(NULL, test_disposition_xfail_without_failure_buckets_as_xpass, NULL);
     lfg_ct_test(NULL, test_disposition_xfail_repeated_calls_keep_last_reason, NULL);
     lfg_ct_test(NULL, test_disposition_skip_after_nested_test_impl_still_unwinds, NULL);
-    lfg_ct_test(NULL, test_disposition_suite_setup_skip_does_not_leak_to_next_suite, NULL);
+    lfg_ct_test(NULL, test_disposition_suite_context_skip_is_benign_no_op, NULL);
     lfg_ct_test(NULL, test_disposition_xpass_strict_flag_toggles_return_code, NULL);
     lfg_ct_test(NULL, test_disposition_parse_strict_xpass_flag, NULL);
 }

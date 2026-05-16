@@ -120,8 +120,8 @@ replaces any previously parsed state.
 Tests that are known-failing for a tracked reason (a deferred fix, an
 environment-specific path, a flake under investigation) can declare
 their expected disposition inline. Two macros, callable from inside a
-test body (and from `setup`, where `lfg_ct_skip` is the natural way to
-express "preconditions not met"):
+test body (and from the test's `setup`, where `lfg_ct_skip` is the
+natural way to express "preconditions not met"):
 
 ```c
 lfg_ct_skip("waiting on driver fix");
@@ -130,12 +130,15 @@ lfg_ct_xfail("known flaky under valgrind");
 
 | Macro | Effect |
 |-------|--------|
-| `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately. From `setup`, the body is not invoked but `teardown` still runs. SKIP does not count toward pass or fail. |
+| `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately. From the test's `setup`, the body is not invoked but `teardown` still runs. SKIP does not count toward pass or fail. |
 | `lfg_ct_xfail(reason)` | Mark the test as expected-to-fail and continue executing. After the body completes: if any assertion failed, the test is **XFAIL** (separate bucket); if none failed, the test is **XPASS** (separate bucket). Repeated calls keep the latest reason. |
 
-Outside a test context (e.g. from `main`, between tests, or in
-`teardown`) both macros print a warning to stderr and otherwise do
-nothing — they are not fatal.
+**Scope:** per-test only. Both macros are no-ops with a stderr warning
+when called from anywhere else — `main`, a suite-level `setup` / body /
+`teardown`, a per-test `teardown`, or between tests. Suite-level skip
+is not (yet) a first-class feature; if you need to skip a whole suite
+based on a runtime precondition, gate the `lfg_ct_test(...)` calls
+inside the suite body on a regular `if` instead.
 
 Per-test reporting:
 
