@@ -159,6 +159,88 @@ when set and `_tests_xpassed > 0` and no real failures occurred, return
 `-1` instead of `0`. The summary line shows `XPass: N` regardless of
 the flag; only the exit code changes.
 
+## Fork-per-test isolation (`lfg-ctest-fork.c`)
+
+Optional runtime support for `LFG_CT_ISOLATE_FORK`, selected via
+`lfg_ct_set_isolation(...)`. The implementation lives in its own
+translation unit so the platform gate (`__unix__` / `__APPLE__`) and
+the compile-time opt-out (`LFG_CT_DISABLE_FORK`) stay contained --
+the rest of the framework has zero `#ifdef`s for this feature.
+
+### Dispatch shape
+
+`lfg_ct_test_impl` is now a thin shim. After the list-mode + filter
+checks (which are name-only and have to happen in the parent
+regardless of isolation), it delegates:
+
+- `LFG_CT_ISOLATE_NONE` -> `_lfg_ct_test_impl_inproc`, the original
+  in-process path (now renamed). Unchanged behavior, no extra cost
+  for default-mode consumers.
+- `LFG_CT_ISOLATE_FORK` -> `_lfg_ct_fork_run_test`, in `lfg-ctest-fork.c`.
+
+The fork runner:
+
+1. Opens a pipe and `fork(2)`s.
+2. **Child**: swaps the user's reporter for a capture reporter,
+   snapshots the assertion counters, calls `_lfg_ct_test_impl_inproc`
+   directly, diffs the counters back out, writes a fixed-layout
+   `_fork_payload_t` to the pipe, and `_exit`s. Counter deltas are
+   shipped because the child's increments live in its own address
+   space and don't survive `_exit`.
+3. **Parent**: optionally polls `waitpid(WNOHANG)` with a 5ms step
+   when a timeout is configured, escalating to `kill(SIGKILL)` on
+   expiry; otherwise blocks. Reads the payload, decodes `WIFSIGNALED`
+   / `WIFEXITED`, and projects the outcome via
+   `_lfg_ct_record_external`.
+
+Stdout/stderr fd inheritance is the default `fork(2)` behavior, so
+the child's per-test banner reaches the user without any capture
+wiring. The parent only emits the banner itself on signal / timeout /
+"exited without payload" paths, where the child died before its own
+print landed.
+
+### Bridge surface (lfg-ctest.c <-> lfg-ctest-fork.c)
+
+Three internal symbols (extern-declared in the fork TU, not in any
+public header):
+
+| Symbol | Direction | Role |
+|--------|-----------|------|
+| `_lfg_ct_test_impl_inproc` | `lfg-ctest.c` exports | In-process dispatch the child re-enters after the reporter swap. |
+| `_lfg_ct_counter_snapshot` | `lfg-ctest.c` exports | Read the assertion counters; child uses it to compute deltas. |
+| `_lfg_ct_get_reporter` | `lfg-ctest.c` exports | Save the active reporter so the child can restore after the swap. |
+| `_lfg_ct_record_external` | `lfg-ctest.c` exports | Project a child's classified outcome onto parent-side counters + reporter. Mirrors the post-classification block of the in-process path. |
+| `_lfg_ct_fork_available` | `lfg-ctest-fork.c` exports | `lfg_ct_set_isolation` calls this to decide whether to accept `LFG_CT_ISOLATE_FORK`. The disabled-build / non-Unix stub returns 0. |
+| `_lfg_ct_fork_run_test` | `lfg-ctest-fork.c` exports | The dispatcher itself. Disabled-build / non-Unix stub returns -1 with no fork-related code linked. |
+
+### Compile-time opt-out (`LFG_CT_DISABLE_FORK`)
+
+CMake option `LFG_CTEST_ENABLE_FORK` (default `ON`). When `OFF`, the
+library is built with `LFG_CT_DISABLE_FORK=1` on the
+`lfg-ctest-fork.c` TU; the file compiles to two stubs and the linker
+drops every reference to `fork` / `waitpid` / `kill` / `usleep`. The
+`LFG_CT_ISOLATE_FORK` enum value is unconditional in the header so
+consumer code that references it still compiles.
+
+`test-fork-disabled` rebuilds the framework sources directly with
+`LFG_CT_DISABLE_FORK=1` to exercise the opt-out path -- mirrors the
+self-contained pattern that `test-amalg` uses. `nm -u` on the
+resulting binary shows zero fork-family imports.
+
+### Self-test interaction (`_expect_failures_mode`)
+
+`_lfg_ct_record_external` consults `_expect_failures_mode` when the
+incoming outcome is `LFG_CT_FAILED`: in expect-failures mode, the
+test-level counter bumps (`_tests_failed`, `_current_suite_failures`,
+`_assertions_failed`) are redirected to `_expected_failures_count`
+just like assertion-level failures already are. This lets
+`test-fork.c` drive an inner fork-mode test that crashes / times out
+/ aborts -- and verify the reporter receives `FAILED` -- without
+polluting the global counters and making the binary exit non-zero.
+The extension is consistent with the existing semantic of the flag:
+"intentional failures during this block do not affect the run's
+verdict."
+
 ## Mock system (`lfg-ctest-mock.[ch]`)
 
 ### Macro fanout

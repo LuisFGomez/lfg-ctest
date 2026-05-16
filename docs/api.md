@@ -171,6 +171,100 @@ keep exercising the code path; promote to a real failure later by
 deleting the `lfg_ct_xfail` call (or pass `--strict-xpass` in CI to
 catch the moment the bug fixes itself).
 
+### Isolation modes
+
+By default, every `lfg_ct_test` body runs in the test binary's own
+process — the historical, fastest path. A crashing test (`abort`,
+SIGSEGV, etc.) takes down the runner and stops subsequent tests; a
+test that leaks or mutates a global pollutes the next one.
+
+`lfg_ct_set_isolation(mode)` switches the dispatch shape for every
+subsequent `lfg_ct_test` invocation:
+
+| Mode | Effect |
+|------|--------|
+| `LFG_CT_ISOLATE_NONE` (default) | In-process dispatch. Fast; no isolation between tests. |
+| `LFG_CT_ISOLATE_FORK` | Per-test `fork(2)`. Crash survival, true state reset, per-test sanitizer attribution. |
+
+Fork mode mechanics:
+
+- For each `lfg_ct_test(...)`, the parent `fork`s. The child runs
+  setup → body → teardown via the in-process path and ships an
+  outcome payload back over a pipe. The parent decodes, projects the
+  outcome onto its own counters / reporter, and continues with the
+  next test.
+- A child that dies on a signal (SIGSEGV, SIGABRT, SIGBUS, ...) is
+  reaped by the parent and recorded as `FAILED` with a "killed by
+  signal N" message; the runner advances to the next test.
+- A child that exits non-zero **without** writing the payload (e.g.
+  the body calls `_exit(N)`) is recorded as `FAILED` with a "child
+  exited N with no payload" message — no silent pass.
+- Stdout/stderr are shared with the child via the default fork fd
+  inheritance, so the child's per-test banner reaches the user
+  without any explicit capture wiring.
+- Expensive shared setup stays in the parent: anything opened or
+  computed before the dispatch (file descriptors, parsed fixtures,
+  DB handles) is inherited by every child via COW.
+
+Per-test timeout:
+
+```c
+lfg_ct_set_fork_timeout_ms(50);   /* 50ms per test; 0 disables (default) */
+```
+
+A child that has not exited within the configured timeout is sent
+`SIGKILL` and recorded as `FAILED` with a "timed out after Nms"
+message. The setting only takes effect under `LFG_CT_ISOLATE_FORK`
+and persists across mode changes.
+
+Platform + opt-out:
+
+- Fork mode is Unix-family (`__unix__` / `__APPLE__`) only. On other
+  platforms `lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK)` returns
+  non-zero and leaves the configured mode unchanged. **No silent
+  fallback.**
+- Consumers who don't want the additional dependency surface (extra
+  syscalls, signal-handling glue, `waitpid` wiring) can build the
+  framework with the CMake option `-DLFG_CTEST_ENABLE_FORK=OFF`
+  (equivalent to defining `LFG_CT_DISABLE_FORK=1` on the
+  `lfg-ctest-fork.c` TU). The resulting binary has no
+  fork/waitpid/signal-handling code linked in;
+  `lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK)` returns the same
+  documented error as the unsupported-platform path.
+- The `LFG_CT_ISOLATE_FORK` enum value is part of the public ABI
+  unconditionally — consumer code that references it still compiles
+  in both builds.
+
+Out of scope:
+
+- **Nested forks inside a test.** Test code that calls `fork(2)`
+  itself is on its own — the parent only waits on its direct child.
+- **Windows isolation.** A `CreateProcess` stub would be a separate
+  follow-up; the current cut documents Windows as `LFG_CT_ISOLATE_FORK`
+  returning the clean error.
+
+Example:
+
+```c
+int main(int argc, char *argv[])
+{
+    if (0 != lfg_ct_parse_args(argc, argv)) return 1;
+
+    /* Opt in to fork-per-test for tests that need crash survival or
+     * true state reset. Fall back gracefully if the runtime support
+     * is unavailable (Windows, or LFG_CT_DISABLE_FORK build). */
+    if (0 != lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK)) {
+        fprintf(stderr, "fork isolation unavailable; running in-process\n");
+    }
+    lfg_ct_set_fork_timeout_ms(5000);  /* 5s per test */
+
+    lfg_ct_start();
+    /* ... lfg_ct_suite / lfg_ct_test calls ... */
+    lfg_ct_print_summary();
+    return lfg_ct_return();
+}
+```
+
 ### Reporter callback
 
 `lfg_ct_set_reporter(const lfg_ct_reporter_t *)` installs a pluggable
