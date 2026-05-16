@@ -273,6 +273,27 @@
  */
 #define lfg_ct_test(_setup, _test, _teardown) lfg_ct_test_impl((_setup), (_test), (_teardown), #_test)
 
+/** Mark the current test as skipped, record @p _reason, and return from
+ *  the test body immediately. Buckets the test as SKIP (separate from
+ *  pass/fail). Legal in setup; the body is then not invoked but
+ *  @c teardown still runs (same guarantee as a setup-failure path).
+ *  Outside a test context this is a no-op with a warning to stderr.
+ */
+#define lfg_ct_skip(_reason) lfg_ct_skip_impl((_reason), __FILE__, __LINE__, LFG_CT_FUNCTION)
+
+/** Mark the current test as expected-to-fail and record @p _reason.
+ *  Unlike @ref lfg_ct_skip, this does @b not return from the body --
+ *  the body runs to completion and the disposition is decided after
+ *  the fact:
+ *    - any assertion failure in the body -> XFAIL (separate bucket,
+ *      not counted as failure);
+ *    - no assertion failures -> XPASS (separate bucket, not counted
+ *      as pass; warning only unless @c --strict-xpass is set).
+ *  Repeated calls keep the latest reason (last one wins). Outside a
+ *  test context this is a no-op with a warning to stderr.
+ */
+#define lfg_ct_xfail(_reason) lfg_ct_xfail_impl((_reason), __FILE__, __LINE__, LFG_CT_FUNCTION)
+
 /*============================================================================
  *  Public API
  *==========================================================================*/
@@ -310,6 +331,10 @@ void lfg_ct_end(void);
  *                                  matches the glob. Inverse of @c --filter,
  *                                  same repeat / OR semantics. Exclude wins
  *                                  on overlap with @c --filter.
+ *   - @c --strict-xpass          : flip an otherwise-clean run that contains
+ *                                  one or more @c xpass outcomes to a
+ *                                  non-zero exit code. Default behavior is
+ *                                  permissive (xpass is a warning).
  *
  *  An unmatched filter is not an error -- zero tests execute and the program
  *  exits 0. Unknown flags print a short usage message to stderr and produce
@@ -352,6 +377,22 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
  *  hook that should be skipped.
  */
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+
+/** Implementation backing the @ref lfg_ct_skip macro. Use the macro --
+ *  it captures @c __FILE__ / @c __LINE__ / function name automatically.
+ *  Triggers a @c longjmp out of the current test or setup phase; the
+ *  function does not return to its caller. Outside a test context this
+ *  is a no-op with a warning to stderr.
+ */
+void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function);
+
+/** Implementation backing the @ref lfg_ct_xfail macro. Use the macro --
+ *  it captures @c __FILE__ / @c __LINE__ / function name automatically.
+ *  Records the expected-to-fail intent and returns normally; the body
+ *  continues to run. Outside a test context this is a no-op with a
+ *  warning to stderr.
+ */
+void lfg_ct_xfail_impl(const char *reason, const char *file, int line, const char *function);
 
 /** Print test summary.
  */
@@ -551,6 +592,34 @@ void lfg_ct_expect_failures_begin(void);
  *  @return Number of assertion failures captured during expect-failures mode.
  */
 int lfg_ct_expect_failures_end(void);
+
+/** Self-test accessor: running tally of tests bucketed as SKIP. */
+int lfg_ct_self_skipped_count(void);
+
+/** Self-test accessor: running tally of tests bucketed as XFAIL. */
+int lfg_ct_self_xfailed_count(void);
+
+/** Self-test accessor: running tally of tests bucketed as XPASS. */
+int lfg_ct_self_xpassed_count(void);
+
+/** Self-test accessor: running tally of tests bucketed as FAIL. */
+int lfg_ct_self_failed_count(void);
+
+/** Self-test accessor: running tally of failed assertions (post the
+ *  xfail/skip absorption performed at test classification).
+ */
+int lfg_ct_self_assertions_failed(void);
+
+/** Self-test toggle for @c --strict-xpass. Lets the framework's own tests
+ *  flip the flag without going through @ref lfg_ct_parse_args (which
+ *  would also reset filter state).
+ */
+void lfg_ct_self_set_strict_xpass(int enabled);
+
+/** Self-test accessor: returns the exit code @ref lfg_ct_return would
+ *  produce right now, without printing the summary.
+ */
+int lfg_ct_self_return_code(void);
 
 #endif /* LFG_CTEST_SELF_TEST */
 

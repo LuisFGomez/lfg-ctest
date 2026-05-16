@@ -11,6 +11,7 @@
 #include <time.h>
 #include <string.h>
 #include <fnmatch.h>
+#include <setjmp.h>
 #if defined(LFG_CTEST_HAS_FLOAT) || defined(LFG_CTEST_HAS_DOUBLE)
 #include <math.h>
 #endif
@@ -34,8 +35,37 @@ static int _assertions_passed = 0;
 static int _tests_executed = 0;
 static int _tests_failed = 0;
 static int _tests_passed = 0;
+static int _tests_skipped = 0;
+static int _tests_xfailed = 0;
+static int _tests_xpassed = 0;
 static int _current_test_failures = 0;
 static int _current_suite_failures = 0;
+
+/* Per-test disposition tracking. Reset at every lfg_ct_test_impl entry,
+ * read at classification time. */
+typedef enum
+{
+    LFG_CT_DISP_NORMAL = 0,
+    LFG_CT_DISP_SKIPPED
+} _disposition_t;
+
+static _disposition_t _current_disposition = LFG_CT_DISP_NORMAL;
+static const char *_current_skip_reason = NULL;
+static int _current_xfail_set = 0;
+static const char *_current_xfail_reason = NULL;
+
+/* Boundary for lfg_ct_skip's "return from body immediately" semantics.
+ * Set up around setup() and body() invocations in the lifecycle helper;
+ * lfg_ct_skip longjmps out when active and no-ops otherwise. There is
+ * intentionally one buffer (and the lifecycle never re-enters itself --
+ * tests are serial), so a nested skip from a recursive context would
+ * land at the innermost setjmp, which is the desired behavior. */
+static jmp_buf _skip_env;
+static int _skip_env_active = 0;
+
+/* --strict-xpass: flip an otherwise-clean run that contains xpass
+ * outcomes to a non-zero exit code. */
+static int _strict_xpass = 0;
 
 /* lfg_ct_parse_args() runtime state. The glob arrays hold borrowed pointers
  * into the caller's argv (which has program lifetime under standard main()
@@ -162,6 +192,7 @@ _filter_state_reset(void)
     _filter_glob_count = 0;
     _exclude_glob_count = 0;
     _filter_inherited_depth = 0;
+    _strict_xpass = 0;
 }
 
 static void
@@ -172,6 +203,7 @@ _filter_print_usage(const char *progname)
             "  --list                   List registered test/suite names and exit 0\r\n"
             "  --filter <glob>          Run only entries whose name matches <glob>\r\n"
             "  --filter-exclude <glob>  Skip entries whose name matches <glob>\r\n"
+            "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
             progname ? progname : "test");
@@ -196,6 +228,11 @@ lfg_ct_parse_args(int argc, char *argv[])
         if (0 == strcmp(a, "--list"))
         {
             _list_mode = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "--strict-xpass"))
+        {
+            _strict_xpass = 1;
             continue;
         }
         if (0 == strcmp(a, "--filter"))
@@ -284,7 +321,10 @@ _lifecycle_failure_total(void)
 /* Shared setup -> body -> teardown lifecycle. Teardown runs whenever
  * provided, even if the body or its assertions failed. If setup itself
  * fails an assertion the body is skipped but teardown still runs --
- * setup may have partially acquired resources before failing.
+ * setup may have partially acquired resources before failing. Setup and
+ * body are each wrapped in a setjmp boundary so lfg_ct_skip() can
+ * unwind to the lifecycle without running the remaining body; teardown
+ * is intentionally outside any boundary so it always runs to completion.
  */
 static void
 _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(void))
@@ -295,13 +335,27 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
     if (setup)
     {
         setup_failures_before = _lifecycle_failure_total();
-        setup();
+        _skip_env_active = 1;
+        if (0 == setjmp(_skip_env))
+        {
+            setup();
+        }
+        _skip_env_active = 0;
         setup_failed = (_lifecycle_failure_total() > setup_failures_before);
     }
 
-    if (!setup_failed && body)
+    /* lfg_ct_skip in setup propagates by setting _current_disposition;
+     * the body is skipped in that case so callers see the same
+     * "preconditions not met" semantics whether the skip fired in setup
+     * or in the body. */
+    if (LFG_CT_DISP_SKIPPED != _current_disposition && !setup_failed && body)
     {
-        body();
+        _skip_env_active = 1;
+        if (0 == setjmp(_skip_env))
+        {
+            body();
+        }
+        _skip_env_active = 0;
     }
 
     if (teardown)
@@ -377,8 +431,45 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
 
     _tests_executed++;
     _current_test_failures = 0;
+    _current_disposition = LFG_CT_DISP_NORMAL;
+    _current_skip_reason = NULL;
+    _current_xfail_set = 0;
+    _current_xfail_reason = NULL;
+
     _lfg_ct_run_lifecycle(setup, fn, teardown);
-    if (_current_test_failures > 0)
+
+    /* Classification. SKIP wins over a stray failure that may have
+     * occurred before the skip call -- the test author signalled intent
+     * to skip, so honor it. XFAIL/XPASS only apply when no skip fired.
+     * For XFAIL/XPASS/SKIP we absorb the per-test assertion failures
+     * back out of the global _assertions_failed so the surrounding
+     * suite-failure detector doesn't trip on them. */
+    if (LFG_CT_DISP_SKIPPED == _current_disposition)
+    {
+        if (_current_test_failures > 0)
+        {
+            _assertions_failed -= _current_test_failures;
+        }
+        _tests_skipped++;
+        printf("*** test SKIP: %s: %s\r\n", name, _current_skip_reason ? _current_skip_reason : "(no reason)");
+    }
+    else if (_current_xfail_set)
+    {
+        if (_current_test_failures > 0)
+        {
+            _assertions_failed -= _current_test_failures;
+            _tests_xfailed++;
+            printf("*** test XFAIL: %s: %s\r\n", name,
+                    _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+        }
+        else
+        {
+            _tests_xpassed++;
+            printf("*** test XPASS: %s: %s\r\n", name,
+                    _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+        }
+    }
+    else if (_current_test_failures > 0)
     {
         _current_suite_failures++;
         _tests_failed++;
@@ -388,23 +479,77 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     {
         _tests_passed++;
     }
+
+    /* Reset per-test state so a nested test_impl call doesn't leave its
+     * disposition/xfail flags around for the calling test's own
+     * classification at the end of the outer lifecycle. */
+    _current_test_failures = 0;
+    _current_disposition = LFG_CT_DISP_NORMAL;
+    _current_skip_reason = NULL;
+    _current_xfail_set = 0;
+    _current_xfail_reason = NULL;
 }
 
 void lfg_ct_print_summary(void)
 {
+    int strict_xpass_fail;
+    const char *verdict;
+
     if (_list_mode)
     {
         /* No tests ran; reporting "0 assertions / 0 tests" is misleading. */
         return;
     }
-    printf("*** Executed %d assertions in %d tests. Failures: %d\r\n"
+
+    strict_xpass_fail = (_strict_xpass && _tests_xpassed > 0);
+    verdict = (_tests_failed > 0 || strict_xpass_fail) ? "FAIL" : "PASS";
+
+    printf("*** Executed %d assertions in %d tests. "
+           "Failures: %d, Skipped: %d, XFail: %d, XPass: %d\r\n"
            "*** Testing complete. Result: %s\r\n",
-            _assertions_executed, _tests_executed, _tests_failed, _tests_failed ? "FAIL" : "PASS");
+            _assertions_executed, _tests_executed, _tests_failed, _tests_skipped, _tests_xfailed, _tests_xpassed,
+            verdict);
 }
 
 int lfg_ct_return(void)
 {
-    return -_tests_failed;
+    /* Strict mode flips an otherwise-clean run with xpass outcomes to
+     * non-zero. Negative sign mirrors the prior contract (-_tests_failed). */
+    if (_tests_failed > 0)
+    {
+        return -_tests_failed;
+    }
+    if (_strict_xpass && _tests_xpassed > 0)
+    {
+        return -1;
+    }
+    return 0;
+}
+
+void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function)
+{
+    if (!_skip_env_active)
+    {
+        fprintf(stderr, "*** %s: %d: WARNING in %s(): lfg_ct_skip(\"%s\") called outside a test context; ignoring\r\n",
+                file ? file : "(unknown)", line, function ? function : "(unknown)", reason ? reason : "");
+        return;
+    }
+    _current_disposition = LFG_CT_DISP_SKIPPED;
+    _current_skip_reason = reason;
+    longjmp(_skip_env, 1);
+}
+
+void lfg_ct_xfail_impl(const char *reason, const char *file, int line, const char *function)
+{
+    if (!_skip_env_active)
+    {
+        fprintf(stderr, "*** %s: %d: WARNING in %s(): lfg_ct_xfail(\"%s\") called outside a test context; ignoring\r\n",
+                file ? file : "(unknown)", line, function ? function : "(unknown)", reason ? reason : "");
+        return;
+    }
+    /* Last reason wins -- repeated calls just overwrite. */
+    _current_xfail_set = 1;
+    _current_xfail_reason = reason;
 }
 
 /*============================================================================
@@ -423,6 +568,41 @@ int lfg_ct_expect_failures_end(void)
 {
     _expect_failures_mode = 0;
     return _expected_failures_count;
+}
+
+int lfg_ct_self_skipped_count(void)
+{
+    return _tests_skipped;
+}
+
+int lfg_ct_self_xfailed_count(void)
+{
+    return _tests_xfailed;
+}
+
+int lfg_ct_self_xpassed_count(void)
+{
+    return _tests_xpassed;
+}
+
+int lfg_ct_self_failed_count(void)
+{
+    return _tests_failed;
+}
+
+int lfg_ct_self_assertions_failed(void)
+{
+    return _assertions_failed;
+}
+
+void lfg_ct_self_set_strict_xpass(int enabled)
+{
+    _strict_xpass = enabled ? 1 : 0;
+}
+
+int lfg_ct_self_return_code(void)
+{
+    return lfg_ct_return();
 }
 
 #endif /* LFG_CTEST_SELF_TEST */
