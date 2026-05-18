@@ -29,6 +29,15 @@
  *  payload).
  */
 
+/* POSIX.1-2008 surface (clock_gettime, CLOCK_MONOTONIC, struct timespec,
+ * nanosleep) must be visible even when the consumer builds with strict
+ * -std=c99 (i.e. without _DEFAULT_SOURCE / _GNU_SOURCE). #ifndef guard
+ * avoids redefinition warnings when the consumer already set the macro
+ * at a different level via -D or a previously-included header. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "lfg-ctest.h"
 
 #if !defined(LFG_CT_DISABLE_FORK) && (defined(__unix__) || defined(__APPLE__))
@@ -190,7 +199,7 @@ _lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
                 timed_out = 1;
                 break;
             }
-            usleep(step_ms * 1000);
+            nanosleep(&(struct timespec){0, step_ms * 1000000L}, NULL);
             elapsed_ms += step_ms;
         }
     }
