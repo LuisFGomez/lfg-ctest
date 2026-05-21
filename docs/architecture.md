@@ -241,6 +241,84 @@ The extension is consistent with the existing semantic of the flag:
 "intentional failures during this block do not affect the run's
 verdict."
 
+## Verbose mode (built-in reporter)
+
+`-v` / `--verbose` is the first built-in reporter built on the
+[Reporter callback](api.md#reporter-callback) contract. Implementation
+lives in `lfg-ctest.c` (no separate TU; the verbose reporter is small
+and the core was the natural seat for the reporter-chain plumbing).
+
+Key statics:
+
+- `_verbose_mode` -- the parsed-flag bit, toggled by
+  `lfg_ct_parse_args` when it sees `-v` / `--verbose` and cleared by
+  `_filter_state_reset` along with the other parsed-flag state.
+- `_user_reporter` -- the slot a consumer set via
+  `lfg_ct_set_reporter`. The user-facing pointer; never the active
+  fire target when verbose mode is on.
+- `_reporter` -- the active fire target. Equal to `_user_reporter`
+  when verbose is off, equal to the built-in `_verbose_reporter`
+  struct when verbose is on.
+- `_reporter_activate()` -- recomputes `_reporter` from
+  `_verbose_mode` and `_user_reporter`. Called wherever either input
+  changes.
+
+The built-in reporter's callbacks (`_verbose_on_test_start`,
+`_verbose_on_record`, `_verbose_on_run_complete`) print the
+streamed banners on `stdout`, `fflush` to keep them visible
+before a slow body completes and before any `fork(2)`, then chain
+into `_user_reporter`'s callbacks so a downstream consumer reporter
+(e.g. the JUnit-XML emitter) still observes every event. The fan-out
+keeps a single print path through the reporter contract -- there is
+no parallel "verbose output" code path elsewhere in the runner.
+
+### Fire sites
+
+`on_test_start` fires from `lfg_ct_test_impl` (the parent-side
+dispatcher) **after** the list-mode / filter / exclude gates and
+**before** delegation to either the in-process or the fork path.
+Single fire site per admitted test:
+
+1. The list-mode and filter checks gate-keep first; an excluded test
+   sees nothing.
+2. `_reporter->on_test_start` fires once with the current suite name
+   (`_current_suite_name`) and the test name.
+3. Isolation dispatch follows: `_lfg_ct_test_impl_inproc` directly,
+   or `_lfg_ct_fork_run_test` for fork mode.
+
+`_lfg_ct_test_impl_inproc` itself does **not** fire `on_test_start`.
+The fork TU re-enters that helper inside the child, but the parent
+already fired the start callback before forking, so a child-side
+re-fire would double-up. Direct callers of `_lfg_ct_test_impl_inproc`
+are limited to that re-entry path; the public dispatch flow always
+goes through `lfg_ct_test_impl`.
+
+### Fork-mode interaction
+
+Under `LFG_CT_ISOLATE_FORK`:
+
+- Parent fires `on_test_start` via the verbose chain (prints banner,
+  delegates to user reporter).
+- Parent `fork(2)`s.
+- Child swaps `_reporter` to the fork TU's capture reporter via the
+  internal bridge `_lfg_ct_set_active_reporter_direct`. This bypasses
+  the verbose chain (no banner printed from the child, no chain into
+  `_user_reporter`); the child's classification calls
+  `_child_capture` directly to fill the payload.
+- Child writes payload, `_exit`s.
+- Parent decodes the payload and calls `_lfg_ct_record_external`,
+  which fires `on_record` on `_reporter` -- still the verbose
+  reporter, so the parent prints the outcome banner and chains
+  through to `_user_reporter`.
+
+Net effect: each fork-isolated test produces exactly one start
+banner and one outcome banner in the parent, no interleaving with
+the child's stdout, and the user reporter receives one
+`on_test_start` + one `on_record` per test just like the in-process
+path. The direct-set bridge is the minimum surface needed to keep
+the verbose chain quiet in the child; the rest of the fork TU is
+unchanged.
+
 ## Mock system (`lfg-ctest-mock.[ch]`)
 
 ### Macro fanout

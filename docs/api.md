@@ -88,6 +88,7 @@ Recognized flags:
 | `--filter <glob>` | Run only entries whose registered name matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite name matches, every entry inside the suite inherits the match — useful with the `add_test` pattern above. |
 | `--filter-exclude <glob>` | Skip entries whose name matches the glob. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same name. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 
 An unmatched filter is not an error: zero tests run, the binary exits 0.
 Unknown flags print usage to stderr and return non-zero — `main` should
@@ -112,8 +113,47 @@ outside the framework (e.g. opening a database connection) when the
 current filter state would skip the test anyway. `lfg_ct_is_list_mode()`
 exposes the `--list` bit directly — gate your own diagnostic prints on
 `!lfg_ct_is_list_mode()` if you want stdout to be a clean
-newline-separated list of names. Each call to `lfg_ct_parse_args`
-replaces any previously parsed state.
+newline-separated list of names. `lfg_ct_is_verbose()` exposes the
+`-v` / `--verbose` bit; consumer-side reporters can use it to decide
+whether to suppress redundant output of their own. Each call to
+`lfg_ct_parse_args` replaces any previously parsed state, including
+the verbose toggle.
+
+### Verbose output
+
+`-v` / `--verbose` streams the runner's per-test progress to `stdout`,
+in the spirit of cmake's `ctest -V`. With the flag set:
+
+- before each test body is dispatched, the runner emits
+  `*** START: <suite>::<name>` (or `*** START: <name>` for top-level
+  tests with no enclosing suite);
+- after the test classifies, the runner emits
+  `*** PASS|FAIL|SKIP|XFAIL|XPASS: <suite>::<name> (X.XXX ms)`, with
+  the disposition reason or assertion text appended after `:` when one
+  is available (SKIP / XFAIL / XPASS reasons, FAIL assertion text).
+
+The disposition keywords match the labels used elsewhere in the
+runner. Elapsed time is wall-clock milliseconds with sub-millisecond
+precision; the source clock is the same `clock(3)`-based seconds
+counter that feeds the reporter's `time_sec` field.
+
+Verbose output is built on top of the [reporter contract](#reporter-callback)
+as the framework's first built-in reporter: enabling `--verbose`
+installs an internal reporter that prints the banners and then fans
+out to whatever consumer reporter `lfg_ct_set_reporter` had attached.
+So `--verbose` and a JUnit-XML report can be active in the same run
+without interfering, and any future report format that registers
+through the same hook inherits the same fan-out.
+
+Default behaviour (no flag): no extra lines, byte-identical output to
+prior framework versions. The flag is purely opt-in.
+
+Under `LFG_CT_ISOLATE_FORK` the parent serialises both the `START`
+banner (before `fork(2)`) and the outcome banner (after the child's
+payload arrives), so no verbose line interleaves with another test's
+stdout — and the child does not re-fire the start callback because
+its reporter slot is swapped to the fork TU's capture reporter for
+the duration of the child.
 
 ### Skip, xfail, xpass
 
@@ -291,13 +331,24 @@ typedef struct {
     void (*on_record)(const lfg_ct_record_t *, void *userdata);
     void (*on_run_complete)(void *userdata);
     void *userdata;
+    void (*on_test_start)(const char *suite_name, const char *test_name,
+                          void *userdata);
 } lfg_ct_reporter_t;
 ```
 
 `on_record` fires once per classified test, at the end of
 `lfg_ct_test_impl`. `on_run_complete` fires once at the end of
 `lfg_ct_print_summary` -- the natural flush point for a buffering
-reporter.
+reporter. `on_test_start` fires once per admitted test from the
+parent dispatcher, immediately before the body is invoked; under
+`LFG_CT_ISOLATE_FORK` this runs in the parent before `fork(2)`, so
+the start callback is the natural seat for "this test is about to
+run" annotations that must precede the child's stdout.
+
+Field order is part of the contract: positional initialisers like
+`{on_record, on_run_complete, &userdata}` written against the
+original three-field bundle stay valid -- `on_test_start` lives at
+the tail and defaults to `NULL`.
 
 String fields on the record (`suite_name`, `test_name`, `message`) are
 **borrowed** -- valid only for the duration of the callback. Buffer
