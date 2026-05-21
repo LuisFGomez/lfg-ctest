@@ -62,7 +62,7 @@ _fork_on_record(const lfg_ct_record_t *record, void *userdata)
     snprintf(log->names[i], _FORK_LOG_NAME_MAX, "%s", record->test_name ? record->test_name : "");
 }
 
-static lfg_ct_reporter_t _capture = {_fork_on_record, NULL, &_log};
+static lfg_ct_reporter_t _capture = {_fork_on_record, NULL, &_log, NULL};
 
 /* ============================================================================
  *  Inner bodies driven through the fork dispatcher
@@ -344,6 +344,73 @@ test_fork_skip_round_trip(void)
     ASSERT_STR_EQUAL("skip-from-fork-child", _log.messages[0]);
 }
 
+/* on_test_start counter for the fork-with-verbose case. Counts every
+ * fire of the start callback, including the ones from the outer test
+ * harness around our nested driver -- we measure deltas across the
+ * driven test_impl call rather than absolute counts. */
+static int _fork_verbose_start_count;
+static char _fork_verbose_start_last_name[_FORK_LOG_NAME_MAX];
+
+static void
+_fork_verbose_on_start(const char *suite_name, const char *test_name, void *userdata)
+{
+    (void)suite_name;
+    (void)userdata;
+    _fork_verbose_start_count++;
+    snprintf(_fork_verbose_start_last_name, sizeof(_fork_verbose_start_last_name), "%s",
+            test_name ? test_name : "");
+}
+
+static void
+test_fork_verbose_start_fires_once_in_parent(void)
+{
+    /* Under fork isolation, on_test_start fires from the parent
+     * dispatcher before fork(2). The child's capture reporter
+     * does NOT re-fire it. Net effect for the user-installed
+     * downstream reporter: exactly one start per test. The
+     * chained on_record also fires once from the parent's
+     * _lfg_ct_record_external projection. */
+    char *argv[] = {(char *)"prog", (char *)"-v"};
+    lfg_ct_reporter_t r;
+    int start_before;
+    int start_delta;
+
+    memset(&r, 0, sizeof(r));
+    r.on_test_start = _fork_verbose_on_start;
+    r.on_record = _fork_on_record;
+    r.userdata = &_log;
+
+    _fork_log_reset();
+    _fork_verbose_start_count = 0;
+    _fork_verbose_start_last_name[0] = '\0';
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    lfg_ct_set_reporter(&r);
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+
+    start_before = _fork_verbose_start_count;
+    lfg_ct_test_impl(NULL, _body_pass, NULL, "fork_verbose_inner");
+    start_delta = _fork_verbose_start_count - start_before;
+
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    lfg_ct_set_reporter(NULL);
+
+    /* Clear verbose state so the surrounding harness's reporter
+     * state is not contaminated. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, reset_argv);
+    }
+
+    /* Exactly one start (parent-only) and one record (parent's
+     * projection of the child's payload). */
+    ASSERT_INT_EQUAL(1, start_delta);
+    ASSERT_STR_EQUAL("fork_verbose_inner", _fork_verbose_start_last_name);
+    ASSERT_INT_EQUAL(1, _log.count);
+    ASSERT_INT_EQUAL((int)LFG_CT_PASSED, (int)_log.outcomes[0]);
+    ASSERT_STR_EQUAL("fork_verbose_inner", _log.names[0]);
+}
+
 static void
 test_fork_xfail_round_trip(void)
 {
@@ -382,6 +449,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(NULL, test_fork_parent_fd_inheritance, NULL);
     lfg_ct_test(NULL, test_fork_skip_round_trip, NULL);
     lfg_ct_test(NULL, test_fork_xfail_round_trip, NULL);
+    lfg_ct_test(NULL, test_fork_verbose_start_fires_once_in_parent, NULL);
 }
 
 int

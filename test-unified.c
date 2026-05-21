@@ -1216,7 +1216,7 @@ static void _rep_body_xpass(void) { lfg_ct_xfail("expected to fail but didn't");
 
 static void test_reporter_fires_once_per_test_with_pass_outcome(void)
 {
-    lfg_ct_reporter_t reporter = {_reporter_on_record, _reporter_on_run_complete, &_rep_log};
+    lfg_ct_reporter_t reporter = {_reporter_on_record, _reporter_on_run_complete, &_rep_log, NULL};
 
     memset(&_rep_log, 0, sizeof(_rep_log));
     lfg_ct_set_reporter(&reporter);
@@ -1233,7 +1233,7 @@ static void test_reporter_fires_once_per_test_with_pass_outcome(void)
 
 static void test_reporter_classifies_skip_and_xpass_with_reason(void)
 {
-    lfg_ct_reporter_t reporter = {_reporter_on_record, NULL, &_rep_log};
+    lfg_ct_reporter_t reporter = {_reporter_on_record, NULL, &_rep_log, NULL};
 
     memset(&_rep_log, 0, sizeof(_rep_log));
     lfg_ct_set_reporter(&reporter);
@@ -1254,7 +1254,7 @@ static void test_reporter_classifies_skip_and_xpass_with_reason(void)
 
 static void test_reporter_run_complete_fires_from_print_summary(void)
 {
-    lfg_ct_reporter_t reporter = {NULL, _reporter_on_run_complete, &_rep_log};
+    lfg_ct_reporter_t reporter = {NULL, _reporter_on_run_complete, &_rep_log, NULL};
 
     memset(&_rep_log, 0, sizeof(_rep_log));
     lfg_ct_set_reporter(&reporter);
@@ -1281,7 +1281,7 @@ static void test_reporter_null_slot_no_ops(void)
 
 static void test_reporter_record_surfaces_classname_from_enclosing_suite(void)
 {
-    lfg_ct_reporter_t reporter = {_reporter_on_record, NULL, &_rep_log};
+    lfg_ct_reporter_t reporter = {_reporter_on_record, NULL, &_rep_log, NULL};
 
     memset(&_rep_log, 0, sizeof(_rep_log));
     /* This test is itself running inside suite_reporter_tests, so
@@ -1313,6 +1313,264 @@ static void suite_reporter_tests(void)
     lfg_ct_test(NULL, test_reporter_run_complete_fires_from_print_summary, NULL);
     lfg_ct_test(NULL, test_reporter_null_slot_no_ops, NULL);
     lfg_ct_test(NULL, test_reporter_record_surfaces_classname_from_enclosing_suite, NULL);
+}
+
+/* ============================================================================
+ * VERBOSE MODE TESTS
+ *
+ * Verify that -v / --verbose:
+ *   - parse correctly and flip lfg_ct_is_verbose();
+ *   - off by default (no parse_args call, or parse_args without -v);
+ *   - install a chain that fans out on_test_start + on_record + on_run_complete
+ *     to a user-installed downstream reporter -- so the streamed output and a
+ *     JUnit-XML-style emitter coexist;
+ *   - fire on_test_start once per admitted test (filter / list-mode bypass it);
+ *   - propagate (suite_name, test_name) on the start callback;
+ *   - reset across calls to parse_args (consistent with the other parsed flags).
+ *
+ * Stdout content is not pattern-matched in self-tests -- the chain
+ * structure is the verifiable artifact; the streamed banners are
+ * smoke-tested by the test-amalg binary at the CI layer.
+ * ============================================================================ */
+
+#define VERBOSE_LOG_MAX 16
+
+typedef struct
+{
+    char start_names[VERBOSE_LOG_MAX][64];
+    char start_suites[VERBOSE_LOG_MAX][64];
+    int start_count;
+
+    char record_names[VERBOSE_LOG_MAX][64];
+    lfg_ct_outcome_t record_outcomes[VERBOSE_LOG_MAX];
+    int record_count;
+
+    int run_complete_fired;
+} _verbose_log_t;
+
+static _verbose_log_t _vlog;
+
+static void
+_verbose_log_on_test_start(const char *suite_name, const char *test_name, void *userdata)
+{
+    _verbose_log_t *log = (_verbose_log_t *)userdata;
+    int i;
+    if (log->start_count >= VERBOSE_LOG_MAX)
+    {
+        return;
+    }
+    i = log->start_count++;
+    snprintf(log->start_names[i], sizeof(log->start_names[0]), "%s", test_name ? test_name : "");
+    snprintf(log->start_suites[i], sizeof(log->start_suites[0]), "%s", suite_name ? suite_name : "");
+}
+
+static void
+_verbose_log_on_record(const lfg_ct_record_t *rec, void *userdata)
+{
+    _verbose_log_t *log = (_verbose_log_t *)userdata;
+    int i;
+    if (log->record_count >= VERBOSE_LOG_MAX)
+    {
+        return;
+    }
+    i = log->record_count++;
+    snprintf(log->record_names[i], sizeof(log->record_names[0]), "%s", rec->test_name ? rec->test_name : "");
+    log->record_outcomes[i] = rec->outcome;
+}
+
+static void
+_verbose_log_on_run_complete(void *userdata)
+{
+    _verbose_log_t *log = (_verbose_log_t *)userdata;
+    log->run_complete_fired = 1;
+}
+
+static void _verbose_body_pass(void) { ASSERT_TRUE(1); }
+
+static void
+test_verbose_default_off_after_parse(void)
+{
+    /* No flag -> verbose stays off. */
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_long_flag_toggles_on(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--verbose"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_short_flag_toggles_on(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"-v"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_resets_across_parse_calls(void)
+{
+    char *argv_on[] = {(char *)"prog", (char *)"-v"};
+    char *argv_off[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_on));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+
+    /* Second parse with no -v must clear the prior verbose state, just
+     * like list / filter / exclude / strict-xpass reset semantics. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_off));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_start_callback_fires_once_per_test(void)
+{
+    /* Verbose mode is the only switch that exposes the on_test_start
+     * event today. Wire a downstream reporter through the verbose
+     * chain and drive a nested test_impl; the chain must propagate
+     * one start fire + one record fire to the downstream. */
+    char *argv[] = {(char *)"prog", (char *)"-v"};
+    lfg_ct_reporter_t r;
+
+    memset(&r, 0, sizeof(r));
+    r.on_test_start = _verbose_log_on_test_start;
+    r.on_record = _verbose_log_on_record;
+    r.userdata = &_vlog;
+
+    memset(&_vlog, 0, sizeof(_vlog));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    lfg_ct_set_reporter(&r);
+
+    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "verbose_inner_case");
+
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(1, _vlog.start_count);
+    ASSERT_STR_EQUAL("verbose_inner_case", _vlog.start_names[0]);
+    ASSERT_INT_EQUAL(1, _vlog.record_count);
+    ASSERT_STR_EQUAL("verbose_inner_case", _vlog.record_names[0]);
+    ASSERT_INT_EQUAL((int)LFG_CT_PASSED, (int)_vlog.record_outcomes[0]);
+}
+
+static void
+test_verbose_start_callback_carries_enclosing_suite_name(void)
+{
+    /* This test runs inside suite_verbose_mode_tests; a nested test
+     * fires on_test_start with the inherited suite name baton. */
+    char *argv[] = {(char *)"prog", (char *)"-v"};
+    lfg_ct_reporter_t r;
+
+    memset(&r, 0, sizeof(r));
+    r.on_test_start = _verbose_log_on_test_start;
+    r.userdata = &_vlog;
+
+    memset(&_vlog, 0, sizeof(_vlog));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    lfg_ct_set_reporter(&r);
+
+    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "verbose_inner_with_suite");
+
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(1, _vlog.start_count);
+    ASSERT_STR_EQUAL("suite_verbose_mode_tests", _vlog.start_suites[0]);
+}
+
+static void
+test_verbose_chain_propagates_run_complete(void)
+{
+    /* on_run_complete chains through too: a downstream reporter
+     * installed under verbose mode must still receive the run-end
+     * fire from lfg_ct_print_summary. */
+    char *argv[] = {(char *)"prog", (char *)"-v"};
+    lfg_ct_reporter_t r;
+
+    memset(&r, 0, sizeof(r));
+    r.on_run_complete = _verbose_log_on_run_complete;
+    r.userdata = &_vlog;
+
+    memset(&_vlog, 0, sizeof(_vlog));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    lfg_ct_set_reporter(&r);
+
+    lfg_ct_print_summary();
+
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(1, _vlog.run_complete_fired);
+}
+
+static void
+test_verbose_filtered_test_does_not_fire_start(void)
+{
+    /* A test the filter would skip must NOT fire on_test_start.
+     * The gate sits in lfg_ct_test_impl before the fire site, so the
+     * downstream reporter sees zero starts for excluded names. */
+    char *argv[] = {(char *)"prog", (char *)"-v", (char *)"--filter", (char *)"match_me*"};
+    lfg_ct_reporter_t r;
+
+    memset(&r, 0, sizeof(r));
+    r.on_test_start = _verbose_log_on_test_start;
+    r.userdata = &_vlog;
+
+    memset(&_vlog, 0, sizeof(_vlog));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
+    lfg_ct_set_reporter(&r);
+
+    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "no_match_here");
+
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(0, _vlog.start_count);
+}
+
+static void
+test_verbose_unknown_flag_does_not_toggle(void)
+{
+    /* Robustness: an unrelated flag failure must leave verbose alone
+     * (parse_args resets state on failure, so verbose ends up 0). */
+    char *argv[] = {(char *)"prog", (char *)"--bogus"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_reset_state_for_remaining_tests(void)
+{
+    /* Reset for any subsequent suite in this binary. Mirrors the
+     * pattern test_filter_reset_state_for_remaining_tests already uses. */
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void suite_verbose_mode_tests(void)
+{
+    lfg_ct_test(NULL, test_verbose_default_off_after_parse, NULL);
+    lfg_ct_test(NULL, test_verbose_long_flag_toggles_on, NULL);
+    lfg_ct_test(NULL, test_verbose_short_flag_toggles_on, NULL);
+    lfg_ct_test(NULL, test_verbose_resets_across_parse_calls, NULL);
+    lfg_ct_test(NULL, test_verbose_start_callback_fires_once_per_test, NULL);
+    lfg_ct_test(NULL, test_verbose_start_callback_carries_enclosing_suite_name, NULL);
+    lfg_ct_test(NULL, test_verbose_chain_propagates_run_complete, NULL);
+    lfg_ct_test(NULL, test_verbose_filtered_test_does_not_fire_start, NULL);
+    lfg_ct_test(NULL, test_verbose_unknown_flag_does_not_toggle, NULL);
+
+    /* Unconditional reset before the verifying test runs -- mirrors
+     * the pattern at the tail of suite_filter_args_tests. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, reset_argv);
+    }
+    lfg_ct_test(NULL, test_verbose_reset_state_for_remaining_tests, NULL);
 }
 
 /* ============================================================================
@@ -1416,6 +1674,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 6: REPORTER CALLBACK CONTRACT TESTS ---\n");
     printf("(Verifies lfg_ct_set_reporter / on_record / on_run_complete wiring)\n");
     lfg_ct_suite(NULL, suite_reporter_tests, NULL);
+
+    printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
+    printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
+    lfg_ct_suite(NULL, suite_verbose_mode_tests, NULL);
 
     printf("\n");
     printf("================================================================================\n");
