@@ -340,6 +340,19 @@ void lfg_ct_end(void);
  *                                  one or more @c xpass outcomes to a
  *                                  non-zero exit code. Default behavior is
  *                                  permissive (xpass is a warning).
+ *   - @c -v / @c --verbose       : stream a per-test @c START line before
+ *                                  each test body is dispatched and a
+ *                                  per-test outcome line (@c PASS / @c FAIL /
+ *                                  @c SKIP / @c XFAIL / @c XPASS) with
+ *                                  elapsed milliseconds after the test
+ *                                  classifies. Compatible with an installed
+ *                                  reporter (e.g. JUnit-XML) -- the verbose
+ *                                  output is fanned out alongside the
+ *                                  user-installed reporter, not in place of
+ *                                  it. Under @ref LFG_CT_ISOLATE_FORK the
+ *                                  parent serialises both the start and the
+ *                                  outcome line, so no banner interleaves
+ *                                  with another forked test's stdout.
  *
  *  An unmatched filter is not an error -- zero tests execute and the program
  *  exits 0. Unknown flags print a short usage message to stderr and produce
@@ -358,6 +371,11 @@ int lfg_ct_parse_args(int argc, char *argv[]);
  *  @return 1 if @c --list was parsed, 0 otherwise.
  */
 int lfg_ct_is_list_mode(void);
+
+/** Query whether verbose-mode streaming is currently active.
+ *  @return 1 if @c -v / @c --verbose was parsed, 0 otherwise.
+ */
+int lfg_ct_is_verbose(void);
 
 /** Query whether a hypothetical test/suite with @p name would be executed by
  *  the runner under the currently parsed filter/exclude rules.
@@ -505,9 +523,14 @@ typedef struct
                               */
 } lfg_ct_record_t;
 
-/** Reporter callback bundle. Both function pointers are optional (NULL =
+/** Reporter callback bundle. All function pointers are optional (NULL =
  *  ignored). @c userdata is opaquely forwarded; the runner does not
  *  interpret it.
+ *
+ *  Field order is part of the contract: positional initialisers like
+ *  @c {on_record, on_run_complete, userdata} written against the
+ *  original three-field bundle stay valid -- new callbacks live after
+ *  @c userdata and default to @c NULL.
  */
 typedef struct
 {
@@ -521,6 +544,20 @@ typedef struct
     void (*on_run_complete)(void *userdata);
 
     void *userdata;
+
+    /** Invoked once per test immediately before its body is dispatched,
+     *  fired from the parent side of @ref lfg_ct_test_impl after the
+     *  list-mode / filter / exclude gates have admitted the test.
+     *  Strings are borrowed for the duration of the callback. Outcome,
+     *  elapsed time, and message are not yet known and are reported
+     *  through @c on_record at the end of the test.
+     *
+     *  Under @ref LFG_CT_ISOLATE_FORK, this fires in the parent before
+     *  @c fork(2) so the start banner is serialised relative to the
+     *  forked child's stdout and the matching @c on_record at test
+     *  completion. The child's in-process reporter is the fork TU's
+     *  capture reporter, which does not re-fire @c on_test_start. */
+    void (*on_test_start)(const char *suite_name, const char *test_name, void *userdata);
 } lfg_ct_reporter_t;
 
 /** Install or replace the active reporter. @p reporter is borrowed (the

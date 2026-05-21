@@ -78,7 +78,7 @@ static void _on_run_complete(void *userdata);
 /* Reporter struct -- file-static so its address stays valid for
  * the lifetime of the test binary, which is what
  * @ref lfg_ct_set_reporter borrows it for. */
-static const lfg_ct_reporter_t _reporter = {_on_record, _on_run_complete, NULL};
+static const lfg_ct_reporter_t _reporter = {_on_record, _on_run_complete, NULL, NULL};
 
 /*============================================================================
  *  Private Function Prototypes
