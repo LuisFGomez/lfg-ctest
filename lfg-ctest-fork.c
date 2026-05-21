@@ -71,6 +71,7 @@ typedef struct
 extern void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
 extern void _lfg_ct_counter_snapshot(int *executed, int *passed, int *failed);
 extern const lfg_ct_reporter_t *_lfg_ct_get_reporter(void);
+extern void _lfg_ct_set_active_reporter_direct(const lfg_ct_reporter_t *reporter);
 extern void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t outcome, const char *message,
         int assertions_executed_delta, int assertions_passed_delta, int assertions_failed_delta,
         int print_outcome_line);
@@ -148,18 +149,25 @@ _lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
         memset(&out, 0, sizeof(out));
         out.outcome = (int32_t)LFG_CT_PASSED;
 
+        memset(&capture, 0, sizeof(capture));
         capture.on_record = _child_capture;
-        capture.on_run_complete = NULL;
         capture.userdata = &out;
 
+        /* Install capture directly: bypassing the public set-reporter
+         * keeps the parent-side verbose chain from also firing here
+         * (which would print verbose banners from inside the child
+         * and double up with the parent-side ones). The address space
+         * is throwaway, but the explicit restore keeps the contract
+         * symmetric in case future child-side code reads back the
+         * slot. */
         saved = _lfg_ct_get_reporter();
-        lfg_ct_set_reporter(&capture);
+        _lfg_ct_set_active_reporter_direct(&capture);
 
         _lfg_ct_counter_snapshot(&exec0, &pass0, &fail0);
         _lfg_ct_test_impl_inproc(setup, fn, teardown, name);
         _lfg_ct_counter_snapshot(&exec1, &pass1, &fail1);
 
-        lfg_ct_set_reporter(saved);
+        _lfg_ct_set_active_reporter_direct(saved);
 
         out.assertions_executed = (int32_t)(exec1 - exec0);
         out.assertions_passed = (int32_t)(pass1 - pass0);

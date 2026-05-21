@@ -92,8 +92,38 @@ static const char *_current_suite_name = NULL;
 
 /* Reporter slot. Single pointer; one downstream consumer at a time.
  * Borrowed -- caller keeps the struct alive across runner calls
- * (file-static in the consumer is the intended usage). */
+ * (file-static in the consumer is the intended usage).
+ *
+ * When --verbose is active, _reporter points at the built-in verbose
+ * reporter (file-static, defined below) and _user_reporter holds the
+ * consumer-installed slot. The verbose reporter prints the per-test
+ * START / outcome banners then delegates to _user_reporter, so a
+ * downstream package (e.g. contrib/junit-xml) keeps observing every
+ * test event alongside the streamed output -- single fan-out site,
+ * no parallel print paths. When verbose is off, _reporter == _user_reporter
+ * and the chain collapses to the original one-slot behaviour. */
 static const lfg_ct_reporter_t *_reporter = NULL;
+static const lfg_ct_reporter_t *_user_reporter = NULL;
+
+/* Forward declaration -- the verbose reporter struct (defined below)
+ * needs its callbacks visible at the install site. */
+static void _verbose_on_test_start(const char *suite_name, const char *test_name, void *userdata);
+static void _verbose_on_record(const lfg_ct_record_t *record, void *userdata);
+static void _verbose_on_run_complete(void *userdata);
+
+static const lfg_ct_reporter_t _verbose_reporter = {
+        _verbose_on_record,
+        _verbose_on_run_complete,
+        NULL,
+        _verbose_on_test_start,
+};
+
+/* --verbose: stream a START line before each test body and an outcome
+ * line (PASS / FAIL / SKIP / XFAIL / XPASS) with elapsed milliseconds
+ * after classification. Implemented via the built-in verbose reporter
+ * above so the print path goes through the same single reporter
+ * contract every other event observer uses. */
+static int _verbose_mode = 0;
 
 /* Isolation mode + per-test timeout for fork mode. Both are runtime
  * settings; the platform gate and the LFG_CT_DISABLE_FORK opt-out are
@@ -279,6 +309,29 @@ _glob_list_matches(const char *name, const char *const *globs, int count)
     return 0;
 }
 
+/* Recompute the active reporter slot from the verbose toggle and the
+ * consumer-installed reporter. Called whenever either input changes
+ * (parse_args toggling verbose, lfg_ct_set_reporter installing or
+ * clearing the user slot). Keeping the resolution centralized means
+ * neither caller has to know about the other's state.
+ *
+ * When verbose is on the active reporter is always the built-in
+ * verbose reporter; its callbacks pull _user_reporter at fire time
+ * and chain to it. When verbose is off the active reporter is the
+ * user's slot directly (which may itself be NULL). */
+static void
+_reporter_activate(void)
+{
+    if (_verbose_mode)
+    {
+        _reporter = &_verbose_reporter;
+    }
+    else
+    {
+        _reporter = _user_reporter;
+    }
+}
+
 static void
 _filter_state_reset(void)
 {
@@ -287,6 +340,8 @@ _filter_state_reset(void)
     _exclude_glob_count = 0;
     _filter_inherited_depth = 0;
     _strict_xpass = 0;
+    _verbose_mode = 0;
+    _reporter_activate();
 }
 
 static void
@@ -298,6 +353,7 @@ _filter_print_usage(const char *progname)
             "  --filter <glob>          Run only entries whose name matches <glob>\r\n"
             "  --filter-exclude <glob>  Skip entries whose name matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
+            "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
             progname ? progname : "test");
@@ -327,6 +383,12 @@ lfg_ct_parse_args(int argc, char *argv[])
         if (0 == strcmp(a, "--strict-xpass"))
         {
             _strict_xpass = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "-v") || 0 == strcmp(a, "--verbose"))
+        {
+            _verbose_mode = 1;
+            _reporter_activate();
             continue;
         }
         if (0 == strcmp(a, "--filter"))
@@ -369,6 +431,12 @@ int
 lfg_ct_is_list_mode(void)
 {
     return _list_mode ? 1 : 0;
+}
+
+int
+lfg_ct_is_verbose(void)
+{
+    return _verbose_mode ? 1 : 0;
 }
 
 /* Pure name predicate -- ignores list mode (which suppresses execution
@@ -523,7 +591,13 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
  * to happen in the parent regardless of isolation, so they sit here.
  * Fork mode delegates the rest to lfg-ctest-fork.c, which manages
  * fork/wait/payload and re-enters _lfg_ct_test_impl_inproc inside the
- * child. The in-process branch is the original code path, untouched. */
+ * child. The in-process branch is the original code path, untouched.
+ *
+ * The reporter's @c on_test_start fires here -- AFTER the gates have
+ * admitted the test, but BEFORE any fork. This single fire site keeps
+ * verbose-mode START banners serialised in the parent regardless of
+ * isolation, and the child's reentry into @c _lfg_ct_test_impl_inproc
+ * intentionally does not re-fire to avoid duplicates. */
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
 {
     if (_list_mode)
@@ -534,6 +608,10 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     if (!_filter_admits(name))
     {
         return;
+    }
+    if (_reporter && _reporter->on_test_start)
+    {
+        _reporter->on_test_start(_current_suite_name, name, _reporter->userdata);
     }
     if (LFG_CT_ISOLATE_FORK == _isolation)
     {
@@ -748,7 +826,111 @@ void lfg_ct_print_summary(void)
 
 void lfg_ct_set_reporter(const lfg_ct_reporter_t *reporter)
 {
-    _reporter = reporter;
+    _user_reporter = reporter;
+    _reporter_activate();
+}
+
+/* Built-in verbose reporter. Prints a per-test START banner from
+ * @c on_test_start (fired by the parent dispatcher before any fork)
+ * and a per-test outcome banner from @c on_record (fired by either
+ * the in-process classification or the fork TU's payload projection).
+ * Both banners include the elapsed time in milliseconds with sub-ms
+ * precision; the outcome banner uses the keywords the acceptance
+ * criterion calls out (@c PASS / @c FAIL / @c SKIP / @c XFAIL /
+ * @c XPASS). After printing, each callback delegates to
+ * @c _user_reporter so a consumer-installed reporter (e.g. the
+ * contrib JUnit emitter) keeps observing every event alongside the
+ * streamed output -- single fan-out site, no parallel print path.
+ *
+ * @c fflush(stdout) after each line keeps the START line visible
+ * before a slow body completes (useful for the "which test hung CI?"
+ * question) and prevents the parent's stdout buffer from carrying
+ * unflushed bytes into a forked child where the duplicate would
+ * surface at the child's own buffer flush. */
+
+static void
+_verbose_print_qualified_name(const char *suite_name, const char *test_name)
+{
+    if (suite_name && suite_name[0])
+    {
+        printf("%s::%s", suite_name, test_name ? test_name : "(unnamed)");
+    }
+    else
+    {
+        printf("%s", test_name ? test_name : "(unnamed)");
+    }
+}
+
+static void
+_verbose_on_test_start(const char *suite_name, const char *test_name, void *userdata)
+{
+    (void)userdata;
+    printf("*** START: ");
+    _verbose_print_qualified_name(suite_name, test_name);
+    printf("\r\n");
+    fflush(stdout);
+
+    if (_user_reporter && _user_reporter->on_test_start)
+    {
+        _user_reporter->on_test_start(suite_name, test_name, _user_reporter->userdata);
+    }
+}
+
+static void
+_verbose_on_record(const lfg_ct_record_t *record, void *userdata)
+{
+    const char *keyword;
+    double elapsed_ms;
+
+    (void)userdata;
+
+    switch (record->outcome)
+    {
+        case LFG_CT_PASSED:
+            keyword = "PASS";
+            break;
+        case LFG_CT_FAILED:
+            keyword = "FAIL";
+            break;
+        case LFG_CT_SKIPPED:
+            keyword = "SKIP";
+            break;
+        case LFG_CT_XFAIL:
+            keyword = "XFAIL";
+            break;
+        case LFG_CT_XPASS:
+            keyword = "XPASS";
+            break;
+        default:
+            keyword = "?";
+            break;
+    }
+
+    elapsed_ms = (record->time_sec < 0.0) ? 0.0 : record->time_sec * 1000.0;
+    printf("*** %s: ", keyword);
+    _verbose_print_qualified_name(record->suite_name, record->test_name);
+    printf(" (%.3f ms)", elapsed_ms);
+    if (record->message && record->message[0])
+    {
+        printf(": %s", record->message);
+    }
+    printf("\r\n");
+    fflush(stdout);
+
+    if (_user_reporter && _user_reporter->on_record)
+    {
+        _user_reporter->on_record(record, _user_reporter->userdata);
+    }
+}
+
+static void
+_verbose_on_run_complete(void *userdata)
+{
+    (void)userdata;
+    if (_user_reporter && _user_reporter->on_run_complete)
+    {
+        _user_reporter->on_run_complete(_user_reporter->userdata);
+    }
 }
 
 int lfg_ct_set_isolation(lfg_ct_isolation_t mode)
@@ -784,6 +966,19 @@ unsigned lfg_ct_get_fork_timeout_ms(void)
 const lfg_ct_reporter_t *_lfg_ct_get_reporter(void)
 {
     return _reporter;
+}
+
+/* Direct-active-slot setter for the fork TU's child path. Bypasses
+ * the verbose chain: assigns @p reporter to the active slot without
+ * touching @c _user_reporter or @c _verbose_mode, so the child's
+ * capture reporter receives @c on_record directly even when the
+ * parent had verbose mode active. The child uses this to install
+ * capture, run the body, and (best-effort) restore the prior active
+ * slot before @c _exit -- the address space is about to be torn
+ * down, so the restore is hygiene rather than required. */
+void _lfg_ct_set_active_reporter_direct(const lfg_ct_reporter_t *reporter)
+{
+    _reporter = reporter;
 }
 
 void _lfg_ct_counter_snapshot(int *executed, int *passed, int *failed)
