@@ -2,9 +2,16 @@
 
 Consumer-facing reference for the assertion API, the test runner, and the
 mocking framework. For internals (how the framework is put together), see
-[architecture.md](architecture.md).
+[architecture.md](architecture.md). If you are learning the framework rather
+than looking a symbol up, the [tutorial series](tutorial/README.md) walks the
+same surface feature-by-feature with copy-pasteable examples; this page
+cross-links into it from the relevant sections.
 
 ## Testing API
+
+> Tutorial: [Your first test + runner](tutorial/01-first-test.md) introduces
+> this section's runner calls, suites, setup/teardown, and the assertions
+> gently, with a buildable example.
 
 ### Basic Test Structure
 
@@ -68,6 +75,9 @@ int main(void)
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
 
 ### Listing and filtering
+
+> Tutorial: [Running and filtering](tutorial/02-running-and-filtering.md) walks
+> `--list` / `--filter` and the one-binary-many-CTest-entries pattern.
 
 `lfg_ct_parse_args(argc, argv)` lets a single test binary expose the
 registered names and a name-glob selector — the natural pairing for
@@ -157,6 +167,9 @@ the duration of the child.
 
 ### Skip, xfail, xpass
 
+> Tutorial: [Skip, xfail, xpass](tutorial/03-skip-xfail-xpass.md) covers the
+> three buckets and when to reach for each.
+
 Tests that are known-failing for a tracked reason (a deferred fix, an
 environment-specific path, a flake under investigation) can declare
 their expected disposition inline. Two macros, callable from inside a
@@ -212,6 +225,9 @@ deleting the `lfg_ct_xfail` call (or pass `--strict-xpass` in CI to
 catch the moment the bug fixes itself).
 
 ### Isolation modes
+
+> Tutorial: [Fork-per-test isolation](tutorial/07-fork-isolation.md) explains
+> what fork mode buys, the graceful-fallback wiring, and platform gating.
 
 By default, every `lfg_ct_test` body runs in the test binary's own
 process — the historical, fastest path. A crashing test (`abort`,
@@ -306,6 +322,9 @@ int main(int argc, char *argv[])
 ```
 
 ### Reporter callback
+
+> Tutorial: [Integration](tutorial/08-integration.md) shows the opt-in
+> JUnit-XML reporter (a reference consumer of this hook) wired into a build.
 
 `lfg_ct_set_reporter(const lfg_ct_reporter_t *)` installs a pluggable
 hook that observes each test's classified outcome plus run completion.
@@ -599,6 +618,11 @@ void test_double_precision(void)
 
 The mocking framework provides macro-based mock generation for C functions.
 
+> Tutorial: [Your first mock](tutorial/04-first-mock.md) builds a mock from
+> scratch (declare/define, call count, param history, return queue);
+> [chapter 9](tutorial/09-library-mocks.md) applies the same mechanics to the
+> C standard library, mbedTLS, and libcurl.
+
 ### Macro Naming Convention
 
 ```
@@ -665,6 +689,9 @@ Each mock generates these symbols (using `get_value` as example):
 | `get_value_params` | typedef | Struct type for captured parameters |
 
 ### Resetting Mock State
+
+> Tutorial: [Teardown and cleanup](tutorial/06-teardown-and-cleanup.md) covers
+> `mock_reset_all()` and the `mock_register_cleanup` hook in context.
 
 `mock_reset_all()` (declared in `<lfg-ctest-mock.h>`) is the canonical teardown
 call. Every `DEFINE_MOCK_*` invocation auto-registers its `__mock_reset` thunk
@@ -763,6 +790,9 @@ void test_callback_registration(void)
 
 ### Parameter Actions (Read/Write Memory and Strings)
 
+> Tutorial: [Parameter actions and callbacks](tutorial/05-param-actions-and-callbacks.md)
+> works through capturing and injecting buffers with these functions.
+
 For pointer parameters, capture or inject data using parameter actions:
 
 | Function | Description |
@@ -857,6 +887,9 @@ void test_captures_directory_names(void)
 ```
 
 ### Mock Callbacks
+
+> Tutorial: [Parameter actions and callbacks](tutorial/05-param-actions-and-callbacks.md#the-callback-hook)
+> demonstrates side-effect-only and state-driven callbacks.
 
 Each mock has an optional callback that fires on every call, receiving the call index and all parameters. Use callbacks when you need custom side effects during a mock call (e.g., invoking a captured write callback with response data) or when the mock's return value depends on per-call state the test (or the SUT) seeded.
 

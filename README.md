@@ -52,6 +52,7 @@ int main(void)
 
 | Doc | Covers |
 |-----|--------|
+| [docs/tutorial/](docs/tutorial/README.md) | Progressive, feature-by-feature user guide for new consumers — first test through library mocking, each chapter a copy-pasteable worked example. |
 | [docs/installation.md](docs/installation.md) | CMake integration, single-header amalgamation, float/double config, `__func__` reporting. |
 | [docs/api.md](docs/api.md) | Public API: runner, assertions, mock macros, parameter actions, callback contract, cleanup hooks. |
 | [docs/example.md](docs/example.md) | Worked example — unit-testing an I2C LED driver with conditional mock includes. |
