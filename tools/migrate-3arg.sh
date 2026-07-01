@@ -23,6 +23,11 @@
 # Default is a dry run: it prints what it would rewrite and what still needs a
 # human, and changes nothing. Pass --apply to rewrite matched files in place.
 #
+# Requires GNU sed: --apply does an in-place rewrite with `sed -i` and no
+# backup suffix, which is GNU semantics. BSD/macOS sed treats the next token
+# as the suffix and misbehaves -- run this on a GNU userland (or install
+# GNU sed as `gsed` and invoke it explicitly).
+#
 # Limitation: the matching is line-oriented. A single 3-arg registration split
 # across multiple physical lines is neither stripped nor reported — reflow such
 # call sites onto one line (clang-format does this) before running the codemod.
