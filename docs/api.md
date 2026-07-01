@@ -550,7 +550,9 @@ lfg_ct_test(my_setup, test_thing, my_teardown);   /* NULL for a skipped hook */
 This shim exists only to avoid a flag-day migration; it is **slated for removal
 after one release**. Migrate call sites to body-owned setup/teardown (above)
 and drop the define. It is opt-in, so the default build stays body-only with no
-`#warning`.
+`#warning`. Step-by-step recipe (the two-shaped transform, the
+`tools/migrate-3arg.sh` codemod, lockstep vs staged sequencing):
+[migration-3arg.md](migration-3arg.md).
 
 ### Assertion Reference
 

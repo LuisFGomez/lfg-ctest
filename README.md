@@ -55,6 +55,7 @@ int main(void)
 | [docs/tutorial/](docs/tutorial/README.md) | Progressive, feature-by-feature user guide for new consumers — first test through library mocking, each chapter a copy-pasteable worked example. |
 | [docs/installation.md](docs/installation.md) | CMake integration, single-header amalgamation, float/double config, `__func__` reporting. |
 | [docs/api.md](docs/api.md) | Public API: runner, assertions, mock macros, parameter actions, callback contract, cleanup hooks. |
+| [docs/migration-3arg.md](docs/migration-3arg.md) | Migrating consumer repos off registration-time setup/teardown: the two-shaped transform, the `tools/migrate-3arg.sh` codemod, and the adopter tracking table. |
 | [docs/example.md](docs/example.md) | Worked example — unit-testing an I2C LED driver with conditional mock includes. |
 | [docs/architecture.md](docs/architecture.md) | Framework internals: runner state, expect-failures mode, mock fanout, `_S` variants, reset registry, amalgamation, float/double gating. |
 | [docs/build-and-test.md](docs/build-and-test.md) | Working on the framework itself: presets, self-test patterns, versioning, formatting, CI. |
@@ -68,7 +69,7 @@ int main(void)
 | `lfg-ctest-fork.c` | Fork-per-test isolation runner (`LFG_CT_ISOLATE_FORK`). Platform-gated + opt-out-gated; default-on Unix builds. |
 | `contrib/junit-xml/` | Opt-in JUnit-XML reporter (registers via `lfg_ct_set_reporter`). Builds standalone only. |
 | `test-unified.c` / `test-mock.c` / `test-amalg.c` | Self-tests (built only when this repo is the top-level CMake source). |
-| `tools/` | C99 amalgamator (`amalgamate.c` + `amalgamate.manifest`), version stamper (`mkversion.c`), release helper (`mkrelease.c`). |
+| `tools/` | C99 amalgamator (`amalgamate.c` + `amalgamate.manifest`), version stamper (`mkversion.c`), release helper (`mkrelease.c`), 3-arg migration codemod (`migrate-3arg.sh`). |
 | `dist/` | Generated single-header (gitignored; built by `cmake --build build --target amalgamate`). |
 | `CMakeLists.txt`, `CMakePresets.json` | Build config — float/double auto-detection, install rules, only `debug` preset. |
 | `.clang-format` | BSD/Allman, 4-space indent, 120-col, pointer-right, case labels flush with switch. Authoritative for this repo. |
