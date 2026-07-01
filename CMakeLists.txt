@@ -281,6 +281,37 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endif()
     list(APPEND TEST_TARGETS test-fork-disabled)
 
+    # test-compat-3arg rebuilds the framework sources with the deprecated
+    # 3-argument registration shim enabled so CI compiles every
+    # LFG_CT_COMPAT_3ARG #ifdef branch (spread across lfg-ctest.c,
+    # lfg-ctest-mock.c, and lfg-ctest-fork.c) and exercises the retained
+    # setup -> body -> teardown lifecycle. The static lib is body-only, so
+    # like test-fork-disabled this target compiles the sources itself.
+    add_executable(test-compat-3arg
+        test-compat-3arg.c
+        lfg-ctest.c
+        lfg-ctest-mock.c
+        lfg-ctest-fork.c
+    )
+    target_compile_definitions(test-compat-3arg PRIVATE
+        LFG_CT_COMPAT_3ARG=1
+    )
+    target_include_directories(test-compat-3arg PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_dependencies(test-compat-3arg lfg_ct_version_header)
+    if(LFG_CTEST_HAS_FLOAT)
+        target_compile_definitions(test-compat-3arg PRIVATE LFG_CTEST_HAS_FLOAT=1)
+    endif()
+    if(LFG_CTEST_HAS_DOUBLE)
+        target_compile_definitions(test-compat-3arg PRIVATE LFG_CTEST_HAS_DOUBLE=1)
+    endif()
+    if(LFG_CTEST_NEEDS_LIBM)
+        target_link_libraries(test-compat-3arg PRIVATE m)
+    endif()
+    list(APPEND TEST_TARGETS test-compat-3arg)
+
     # Smoke test for the amalgamated header -- catches drift between the
     # split sources and dist/lfg-ctest.h. Self-contained (defines
     # LFG_CTEST_IMPLEMENTATION itself; does NOT link against lfg-ctest).
@@ -310,6 +341,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         add_test(NAME test-fork COMMAND test-fork)
     endif()
     add_test(NAME test-fork-disabled COMMAND test-fork-disabled)
+    add_test(NAME test-compat-3arg COMMAND test-compat-3arg)
 
     # Custom target to run all tests
     add_custom_target(run_all_tests
