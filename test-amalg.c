@@ -81,13 +81,13 @@ test_double_assertions(void)
 static void
 smoke_suite(void)
 {
-    lfg_ct_test(NULL, test_assertions, NULL);
-    lfg_ct_test(NULL, test_mock_return_and_params, NULL);
+    lfg_ct_test(test_assertions);
+    lfg_ct_test(test_mock_return_and_params);
 #ifdef LFG_CTEST_HAS_FLOAT
-    lfg_ct_test(NULL, test_float_assertions, NULL);
+    lfg_ct_test(test_float_assertions);
 #endif
 #ifdef LFG_CTEST_HAS_DOUBLE
-    lfg_ct_test(NULL, test_double_assertions, NULL);
+    lfg_ct_test(test_double_assertions);
 #endif
 }
 
@@ -99,7 +99,7 @@ main(int argc, char *argv[])
         return 1;
     }
     lfg_ct_start();
-    lfg_ct_suite(NULL, smoke_suite, NULL);
+    lfg_ct_suite(smoke_suite);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

@@ -83,8 +83,8 @@ static char *_drive_and_capture(void)
     lfg_ct_junit_set_output(NULL, NULL);
     lfg_ct_junit_set_output(JUNIT_TEST_TMP_PATH, "self-test-junit");
 
-    lfg_ct_test_impl(NULL, _pass_body, NULL, "pass_case");
-    lfg_ct_test_impl(NULL, _skip_body, NULL, "skip_case");
+    lfg_ct_test_impl(_pass_body, "pass_case");
+    lfg_ct_test_impl(_skip_body, "skip_case");
 
     /* Fire the run-complete hook. We cannot call the real
      * lfg_ct_print_summary because it produces stdout output and
@@ -198,12 +198,12 @@ static void test_junit_consume_args_no_flag_returns_argc_unchanged(void)
 
 static void suite_junit_tests(void)
 {
-    lfg_ct_test(NULL, test_junit_records_pass_with_no_failure_child, NULL);
-    lfg_ct_test(NULL, test_junit_renders_skipped_with_reason, NULL);
-    lfg_ct_test(NULL, test_junit_aggregate_counts_match_cases, NULL);
-    lfg_ct_test(NULL, test_junit_consume_args_peels_flag_and_path, NULL);
-    lfg_ct_test(NULL, test_junit_consume_args_returns_minus_one_on_missing_path, NULL);
-    lfg_ct_test(NULL, test_junit_consume_args_no_flag_returns_argc_unchanged, NULL);
+    lfg_ct_test(test_junit_records_pass_with_no_failure_child);
+    lfg_ct_test(test_junit_renders_skipped_with_reason);
+    lfg_ct_test(test_junit_aggregate_counts_match_cases);
+    lfg_ct_test(test_junit_consume_args_peels_flag_and_path);
+    lfg_ct_test(test_junit_consume_args_returns_minus_one_on_missing_path);
+    lfg_ct_test(test_junit_consume_args_no_flag_returns_argc_unchanged);
 }
 
 int main(int argc, char *argv[])
@@ -216,7 +216,7 @@ int main(int argc, char *argv[])
     }
 
     lfg_ct_start();
-    lfg_ct_suite(NULL, suite_junit_tests, NULL);
+    lfg_ct_suite(suite_junit_tests);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

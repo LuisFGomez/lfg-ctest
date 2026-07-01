@@ -57,9 +57,9 @@ test_isolate_none_still_works(void)
 static void
 suite_fork_disabled_tests(void)
 {
-    lfg_ct_test(NULL, test_fork_isolate_enum_is_unconditionally_visible, NULL);
-    lfg_ct_test(NULL, test_fork_isolate_set_returns_error, NULL);
-    lfg_ct_test(NULL, test_isolate_none_still_works, NULL);
+    lfg_ct_test(test_fork_isolate_enum_is_unconditionally_visible);
+    lfg_ct_test(test_fork_isolate_set_returns_error);
+    lfg_ct_test(test_isolate_none_still_works);
 }
 
 int
@@ -71,7 +71,7 @@ main(int argc, char *argv[])
     }
     lfg_ct_start();
     printf("\n--- FORK OPT-OUT (LFG_CT_DISABLE_FORK) SELF-TESTS ---\n");
-    lfg_ct_suite(NULL, suite_fork_disabled_tests, NULL);
+    lfg_ct_suite(suite_fork_disabled_tests);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

@@ -457,17 +457,21 @@ static void test_double_failure_detection(void)
 #endif
 
 /* ============================================================================
- * SETUP/TEARDOWN HOOK LIFECYCLE TESTS
+ * BODY-OWNED SETUP/TEARDOWN CONVENTION TESTS
  *
- * Verify the framework's setup -> body -> teardown sequencing on both
- * lfg_ct_test and lfg_ct_suite: happy path, body failure (teardown still
- * runs), NULL setup, NULL teardown, setup failure (body skipped, teardown
- * still runs), and the suite-wraps-test nesting order.
+ * The framework no longer binds setup/teardown at registration time --
+ * lfg_ct_test / lfg_ct_suite take the body only. Setup and teardown are
+ * plain functions the body calls itself. These tests verify the blessed
+ * convention reproduces every sequencing guarantee the old registrar
+ * gave: happy path, body-failure-still-runs-teardown (assertions are
+ * non-fatal), an early-return skip path, the no-setup / no-teardown
+ * shapes, a setup-failure that skips the body but still tears down, and
+ * the suite-wraps-test nesting order.
  *
- * Each hook stamps a single character into _hook_trace so order is
+ * Each phase stamps a single character into _hook_trace so order is
  * preserved end-to-end. Outer self-tests wrap the inner framework calls
- * in expect-failures mode so intentional setup/body failures don't fail
- * this binary's own result.
+ * in expect-failures mode so intentional failures don't fail this
+ * binary's own result.
  * ============================================================================ */
 
 static char _hook_trace[64];
@@ -488,86 +492,159 @@ static void _hook_trace_push(char c)
     }
 }
 
-/* Phase callbacks: each appends a tag and (where indicated) fails an
- * assertion. Tags: S/B/T for setup/body/teardown on the test-level
- * happy/failure paths; s/t for suite-level setup/teardown in the nested
- * ordering test. _body_unreachable stamps 'X' which the assertions
- * verify never appears (i.e. the body was skipped). */
-static void _hook_setup_ok(void)         { _hook_trace_push('S'); }
-static void _hook_setup_fail(void)       { _hook_trace_push('S'); ASSERT_FAIL("intentional setup failure"); }
-static void _hook_body_ok(void)          { _hook_trace_push('B'); }
-static void _hook_body_fail(void)        { _hook_trace_push('B'); ASSERT_FAIL("intentional body failure"); }
-static void _hook_body_unreachable(void) { _hook_trace_push('X'); }
-static void _hook_teardown_ok(void)      { _hook_trace_push('T'); }
+/* Fixture helpers a body calls for itself. Setup returns its assertion
+ * result (0 ok, non-zero on failure) so the body can branch on it --
+ * assertions are non-fatal and return their status, which is exactly
+ * what makes the failure-path teardown reproducible in plain C. Tags:
+ * S/B/T for setup/body/teardown; s/t for the suite-level wrap. */
+static int _fx_setup_ok(void)      { _hook_trace_push('S'); return 0; }
+static int _fx_setup_fail(void)    { _hook_trace_push('S'); return ASSERT_FAIL("intentional setup failure"); }
+static void _fx_teardown(void)     { _hook_trace_push('T'); }
 
-static void _nested_suite_setup(void)    { _hook_trace_push('s'); }
-static void _nested_suite_teardown(void) { _hook_trace_push('t'); }
-static void _nested_suite_body(void)
+/* ---- body-owned lifecycle bodies (what a consumer now writes) ------------ */
+
+/* Happy path: setup, body, teardown. */
+static void _conv_body_happy(void)
 {
-    lfg_ct_test(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+    if (0 != _fx_setup_ok())
+    {
+        _fx_teardown();
+        return;
+    }
+    _hook_trace_push('B');
+    _fx_teardown();
 }
 
-/* ---- lfg_ct_test variants ------------------------------------------------ */
+/* Body failure still tears down: the soft assert fails but control falls
+ * through (assertions do not longjmp), so teardown still runs. */
+static void _conv_body_failure(void)
+{
+    if (0 != _fx_setup_ok())
+    {
+        _fx_teardown();
+        return;
+    }
+    _hook_trace_push('B');
+    ASSERT_FAIL("intentional body failure");
+    _fx_teardown();
+}
 
-static void test_test_hooks_happy_path(void)
+/* No setup phase: the body just does its work and tears down. */
+static void _conv_body_no_setup(void)
+{
+    _hook_trace_push('B');
+    _fx_teardown();
+}
+
+/* No teardown phase: nothing to clean up. */
+static void _conv_body_no_teardown(void)
+{
+    if (0 != _fx_setup_ok())
+    {
+        return;
+    }
+    _hook_trace_push('B');
+}
+
+/* Setup failure skips the body but still tears down -- the body branches
+ * on setup's returned status. The 'X' tag must never appear. */
+static void _conv_body_setup_failure(void)
+{
+    if (0 != _fx_setup_fail())
+    {
+        _fx_teardown();
+        return;
+    }
+    _hook_trace_push('X');
+    _fx_teardown();
+}
+
+/* Skip path: teardown runs before lfg_ct_skip, which longjmps out of the
+ * body -- the "teardown before skip" convention. The 'X' tag after the
+ * skip must never appear. */
+static void _conv_body_skip(void)
+{
+    if (0 != _fx_setup_ok())
+    {
+        _fx_teardown();
+        return;
+    }
+    _hook_trace_push('B');
+    _fx_teardown();
+    lfg_ct_skip("preconditions not met");
+    _hook_trace_push('X');
+}
+
+/* Suite wrap: the suite body owns its own setup/teardown around the
+ * test it registers. */
+static void _suite_wrap_body(void)
+{
+    _hook_trace_push('s');
+    lfg_ct_test(_conv_body_happy);
+    _hook_trace_push('t');
+}
+
+/* ---- convention self-tests ----------------------------------------------- */
+
+static void test_convention_happy_path(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_test(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+    lfg_ct_test(_conv_body_happy);
     observed = lfg_ct_expect_failures_end();
 
     ASSERT_INT_EQUAL(0, observed);
     ASSERT_STR_EQUAL("SBT", _hook_trace);
 }
 
-static void test_test_hooks_body_failure_still_runs_teardown(void)
+static void test_convention_body_failure_still_runs_teardown(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_test(_hook_setup_ok, _hook_body_fail, _hook_teardown_ok);
+    lfg_ct_test(_conv_body_failure);
     observed = lfg_ct_expect_failures_end();
 
     ASSERT_INT_EQUAL(1, observed);
     ASSERT_STR_EQUAL("SBT", _hook_trace);
 }
 
-static void test_test_hooks_null_setup_skips_setup_phase(void)
+static void test_convention_no_setup_phase(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_test(NULL, _hook_body_ok, _hook_teardown_ok);
+    lfg_ct_test(_conv_body_no_setup);
     observed = lfg_ct_expect_failures_end();
 
     ASSERT_INT_EQUAL(0, observed);
     ASSERT_STR_EQUAL("BT", _hook_trace);
 }
 
-static void test_test_hooks_null_teardown_skips_teardown_phase(void)
+static void test_convention_no_teardown_phase(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_test(_hook_setup_ok, _hook_body_ok, NULL);
+    lfg_ct_test(_conv_body_no_teardown);
     observed = lfg_ct_expect_failures_end();
 
     ASSERT_INT_EQUAL(0, observed);
     ASSERT_STR_EQUAL("SB", _hook_trace);
 }
 
-static void test_test_hooks_setup_failure_skips_body_runs_teardown(void)
+static void test_convention_setup_failure_skips_body_runs_teardown(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_test(_hook_setup_fail, _hook_body_unreachable, _hook_teardown_ok);
+    lfg_ct_test(_conv_body_setup_failure);
     observed = lfg_ct_expect_failures_end();
 
     /* Exactly one failure (the setup), the body never recorded its tag,
@@ -576,82 +653,30 @@ static void test_test_hooks_setup_failure_skips_body_runs_teardown(void)
     ASSERT_STR_EQUAL("ST", _hook_trace);
 }
 
-/* ---- lfg_ct_suite variants ----------------------------------------------- */
-
-static void test_suite_hooks_happy_path(void)
+static void test_convention_skip_path_runs_teardown_first(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_suite(_hook_setup_ok, _hook_body_ok, _hook_teardown_ok);
+    lfg_ct_test(_conv_body_skip);
     observed = lfg_ct_expect_failures_end();
 
+    /* Skip is not a failure; teardown ran before the skip unwound the
+     * body, and no post-skip tag was recorded. */
     ASSERT_INT_EQUAL(0, observed);
     ASSERT_STR_EQUAL("SBT", _hook_trace);
-}
-
-static void test_suite_hooks_body_failure_still_runs_teardown(void)
-{
-    int observed;
-
-    _hook_trace_reset();
-    lfg_ct_expect_failures_begin();
-    lfg_ct_suite(_hook_setup_ok, _hook_body_fail, _hook_teardown_ok);
-    observed = lfg_ct_expect_failures_end();
-
-    ASSERT_INT_EQUAL(1, observed);
-    ASSERT_STR_EQUAL("SBT", _hook_trace);
-}
-
-static void test_suite_hooks_null_setup_skips_setup_phase(void)
-{
-    int observed;
-
-    _hook_trace_reset();
-    lfg_ct_expect_failures_begin();
-    lfg_ct_suite(NULL, _hook_body_ok, _hook_teardown_ok);
-    observed = lfg_ct_expect_failures_end();
-
-    ASSERT_INT_EQUAL(0, observed);
-    ASSERT_STR_EQUAL("BT", _hook_trace);
-}
-
-static void test_suite_hooks_null_teardown_skips_teardown_phase(void)
-{
-    int observed;
-
-    _hook_trace_reset();
-    lfg_ct_expect_failures_begin();
-    lfg_ct_suite(_hook_setup_ok, _hook_body_ok, NULL);
-    observed = lfg_ct_expect_failures_end();
-
-    ASSERT_INT_EQUAL(0, observed);
-    ASSERT_STR_EQUAL("SB", _hook_trace);
-}
-
-static void test_suite_hooks_setup_failure_skips_body_runs_teardown(void)
-{
-    int observed;
-
-    _hook_trace_reset();
-    lfg_ct_expect_failures_begin();
-    lfg_ct_suite(_hook_setup_fail, _hook_body_unreachable, _hook_teardown_ok);
-    observed = lfg_ct_expect_failures_end();
-
-    ASSERT_INT_EQUAL(1, observed);
-    ASSERT_STR_EQUAL("ST", _hook_trace);
 }
 
 /* ---- suite wraps test: nesting order ------------------------------------- */
 
-static void test_suite_wrapping_test_fires_hooks_in_nesting_order(void)
+static void test_convention_suite_wrapping_test_nesting_order(void)
 {
     int observed;
 
     _hook_trace_reset();
     lfg_ct_expect_failures_begin();
-    lfg_ct_suite(_nested_suite_setup, _nested_suite_body, _nested_suite_teardown);
+    lfg_ct_suite(_suite_wrap_body);
     observed = lfg_ct_expect_failures_end();
 
     ASSERT_INT_EQUAL(0, observed);
@@ -793,11 +818,11 @@ static void test_filter_runner_skips_filtered_test_body(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
 
     _filter_body_called = 0;
-    lfg_ct_test_impl(NULL, _filter_body, NULL, "no_match");
+    lfg_ct_test_impl(_filter_body, "no_match");
     ASSERT_INT_EQUAL(0, _filter_body_called);
 
     _filter_body_called = 0;
-    lfg_ct_test_impl(NULL, _filter_body, NULL, "match_me_yes");
+    lfg_ct_test_impl(_filter_body, "match_me_yes");
     ASSERT_INT_EQUAL(1, _filter_body_called);
 }
 
@@ -807,11 +832,11 @@ static void test_filter_runner_skips_excluded_test_body(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
 
     _filter_body_called = 0;
-    lfg_ct_test_impl(NULL, _filter_body, NULL, "skip_me");
+    lfg_ct_test_impl(_filter_body, "skip_me");
     ASSERT_INT_EQUAL(0, _filter_body_called);
 
     _filter_body_called = 0;
-    lfg_ct_test_impl(NULL, _filter_body, NULL, "run_me");
+    lfg_ct_test_impl(_filter_body, "run_me");
     ASSERT_INT_EQUAL(1, _filter_body_called);
 }
 
@@ -822,7 +847,7 @@ static void test_filter_runner_skips_all_bodies_in_list_mode(void)
 
     _filter_body_called = 0;
     /* list mode prints "anything\r\n" to stdout but skips the body */
-    lfg_ct_test_impl(NULL, _filter_body, NULL, "anything");
+    lfg_ct_test_impl(_filter_body, "anything");
     ASSERT_INT_EQUAL(0, _filter_body_called);
 }
 
@@ -838,7 +863,7 @@ static void _filter_inheriting_suite_body(void)
     /* The inner test's name does NOT match "inheriting_suite_filter*"; it
      * runs only because the outer suite's name matched and the match was
      * inherited down through _filter_inherited_depth. */
-    lfg_ct_test_impl(NULL, _filter_inner_body, NULL, "unrelated_inner_test");
+    lfg_ct_test_impl(_filter_inner_body, "unrelated_inner_test");
 }
 
 static void _filter_non_matching_suite_body(void)
@@ -846,7 +871,7 @@ static void _filter_non_matching_suite_body(void)
     /* Used to verify the negative case: no suite-match, so the inner test
      * must match the filter on its own. Its name doesn't match either, so
      * the body must NOT run. */
-    lfg_ct_test_impl(NULL, _filter_inner_body, NULL, "unrelated_inner_test");
+    lfg_ct_test_impl(_filter_inner_body, "unrelated_inner_test");
 }
 
 static void test_filter_runner_suite_match_propagates_to_inner_tests(void)
@@ -856,13 +881,13 @@ static void test_filter_runner_suite_match_propagates_to_inner_tests(void)
 
     /* Positive: matching outer suite -> inner test runs by inheritance. */
     _filter_inner_called = 0;
-    lfg_ct_suite_impl(NULL, _filter_inheriting_suite_body, NULL, "inheriting_suite_filter_demo");
+    lfg_ct_suite_impl(_filter_inheriting_suite_body, "inheriting_suite_filter_demo");
     ASSERT_INT_EQUAL(1, _filter_inner_called);
 
     /* Negative: non-matching outer suite -> still descends, but inner test
      * has to match on its own. It doesn't, so body stays unrun. */
     _filter_inner_called = 0;
-    lfg_ct_suite_impl(NULL, _filter_non_matching_suite_body, NULL, "unrelated_outer_suite");
+    lfg_ct_suite_impl(_filter_non_matching_suite_body, "unrelated_outer_suite");
     ASSERT_INT_EQUAL(0, _filter_inner_called);
 }
 
@@ -878,23 +903,23 @@ static void test_filter_reset_state_for_remaining_tests(void)
 
 static void suite_filter_args_tests(void)
 {
-    lfg_ct_test(NULL, test_filter_parse_no_args_runs_everything, NULL);
-    lfg_ct_test(NULL, test_filter_parse_filter_basic, NULL);
-    lfg_ct_test(NULL, test_filter_parse_exclude_basic, NULL);
-    lfg_ct_test(NULL, test_filter_parse_exclude_wins_over_filter, NULL);
-    lfg_ct_test(NULL, test_filter_parse_repeated_filter_ors, NULL);
-    lfg_ct_test(NULL, test_filter_parse_repeated_exclude_ors, NULL);
-    lfg_ct_test(NULL, test_filter_parse_unmatched_filter_runs_nothing, NULL);
-    lfg_ct_test(NULL, test_filter_parse_list_mode_set, NULL);
-    lfg_ct_test(NULL, test_filter_parse_unknown_flag_fails, NULL);
-    lfg_ct_test(NULL, test_filter_parse_missing_filter_arg_fails, NULL);
-    lfg_ct_test(NULL, test_filter_parse_missing_exclude_arg_fails, NULL);
-    lfg_ct_test(NULL, test_filter_parse_glob_wildcards, NULL);
-    lfg_ct_test(NULL, test_filter_parse_charclass_globs, NULL);
-    lfg_ct_test(NULL, test_filter_runner_skips_filtered_test_body, NULL);
-    lfg_ct_test(NULL, test_filter_runner_skips_excluded_test_body, NULL);
-    lfg_ct_test(NULL, test_filter_runner_skips_all_bodies_in_list_mode, NULL);
-    lfg_ct_test(NULL, test_filter_runner_suite_match_propagates_to_inner_tests, NULL);
+    lfg_ct_test(test_filter_parse_no_args_runs_everything);
+    lfg_ct_test(test_filter_parse_filter_basic);
+    lfg_ct_test(test_filter_parse_exclude_basic);
+    lfg_ct_test(test_filter_parse_exclude_wins_over_filter);
+    lfg_ct_test(test_filter_parse_repeated_filter_ors);
+    lfg_ct_test(test_filter_parse_repeated_exclude_ors);
+    lfg_ct_test(test_filter_parse_unmatched_filter_runs_nothing);
+    lfg_ct_test(test_filter_parse_list_mode_set);
+    lfg_ct_test(test_filter_parse_unknown_flag_fails);
+    lfg_ct_test(test_filter_parse_missing_filter_arg_fails);
+    lfg_ct_test(test_filter_parse_missing_exclude_arg_fails);
+    lfg_ct_test(test_filter_parse_glob_wildcards);
+    lfg_ct_test(test_filter_parse_charclass_globs);
+    lfg_ct_test(test_filter_runner_skips_filtered_test_body);
+    lfg_ct_test(test_filter_runner_skips_excluded_test_body);
+    lfg_ct_test(test_filter_runner_skips_all_bodies_in_list_mode);
+    lfg_ct_test(test_filter_runner_suite_match_propagates_to_inner_tests);
 
     /* Unconditional reset before the verifying test runs -- without this,
      * the verifying test is itself filter-gated by whatever the prior
@@ -904,7 +929,7 @@ static void suite_filter_args_tests(void)
         char *reset_argv[] = {(char *)"prog"};
         (void)lfg_ct_parse_args(1, reset_argv);
     }
-    lfg_ct_test(NULL, test_filter_reset_state_for_remaining_tests, NULL);
+    lfg_ct_test(test_filter_reset_state_for_remaining_tests);
 }
 
 /* ============================================================================
@@ -934,21 +959,22 @@ static void _disp_body_skip_simple(void)
     _disp_post_skip_marker = 1;
 }
 
-static void _disp_setup_skip(void)
-{
-    _disp_setup_teardown_trace |= 0x1;
-    lfg_ct_skip("preconditions not met");
-    _disp_setup_teardown_trace |= 0x2; /* must NOT fire */
-}
-
-static void _disp_body_unreachable(void)
-{
-    _disp_setup_teardown_trace |= 0x4; /* must NOT fire when setup skipped */
-}
-
 static void _disp_teardown_marker(void)
 {
     _disp_setup_teardown_trace |= 0x8;
+}
+
+/* Body-owned lifecycle on the skip path. The body does its setup work,
+ * decides preconditions aren't met, runs teardown, then skips. Teardown
+ * must precede lfg_ct_skip because skip longjmps out of the body -- this
+ * ordering is the blessed convention replacing the old registrar's
+ * "teardown after a setup skip" guarantee. */
+static void _disp_body_skip_runs_teardown_first(void)
+{
+    _disp_setup_teardown_trace |= 0x1; /* setup work, done in the body */
+    _disp_teardown_marker();           /* teardown BEFORE the skip */
+    lfg_ct_skip("preconditions not met");
+    _disp_setup_teardown_trace |= 0x4; /* must NOT fire -- skip unwinds */
 }
 
 static void _disp_body_xfail_with_failure(void)
@@ -978,24 +1004,21 @@ static void _disp_body_xfail_last_reason_wins(void)
  * the outer skip still unwinds. */
 static void _disp_body_after_nested_then_skip(void)
 {
-    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_nested_inner");
+    lfg_ct_test_impl(_disp_body_xfail_without_failure, "mock_nested_inner");
     lfg_ct_skip("outer skip after nested test");
     _disp_post_skip_marker = 1; /* must NOT execute -- outer must unwind */
 }
 
 /* Suite-level skip is intentionally out of scope: lfg_ct_skip is a
- * per-test gesture. A skip call from inside a suite-level setup must
- * warn to stderr and be a benign no-op so the suite continues
- * normally. */
+ * per-test gesture. A skip call from inside a suite body must warn to
+ * stderr and be a benign no-op so the suite continues normally. */
 static int _disp_suite_body_ran;
 
-static void _disp_suite_setup_skips(void)
+static void _disp_suite_body_skips_then_marks(void)
 {
+    /* The suite boundary keeps skip disabled, so this warns to stderr and
+     * returns rather than unwinding; the body then runs to completion. */
     lfg_ct_skip("suite preconditions not met");
-}
-
-static void _disp_suite_body_marker(void)
-{
     _disp_suite_body_ran = 1;
 }
 
@@ -1012,7 +1035,7 @@ static void test_disposition_skip_from_body_increments_skipped_bucket(void)
     int before_asserts_failed = lfg_ct_self_assertions_failed();
 
     _disp_post_skip_marker = 0;
-    lfg_ct_test_impl(NULL, _disp_body_skip_simple, NULL, "mock_skip_body");
+    lfg_ct_test_impl(_disp_body_skip_simple, "mock_skip_body");
 
     /* The post-skip statement must not have executed. */
     ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
@@ -1021,16 +1044,16 @@ static void test_disposition_skip_from_body_increments_skipped_bucket(void)
     ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
 }
 
-static void test_disposition_skip_from_setup_skips_body_runs_teardown(void)
+static void test_disposition_skip_runs_body_owned_teardown_first(void)
 {
     int before_skipped = lfg_ct_self_skipped_count();
     int before_failed = lfg_ct_self_failed_count();
 
     _disp_setup_teardown_trace = 0;
-    lfg_ct_test_impl(_disp_setup_skip, _disp_body_unreachable, _disp_teardown_marker, "mock_skip_setup");
+    lfg_ct_test_impl(_disp_body_skip_runs_teardown_first, "mock_skip_teardown_first");
 
-    /* setup entered (0x1), did not progress past lfg_ct_skip (no 0x2),
-     * body never invoked (no 0x4), teardown still ran (0x8). */
+    /* setup work ran (0x1), teardown ran before the skip (0x8), and the
+     * post-skip store never fired (no 0x4) -- the skip unwound the body. */
     ASSERT_INT_EQUAL(0x1 | 0x8, _disp_setup_teardown_trace);
     ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
     ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
@@ -1042,7 +1065,7 @@ static void test_disposition_xfail_with_assertion_failure_buckets_as_xfail(void)
     int before_failed = lfg_ct_self_failed_count();
     int before_asserts_failed = lfg_ct_self_assertions_failed();
 
-    lfg_ct_test_impl(NULL, _disp_body_xfail_with_failure, NULL, "mock_xfail_with_fail");
+    lfg_ct_test_impl(_disp_body_xfail_with_failure, "mock_xfail_with_fail");
 
     ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
     ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
@@ -1057,7 +1080,7 @@ static void test_disposition_xfail_without_failure_buckets_as_xpass(void)
     int before_xpass = lfg_ct_self_xpassed_count();
     int before_failed = lfg_ct_self_failed_count();
 
-    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_xfail_no_fail");
+    lfg_ct_test_impl(_disp_body_xfail_without_failure, "mock_xfail_no_fail");
 
     ASSERT_INT_EQUAL(before_xpass + 1, lfg_ct_self_xpassed_count());
     ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
@@ -1067,7 +1090,7 @@ static void test_disposition_xfail_repeated_calls_keep_last_reason(void)
 {
     int before_xfail = lfg_ct_self_xfailed_count();
 
-    lfg_ct_test_impl(NULL, _disp_body_xfail_last_reason_wins, NULL, "mock_xfail_last_reason");
+    lfg_ct_test_impl(_disp_body_xfail_last_reason_wins, "mock_xfail_last_reason");
 
     ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
     /* The body called lfg_ct_xfail three times with different reasons;
@@ -1081,7 +1104,7 @@ static void test_disposition_skip_after_nested_test_impl_still_unwinds(void)
     int before_xpassed = lfg_ct_self_xpassed_count();
 
     _disp_post_skip_marker = 0;
-    lfg_ct_test_impl(NULL, _disp_body_after_nested_then_skip, NULL, "mock_outer_skip_after_nested");
+    lfg_ct_test_impl(_disp_body_after_nested_then_skip, "mock_outer_skip_after_nested");
 
     /* Nested mock contributed one xpass; outer contributed one skip. */
     ASSERT_INT_EQUAL(before_xpassed + 1, lfg_ct_self_xpassed_count());
@@ -1098,12 +1121,12 @@ static void test_disposition_suite_context_skip_is_benign_no_op(void)
 
     /* Suite-level skip is out of scope -- lfg_ct_skip is a per-test
      * gesture. lfg_ct_suite_impl explicitly turns the skip boundary
-     * off across its lifecycle, so a stray lfg_ct_skip from a suite
-     * setup must warn to stderr (suppressed for test cleanliness via
+     * off across the suite body, so a stray lfg_ct_skip from suite-level
+     * code must warn to stderr (suppressed for test cleanliness via
      * NOT being captured here -- we only check the observable
      * consequence) and let the suite body run normally. */
     _disp_suite_body_ran = 0;
-    lfg_ct_suite_impl(_disp_suite_setup_skips, _disp_suite_body_marker, NULL, "mock_suite_skip_in_setup");
+    lfg_ct_suite_impl(_disp_suite_body_skips_then_marks, "mock_suite_skip_in_body");
 
     ASSERT_INT_EQUAL(1, _disp_suite_body_ran);
     /* No test was bucketed -- suites do not bucket as SKIP. */
@@ -1118,7 +1141,7 @@ static void test_disposition_xpass_strict_flag_toggles_return_code(void)
     /* Permissive mode: an xpass-only test contributes nothing to a
      * non-zero exit code. */
     lfg_ct_self_set_strict_xpass(0);
-    lfg_ct_test_impl(NULL, _disp_body_xfail_without_failure, NULL, "mock_xpass_permissive");
+    lfg_ct_test_impl(_disp_body_xfail_without_failure, "mock_xpass_permissive");
     ASSERT_INT_EQUAL(before_xpass + 1, lfg_ct_self_xpassed_count());
     if (0 == saved_failed)
     {
@@ -1153,15 +1176,15 @@ static void test_disposition_parse_strict_xpass_flag(void)
 
 static void suite_disposition_tests(void)
 {
-    lfg_ct_test(NULL, test_disposition_skip_from_body_increments_skipped_bucket, NULL);
-    lfg_ct_test(NULL, test_disposition_skip_from_setup_skips_body_runs_teardown, NULL);
-    lfg_ct_test(NULL, test_disposition_xfail_with_assertion_failure_buckets_as_xfail, NULL);
-    lfg_ct_test(NULL, test_disposition_xfail_without_failure_buckets_as_xpass, NULL);
-    lfg_ct_test(NULL, test_disposition_xfail_repeated_calls_keep_last_reason, NULL);
-    lfg_ct_test(NULL, test_disposition_skip_after_nested_test_impl_still_unwinds, NULL);
-    lfg_ct_test(NULL, test_disposition_suite_context_skip_is_benign_no_op, NULL);
-    lfg_ct_test(NULL, test_disposition_xpass_strict_flag_toggles_return_code, NULL);
-    lfg_ct_test(NULL, test_disposition_parse_strict_xpass_flag, NULL);
+    lfg_ct_test(test_disposition_skip_from_body_increments_skipped_bucket);
+    lfg_ct_test(test_disposition_skip_runs_body_owned_teardown_first);
+    lfg_ct_test(test_disposition_xfail_with_assertion_failure_buckets_as_xfail);
+    lfg_ct_test(test_disposition_xfail_without_failure_buckets_as_xpass);
+    lfg_ct_test(test_disposition_xfail_repeated_calls_keep_last_reason);
+    lfg_ct_test(test_disposition_skip_after_nested_test_impl_still_unwinds);
+    lfg_ct_test(test_disposition_suite_context_skip_is_benign_no_op);
+    lfg_ct_test(test_disposition_xpass_strict_flag_toggles_return_code);
+    lfg_ct_test(test_disposition_parse_strict_xpass_flag);
 }
 
 /* ============================================================================
@@ -1221,7 +1244,7 @@ static void test_reporter_fires_once_per_test_with_pass_outcome(void)
     memset(&_rep_log, 0, sizeof(_rep_log));
     lfg_ct_set_reporter(&reporter);
 
-    lfg_ct_test_impl(NULL, _rep_body_pass, NULL, "rep_pass_case");
+    lfg_ct_test_impl(_rep_body_pass, "rep_pass_case");
 
     lfg_ct_set_reporter(NULL);
 
@@ -1238,8 +1261,8 @@ static void test_reporter_classifies_skip_and_xpass_with_reason(void)
     memset(&_rep_log, 0, sizeof(_rep_log));
     lfg_ct_set_reporter(&reporter);
 
-    lfg_ct_test_impl(NULL, _rep_body_skip, NULL, "rep_skip_case");
-    lfg_ct_test_impl(NULL, _rep_body_xpass, NULL, "rep_xpass_case");
+    lfg_ct_test_impl(_rep_body_skip, "rep_skip_case");
+    lfg_ct_test_impl(_rep_body_xpass, "rep_xpass_case");
 
     lfg_ct_set_reporter(NULL);
 
@@ -1273,7 +1296,7 @@ static void test_reporter_null_slot_no_ops(void)
 {
     /* Sanity: a NULL reporter is fine; the runner doesn't trip. */
     lfg_ct_set_reporter(NULL);
-    lfg_ct_test_impl(NULL, _rep_body_pass, NULL, "rep_null_case");
+    lfg_ct_test_impl(_rep_body_pass, "rep_null_case");
     /* No way to verify "nothing happened" beyond the binary not
      * crashing; reaching this point is the assertion. */
     ASSERT_TRUE(1);
@@ -1295,7 +1318,7 @@ static void test_reporter_record_surfaces_classname_from_enclosing_suite(void)
      * verify that an inner nested call records the inherited
      * suite name. */
     lfg_ct_set_reporter(&reporter);
-    lfg_ct_test_impl(NULL, _rep_body_pass, NULL, "rep_inner_case");
+    lfg_ct_test_impl(_rep_body_pass, "rep_inner_case");
     lfg_ct_set_reporter(NULL);
 
     ASSERT_INT_EQUAL(1, _rep_log.count);
@@ -1308,11 +1331,11 @@ static void test_reporter_record_surfaces_classname_from_enclosing_suite(void)
 
 static void suite_reporter_tests(void)
 {
-    lfg_ct_test(NULL, test_reporter_fires_once_per_test_with_pass_outcome, NULL);
-    lfg_ct_test(NULL, test_reporter_classifies_skip_and_xpass_with_reason, NULL);
-    lfg_ct_test(NULL, test_reporter_run_complete_fires_from_print_summary, NULL);
-    lfg_ct_test(NULL, test_reporter_null_slot_no_ops, NULL);
-    lfg_ct_test(NULL, test_reporter_record_surfaces_classname_from_enclosing_suite, NULL);
+    lfg_ct_test(test_reporter_fires_once_per_test_with_pass_outcome);
+    lfg_ct_test(test_reporter_classifies_skip_and_xpass_with_reason);
+    lfg_ct_test(test_reporter_run_complete_fires_from_print_summary);
+    lfg_ct_test(test_reporter_null_slot_no_ops);
+    lfg_ct_test(test_reporter_record_surfaces_classname_from_enclosing_suite);
 }
 
 /* ============================================================================
@@ -1446,7 +1469,7 @@ test_verbose_start_callback_fires_once_per_test(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
     lfg_ct_set_reporter(&r);
 
-    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "verbose_inner_case");
+    lfg_ct_test_impl(_verbose_body_pass, "verbose_inner_case");
 
     lfg_ct_set_reporter(NULL);
 
@@ -1474,7 +1497,7 @@ test_verbose_start_callback_carries_enclosing_suite_name(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
     lfg_ct_set_reporter(&r);
 
-    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "verbose_inner_with_suite");
+    lfg_ct_test_impl(_verbose_body_pass, "verbose_inner_with_suite");
 
     lfg_ct_set_reporter(NULL);
 
@@ -1525,7 +1548,7 @@ test_verbose_filtered_test_does_not_fire_start(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
     lfg_ct_set_reporter(&r);
 
-    lfg_ct_test_impl(NULL, _verbose_body_pass, NULL, "no_match_here");
+    lfg_ct_test_impl(_verbose_body_pass, "no_match_here");
 
     lfg_ct_set_reporter(NULL);
 
@@ -1554,15 +1577,15 @@ test_verbose_reset_state_for_remaining_tests(void)
 
 static void suite_verbose_mode_tests(void)
 {
-    lfg_ct_test(NULL, test_verbose_default_off_after_parse, NULL);
-    lfg_ct_test(NULL, test_verbose_long_flag_toggles_on, NULL);
-    lfg_ct_test(NULL, test_verbose_short_flag_toggles_on, NULL);
-    lfg_ct_test(NULL, test_verbose_resets_across_parse_calls, NULL);
-    lfg_ct_test(NULL, test_verbose_start_callback_fires_once_per_test, NULL);
-    lfg_ct_test(NULL, test_verbose_start_callback_carries_enclosing_suite_name, NULL);
-    lfg_ct_test(NULL, test_verbose_chain_propagates_run_complete, NULL);
-    lfg_ct_test(NULL, test_verbose_filtered_test_does_not_fire_start, NULL);
-    lfg_ct_test(NULL, test_verbose_unknown_flag_does_not_toggle, NULL);
+    lfg_ct_test(test_verbose_default_off_after_parse);
+    lfg_ct_test(test_verbose_long_flag_toggles_on);
+    lfg_ct_test(test_verbose_short_flag_toggles_on);
+    lfg_ct_test(test_verbose_resets_across_parse_calls);
+    lfg_ct_test(test_verbose_start_callback_fires_once_per_test);
+    lfg_ct_test(test_verbose_start_callback_carries_enclosing_suite_name);
+    lfg_ct_test(test_verbose_chain_propagates_run_complete);
+    lfg_ct_test(test_verbose_filtered_test_does_not_fire_start);
+    lfg_ct_test(test_verbose_unknown_flag_does_not_toggle);
 
     /* Unconditional reset before the verifying test runs -- mirrors
      * the pattern at the tail of suite_filter_args_tests. */
@@ -1570,7 +1593,7 @@ static void suite_verbose_mode_tests(void)
         char *reset_argv[] = {(char *)"prog"};
         (void)lfg_ct_parse_args(1, reset_argv);
     }
-    lfg_ct_test(NULL, test_verbose_reset_state_for_remaining_tests, NULL);
+    lfg_ct_test(test_verbose_reset_state_for_remaining_tests);
 }
 
 /* ============================================================================
@@ -1579,54 +1602,50 @@ static void suite_verbose_mode_tests(void)
 
 static void suite_passing_tests(void)
 {
-    lfg_ct_test(NULL, test_pointer_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_boolean_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_integer_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_string_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_memory_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_comparison_assertions_pass, NULL);
-    lfg_ct_test(NULL, test_range_assertion_pass, NULL);
-    lfg_ct_test(NULL, test_bit_assertions_pass, NULL);
+    lfg_ct_test(test_pointer_assertions_pass);
+    lfg_ct_test(test_boolean_assertions_pass);
+    lfg_ct_test(test_integer_assertions_pass);
+    lfg_ct_test(test_string_assertions_pass);
+    lfg_ct_test(test_memory_assertions_pass);
+    lfg_ct_test(test_comparison_assertions_pass);
+    lfg_ct_test(test_range_assertion_pass);
+    lfg_ct_test(test_bit_assertions_pass);
 #ifdef LFG_CTEST_HAS_FLOAT
-    lfg_ct_test(NULL, test_float_assertions_pass, NULL);
+    lfg_ct_test(test_float_assertions_pass);
 #endif
 #ifdef LFG_CTEST_HAS_DOUBLE
-    lfg_ct_test(NULL, test_double_assertions_pass, NULL);
+    lfg_ct_test(test_double_assertions_pass);
 #endif
 }
 
 static void suite_hook_lifecycle_tests(void)
 {
-    lfg_ct_test(NULL, test_test_hooks_happy_path, NULL);
-    lfg_ct_test(NULL, test_test_hooks_body_failure_still_runs_teardown, NULL);
-    lfg_ct_test(NULL, test_test_hooks_null_setup_skips_setup_phase, NULL);
-    lfg_ct_test(NULL, test_test_hooks_null_teardown_skips_teardown_phase, NULL);
-    lfg_ct_test(NULL, test_test_hooks_setup_failure_skips_body_runs_teardown, NULL);
-    lfg_ct_test(NULL, test_suite_hooks_happy_path, NULL);
-    lfg_ct_test(NULL, test_suite_hooks_body_failure_still_runs_teardown, NULL);
-    lfg_ct_test(NULL, test_suite_hooks_null_setup_skips_setup_phase, NULL);
-    lfg_ct_test(NULL, test_suite_hooks_null_teardown_skips_teardown_phase, NULL);
-    lfg_ct_test(NULL, test_suite_hooks_setup_failure_skips_body_runs_teardown, NULL);
-    lfg_ct_test(NULL, test_suite_wrapping_test_fires_hooks_in_nesting_order, NULL);
+    lfg_ct_test(test_convention_happy_path);
+    lfg_ct_test(test_convention_body_failure_still_runs_teardown);
+    lfg_ct_test(test_convention_no_setup_phase);
+    lfg_ct_test(test_convention_no_teardown_phase);
+    lfg_ct_test(test_convention_setup_failure_skips_body_runs_teardown);
+    lfg_ct_test(test_convention_skip_path_runs_teardown_first);
+    lfg_ct_test(test_convention_suite_wrapping_test_nesting_order);
 }
 
 static void suite_failure_detection_tests(void)
 {
-    lfg_ct_test(NULL, test_pointer_failure_detection, NULL);
-    lfg_ct_test(NULL, test_boolean_failure_detection, NULL);
-    lfg_ct_test(NULL, test_integer_failure_detection, NULL);
-    lfg_ct_test(NULL, test_integer64_failure_detection, NULL);
-    lfg_ct_test(NULL, test_string_failure_detection, NULL);
-    lfg_ct_test(NULL, test_memory_failure_detection, NULL);
-    lfg_ct_test(NULL, test_comparison_failure_detection, NULL);
-    lfg_ct_test(NULL, test_range_failure_detection, NULL);
-    lfg_ct_test(NULL, test_bit_failure_detection, NULL);
-    lfg_ct_test(NULL, test_explicit_fail_detection, NULL);
+    lfg_ct_test(test_pointer_failure_detection);
+    lfg_ct_test(test_boolean_failure_detection);
+    lfg_ct_test(test_integer_failure_detection);
+    lfg_ct_test(test_integer64_failure_detection);
+    lfg_ct_test(test_string_failure_detection);
+    lfg_ct_test(test_memory_failure_detection);
+    lfg_ct_test(test_comparison_failure_detection);
+    lfg_ct_test(test_range_failure_detection);
+    lfg_ct_test(test_bit_failure_detection);
+    lfg_ct_test(test_explicit_fail_detection);
 #ifdef LFG_CTEST_HAS_FLOAT
-    lfg_ct_test(NULL, test_float_failure_detection, NULL);
+    lfg_ct_test(test_float_failure_detection);
 #endif
 #ifdef LFG_CTEST_HAS_DOUBLE
-    lfg_ct_test(NULL, test_double_failure_detection, NULL);
+    lfg_ct_test(test_double_failure_detection);
 #endif
 }
 
@@ -1653,31 +1672,31 @@ int main(int argc, char *argv[])
     printf("\n");
 
     printf("--- SUITE 1: PASSING TESTS ---\n");
-    lfg_ct_suite(NULL, suite_passing_tests, NULL);
+    lfg_ct_suite(suite_passing_tests);
 
     printf("\n--- SUITE 2: FAILURE DETECTION TESTS ---\n");
     printf("(Verifies the framework correctly detects assertion failures)\n");
-    lfg_ct_suite(NULL, suite_failure_detection_tests, NULL);
+    lfg_ct_suite(suite_failure_detection_tests);
 
     printf("\n--- SUITE 3: SETUP/TEARDOWN HOOK LIFECYCLE TESTS ---\n");
     printf("(Verifies setup -> body -> teardown sequencing and NULL handling)\n");
-    lfg_ct_suite(NULL, suite_hook_lifecycle_tests, NULL);
+    lfg_ct_suite(suite_hook_lifecycle_tests);
 
     printf("\n--- SUITE 4: --list / --filter / --filter-exclude ARG PARSING ---\n");
     printf("(Verifies lfg_ct_parse_args and the runner's filter-state consumption)\n");
-    lfg_ct_suite(NULL, suite_filter_args_tests, NULL);
+    lfg_ct_suite(suite_filter_args_tests);
 
     printf("\n--- SUITE 5: skip / xfail / xpass DISPOSITION TESTS ---\n");
     printf("(Verifies lfg_ct_skip / lfg_ct_xfail bucketing and --strict-xpass)\n");
-    lfg_ct_suite(NULL, suite_disposition_tests, NULL);
+    lfg_ct_suite(suite_disposition_tests);
 
     printf("\n--- SUITE 6: REPORTER CALLBACK CONTRACT TESTS ---\n");
     printf("(Verifies lfg_ct_set_reporter / on_record / on_run_complete wiring)\n");
-    lfg_ct_suite(NULL, suite_reporter_tests, NULL);
+    lfg_ct_suite(suite_reporter_tests);
 
     printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
     printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
-    lfg_ct_suite(NULL, suite_verbose_mode_tests, NULL);
+    lfg_ct_suite(suite_verbose_mode_tests);
 
     printf("\n");
     printf("================================================================================\n");

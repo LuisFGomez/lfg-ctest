@@ -1777,82 +1777,82 @@ static void test_mock_callback_r_2_modify_queue(void)
 
 static void suite_mock_basic(void)
 {
-    lfg_ct_test(NULL, test_mock_v_v, NULL);
-    lfg_ct_test(NULL, test_mock_r_v, NULL);
-    lfg_ct_test(NULL, test_mock_v_1, NULL);
-    lfg_ct_test(NULL, test_mock_r_1, NULL);
-    lfg_ct_test(NULL, test_mock_v_2, NULL);
-    lfg_ct_test(NULL, test_mock_r_2, NULL);
-    lfg_ct_test(NULL, test_mock_v_3, NULL);
-    lfg_ct_test(NULL, test_mock_r_3, NULL);
-    lfg_ct_test(NULL, test_mock_r_4, NULL);
-    lfg_ct_test(NULL, test_mock_r_5, NULL);
-    lfg_ct_test(NULL, test_mock_r_6, NULL);
-    lfg_ct_test(NULL, test_mock_r_7, NULL);
-    lfg_ct_test(NULL, test_mock_r_8, NULL);
-    lfg_ct_test(NULL, test_mock_r_9, NULL);
-    lfg_ct_test(NULL, test_mock_v_4, NULL);
-    lfg_ct_test(NULL, test_mock_v_5, NULL);
-    lfg_ct_test(NULL, test_mock_v_6, NULL);
-    lfg_ct_test(NULL, test_mock_v_7, NULL);
-    lfg_ct_test(NULL, test_mock_v_8, NULL);
-    lfg_ct_test(NULL, test_mock_v_9, NULL);
+    lfg_ct_test(test_mock_v_v);
+    lfg_ct_test(test_mock_r_v);
+    lfg_ct_test(test_mock_v_1);
+    lfg_ct_test(test_mock_r_1);
+    lfg_ct_test(test_mock_v_2);
+    lfg_ct_test(test_mock_r_2);
+    lfg_ct_test(test_mock_v_3);
+    lfg_ct_test(test_mock_r_3);
+    lfg_ct_test(test_mock_r_4);
+    lfg_ct_test(test_mock_r_5);
+    lfg_ct_test(test_mock_r_6);
+    lfg_ct_test(test_mock_r_7);
+    lfg_ct_test(test_mock_r_8);
+    lfg_ct_test(test_mock_r_9);
+    lfg_ct_test(test_mock_v_4);
+    lfg_ct_test(test_mock_v_5);
+    lfg_ct_test(test_mock_v_6);
+    lfg_ct_test(test_mock_v_7);
+    lfg_ct_test(test_mock_v_8);
+    lfg_ct_test(test_mock_v_9);
 }
 
 static void suite_mock_struct_by_value(void)
 {
-    lfg_ct_test(NULL, test_mock_struct_param, NULL);
-    lfg_ct_test(NULL, test_mock_nested_struct_param, NULL);
-    lfg_ct_test(NULL, test_mock_struct_return, NULL);
-    lfg_ct_test(NULL, test_mock_struct_param_and_return, NULL);
-    lfg_ct_test(NULL, test_mock_multiple_struct_params, NULL);
-    lfg_ct_test(NULL, test_mock_r_2_s, NULL);
-    lfg_ct_test(NULL, test_mock_r_3_s, NULL);
-    lfg_ct_test(NULL, test_mock_r_4_s, NULL);
-    lfg_ct_test(NULL, test_mock_r_5_s, NULL);
-    lfg_ct_test(NULL, test_mock_r_6_s, NULL);
-    lfg_ct_test(NULL, test_mock_r_2_s_reset, NULL);
-    lfg_ct_test(NULL, test_mock_r_2_s_callback, NULL);
-    lfg_ct_test(NULL, test_mock_r_3_s_return_queue, NULL);
-    lfg_ct_test(NULL, test_mock_struct_return_queue, NULL);
+    lfg_ct_test(test_mock_struct_param);
+    lfg_ct_test(test_mock_nested_struct_param);
+    lfg_ct_test(test_mock_struct_return);
+    lfg_ct_test(test_mock_struct_param_and_return);
+    lfg_ct_test(test_mock_multiple_struct_params);
+    lfg_ct_test(test_mock_r_2_s);
+    lfg_ct_test(test_mock_r_3_s);
+    lfg_ct_test(test_mock_r_4_s);
+    lfg_ct_test(test_mock_r_5_s);
+    lfg_ct_test(test_mock_r_6_s);
+    lfg_ct_test(test_mock_r_2_s_reset);
+    lfg_ct_test(test_mock_r_2_s_callback);
+    lfg_ct_test(test_mock_r_3_s_return_queue);
+    lfg_ct_test(test_mock_struct_return_queue);
 }
 
 static void suite_mock_param_actions(void)
 {
-    lfg_ct_test(NULL, test_mock_param_action_str_read, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_str_read_truncation, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_str_read_multi_call, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_str_write, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_read, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_write, NULL);
-    lfg_ct_test(NULL, test_mock_param_action_multi_call, NULL);
-    lfg_ct_test(NULL, test_mock_r_3_output_param, NULL);
-    lfg_ct_test(NULL, test_mock_pointer_vs_memory, NULL);
-    lfg_ct_test(NULL, test_mock_reset_clears_all, NULL);
+    lfg_ct_test(test_mock_param_action_str_read);
+    lfg_ct_test(test_mock_param_action_str_read_truncation);
+    lfg_ct_test(test_mock_param_action_str_read_multi_call);
+    lfg_ct_test(test_mock_param_action_str_write);
+    lfg_ct_test(test_mock_param_action_read);
+    lfg_ct_test(test_mock_param_action_write);
+    lfg_ct_test(test_mock_param_action_multi_call);
+    lfg_ct_test(test_mock_r_3_output_param);
+    lfg_ct_test(test_mock_pointer_vs_memory);
+    lfg_ct_test(test_mock_reset_clears_all);
 }
 
 static void suite_mock_overflow(void)
 {
-    lfg_ct_test(NULL, test_mock_max_calls_void, NULL);
-    lfg_ct_test(NULL, test_mock_max_calls_returning, NULL);
-    lfg_ct_test(NULL, test_mock_overflow_aborts, NULL);
+    lfg_ct_test(test_mock_max_calls_void);
+    lfg_ct_test(test_mock_max_calls_returning);
+    lfg_ct_test(test_mock_overflow_aborts);
 }
 
 static void suite_mock_callback(void)
 {
-    lfg_ct_test(NULL, test_mock_callback_v_v, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_2, NULL);
-    lfg_ct_test(NULL, test_mock_callback_v_1_s, NULL);
-    lfg_ct_test(NULL, test_mock_callback_reset_clears, NULL);
-    lfg_ct_test(NULL, test_mock_callback_null_noop, NULL);
-    lfg_ct_test(NULL, test_mock_callback_index_sequence, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_2_override, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_2_argdriven, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_1_state_driven, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_2_no_touch_preserves_queue, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_1_s_override, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_v_override, NULL);
-    lfg_ct_test(NULL, test_mock_callback_r_2_modify_queue, NULL);
+    lfg_ct_test(test_mock_callback_v_v);
+    lfg_ct_test(test_mock_callback_r_2);
+    lfg_ct_test(test_mock_callback_v_1_s);
+    lfg_ct_test(test_mock_callback_reset_clears);
+    lfg_ct_test(test_mock_callback_null_noop);
+    lfg_ct_test(test_mock_callback_index_sequence);
+    lfg_ct_test(test_mock_callback_r_2_override);
+    lfg_ct_test(test_mock_callback_r_2_argdriven);
+    lfg_ct_test(test_mock_callback_r_1_state_driven);
+    lfg_ct_test(test_mock_callback_r_2_no_touch_preserves_queue);
+    lfg_ct_test(test_mock_callback_r_1_s_override);
+    lfg_ct_test(test_mock_callback_r_v_override);
+    lfg_ct_test(test_mock_callback_r_2_modify_queue);
 }
 
 /*============================================================================
@@ -1984,15 +1984,15 @@ static void test_mock_reset_all_struct_safe(void)
 
 static void suite_mock_reset_all(void)
 {
-    lfg_ct_test(NULL, test_mock_reset_all_clears_invoked, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_clears_return_queue, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_clears_param_history, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_clears_callbacks, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_clears_param_actions, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_skips_uninvoked, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_re_register_after_reset, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_noop_when_empty, NULL);
-    lfg_ct_test(NULL, test_mock_reset_all_struct_safe, NULL);
+    lfg_ct_test(test_mock_reset_all_clears_invoked);
+    lfg_ct_test(test_mock_reset_all_clears_return_queue);
+    lfg_ct_test(test_mock_reset_all_clears_param_history);
+    lfg_ct_test(test_mock_reset_all_clears_callbacks);
+    lfg_ct_test(test_mock_reset_all_clears_param_actions);
+    lfg_ct_test(test_mock_reset_all_skips_uninvoked);
+    lfg_ct_test(test_mock_reset_all_re_register_after_reset);
+    lfg_ct_test(test_mock_reset_all_noop_when_empty);
+    lfg_ct_test(test_mock_reset_all_struct_safe);
 }
 
 /*============================================================================
@@ -2089,11 +2089,11 @@ static void test_mock_register_cleanup_alongside_mock_reset(void)
 
 static void suite_mock_register_cleanup(void)
 {
-    lfg_ct_test(NULL, test_mock_register_cleanup_invoked_by_reset_all, NULL);
-    lfg_ct_test(NULL, test_mock_register_cleanup_dedup, NULL);
-    lfg_ct_test(NULL, test_mock_register_cleanup_multiple_distinct, NULL);
-    lfg_ct_test(NULL, test_mock_register_cleanup_re_register_after_reset, NULL);
-    lfg_ct_test(NULL, test_mock_register_cleanup_alongside_mock_reset, NULL);
+    lfg_ct_test(test_mock_register_cleanup_invoked_by_reset_all);
+    lfg_ct_test(test_mock_register_cleanup_dedup);
+    lfg_ct_test(test_mock_register_cleanup_multiple_distinct);
+    lfg_ct_test(test_mock_register_cleanup_re_register_after_reset);
+    lfg_ct_test(test_mock_register_cleanup_alongside_mock_reset);
 }
 
 /*============================================================================
@@ -2114,25 +2114,25 @@ int main(int argc, char *argv[])
     printf("================================================================================\n\n");
 
     printf("--- SUITE 1: Basic Mock Operations ---\n");
-    lfg_ct_suite(NULL, suite_mock_basic, NULL);
+    lfg_ct_suite(suite_mock_basic);
 
     printf("\n--- SUITE 2: Struct-by-Value ---\n");
-    lfg_ct_suite(NULL, suite_mock_struct_by_value, NULL);
+    lfg_ct_suite(suite_mock_struct_by_value);
 
     printf("\n--- SUITE 3: Parameter Actions ---\n");
-    lfg_ct_suite(NULL, suite_mock_param_actions, NULL);
+    lfg_ct_suite(suite_mock_param_actions);
 
     printf("\n--- SUITE 4: Storage Limits ---\n");
-    lfg_ct_suite(NULL, suite_mock_overflow, NULL);
+    lfg_ct_suite(suite_mock_overflow);
 
     printf("\n--- SUITE 5: Callbacks ---\n");
-    lfg_ct_suite(NULL, suite_mock_callback, NULL);
+    lfg_ct_suite(suite_mock_callback);
 
     printf("\n--- SUITE 6: Reset All ---\n");
-    lfg_ct_suite(NULL, suite_mock_reset_all, NULL);
+    lfg_ct_suite(suite_mock_reset_all);
 
     printf("\n--- SUITE 7: Register Cleanup ---\n");
-    lfg_ct_suite(NULL, suite_mock_register_cleanup, NULL);
+    lfg_ct_suite(suite_mock_register_cleanup);
 
     printf("\n");
     lfg_ct_print_summary();

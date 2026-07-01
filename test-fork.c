@@ -168,7 +168,7 @@ test_fork_pass_case(void)
     lfg_ct_set_reporter(&_capture);
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
-    lfg_ct_test_impl(NULL, _body_pass, NULL, "fork_pass_inner");
+    lfg_ct_test_impl(_body_pass, "fork_pass_inner");
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
     lfg_ct_set_reporter(NULL);
@@ -189,7 +189,7 @@ test_fork_abort_crash_survives_and_reports_failed(void)
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
     lfg_ct_expect_failures_begin();
-    lfg_ct_test_impl(NULL, _body_abort_crash, NULL, "fork_abort_inner");
+    lfg_ct_test_impl(_body_abort_crash, "fork_abort_inner");
     (void)lfg_ct_expect_failures_end();
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
@@ -208,7 +208,7 @@ test_fork_segfault_crash_survives_and_reports_failed(void)
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
     lfg_ct_expect_failures_begin();
-    lfg_ct_test_impl(NULL, _body_segfault_crash, NULL, "fork_segv_inner");
+    lfg_ct_test_impl(_body_segfault_crash, "fork_segv_inner");
     (void)lfg_ct_expect_failures_end();
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
@@ -229,7 +229,7 @@ test_fork_exit_nonzero_reports_failed(void)
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
     lfg_ct_expect_failures_begin();
-    lfg_ct_test_impl(NULL, _body_exit_nonzero, NULL, "fork_exit_inner");
+    lfg_ct_test_impl(_body_exit_nonzero, "fork_exit_inner");
     (void)lfg_ct_expect_failures_end();
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
@@ -251,7 +251,7 @@ test_fork_timeout_kills_hung_child(void)
     lfg_ct_set_fork_timeout_ms(50);
 
     lfg_ct_expect_failures_begin();
-    lfg_ct_test_impl(NULL, _body_sleep_forever, NULL, "fork_timeout_inner");
+    lfg_ct_test_impl(_body_sleep_forever, "fork_timeout_inner");
     (void)lfg_ct_expect_failures_end();
 
     lfg_ct_set_fork_timeout_ms(0);
@@ -273,10 +273,10 @@ test_fork_subsequent_test_still_runs_after_crash(void)
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
     lfg_ct_expect_failures_begin();
-    lfg_ct_test_impl(NULL, _body_abort_crash, NULL, "fork_seq_crash");
+    lfg_ct_test_impl(_body_abort_crash, "fork_seq_crash");
     (void)lfg_ct_expect_failures_end();
 
-    lfg_ct_test_impl(NULL, _body_pass, NULL, "fork_seq_pass");
+    lfg_ct_test_impl(_body_pass, "fork_seq_pass");
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
     lfg_ct_set_reporter(NULL);
@@ -311,7 +311,7 @@ test_fork_parent_fd_inheritance(void)
     lfg_ct_set_reporter(&_capture);
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
-    lfg_ct_test_impl(NULL, _body_read_inherited_fd, NULL, "fork_fd_inherit");
+    lfg_ct_test_impl(_body_read_inherited_fd, "fork_fd_inherit");
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
     lfg_ct_set_reporter(NULL);
@@ -334,7 +334,7 @@ test_fork_skip_round_trip(void)
     lfg_ct_set_reporter(&_capture);
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
-    lfg_ct_test_impl(NULL, _body_skip, NULL, "fork_skip_inner");
+    lfg_ct_test_impl(_body_skip, "fork_skip_inner");
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
     lfg_ct_set_reporter(NULL);
@@ -389,7 +389,7 @@ test_fork_verbose_start_fires_once_in_parent(void)
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
     start_before = _fork_verbose_start_count;
-    lfg_ct_test_impl(NULL, _body_pass, NULL, "fork_verbose_inner");
+    lfg_ct_test_impl(_body_pass, "fork_verbose_inner");
     start_delta = _fork_verbose_start_count - start_before;
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
@@ -421,7 +421,7 @@ test_fork_xfail_round_trip(void)
     lfg_ct_set_reporter(&_capture);
     lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
 
-    lfg_ct_test_impl(NULL, _body_xfail_then_fail, NULL, "fork_xfail_inner");
+    lfg_ct_test_impl(_body_xfail_then_fail, "fork_xfail_inner");
 
     lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
     lfg_ct_set_reporter(NULL);
@@ -438,18 +438,18 @@ test_fork_xfail_round_trip(void)
 static void
 suite_fork_isolation_tests(void)
 {
-    lfg_ct_test(NULL, test_set_isolation_round_trip, NULL);
-    lfg_ct_test(NULL, test_set_fork_timeout_round_trip, NULL);
-    lfg_ct_test(NULL, test_fork_pass_case, NULL);
-    lfg_ct_test(NULL, test_fork_abort_crash_survives_and_reports_failed, NULL);
-    lfg_ct_test(NULL, test_fork_segfault_crash_survives_and_reports_failed, NULL);
-    lfg_ct_test(NULL, test_fork_exit_nonzero_reports_failed, NULL);
-    lfg_ct_test(NULL, test_fork_timeout_kills_hung_child, NULL);
-    lfg_ct_test(NULL, test_fork_subsequent_test_still_runs_after_crash, NULL);
-    lfg_ct_test(NULL, test_fork_parent_fd_inheritance, NULL);
-    lfg_ct_test(NULL, test_fork_skip_round_trip, NULL);
-    lfg_ct_test(NULL, test_fork_xfail_round_trip, NULL);
-    lfg_ct_test(NULL, test_fork_verbose_start_fires_once_in_parent, NULL);
+    lfg_ct_test(test_set_isolation_round_trip);
+    lfg_ct_test(test_set_fork_timeout_round_trip);
+    lfg_ct_test(test_fork_pass_case);
+    lfg_ct_test(test_fork_abort_crash_survives_and_reports_failed);
+    lfg_ct_test(test_fork_segfault_crash_survives_and_reports_failed);
+    lfg_ct_test(test_fork_exit_nonzero_reports_failed);
+    lfg_ct_test(test_fork_timeout_kills_hung_child);
+    lfg_ct_test(test_fork_subsequent_test_still_runs_after_crash);
+    lfg_ct_test(test_fork_parent_fd_inheritance);
+    lfg_ct_test(test_fork_skip_round_trip);
+    lfg_ct_test(test_fork_xfail_round_trip);
+    lfg_ct_test(test_fork_verbose_start_fires_once_in_parent);
 }
 
 int
@@ -461,7 +461,7 @@ main(int argc, char *argv[])
     }
     lfg_ct_start();
     printf("\n--- FORK-PER-TEST ISOLATION SELF-TESTS ---\n");
-    lfg_ct_suite(NULL, suite_fork_isolation_tests, NULL);
+    lfg_ct_suite(suite_fork_isolation_tests);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
