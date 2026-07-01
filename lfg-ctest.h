@@ -260,6 +260,35 @@
 #define ASSERT_NULL(_a) ASSERT_PTR_NULL(_a)
 #define ASSERT_NOT_NULL(_a) ASSERT_PTR_NOT_NULL(_a)
 
+#ifdef LFG_CT_COMPAT_3ARG
+
+/* Deprecated single-release compatibility window for the pre-#35
+ * registration-time setup/teardown signature. Opt-in via
+ * -DLFG_CT_COMPAT_3ARG on the whole build (library + consumer TUs, so the
+ * shared ABI signatures match). The 3-argument macros forward to the
+ * retained internal lifecycle helper (setup -> body -> teardown, with the
+ * old setup-failure and skip semantics). Slated for removal after one
+ * release -- migrate call sites to body-owned setup/teardown. */
+#warning "LFG_CT_COMPAT_3ARG enables the deprecated 3-argument lfg_ct_test/lfg_ct_suite registration; migrate to body-only registration -- this shim is removed after one release."
+
+/** Deprecated. Execute a suite of tests with registration-time
+ *  setup/teardown hooks. Pass @c NULL for @p _setup or @p _teardown to
+ *  skip that phase; teardown runs even if the body or its assertions
+ *  fail, and a setup assertion failure skips the body but still runs
+ *  teardown. Compiled only under @c LFG_CT_COMPAT_3ARG; migrate to the
+ *  body-only @c lfg_ct_suite(_suite).
+ */
+#define lfg_ct_suite(_setup, _suite, _teardown) lfg_ct_suite_impl((_setup), (_suite), (_teardown), #_suite)
+
+/** Deprecated. Execute a single unit test with registration-time
+ *  setup/teardown hooks. Same lifecycle semantics as the deprecated
+ *  @ref lfg_ct_suite. Compiled only under @c LFG_CT_COMPAT_3ARG; migrate
+ *  to the body-only @c lfg_ct_test(_test).
+ */
+#define lfg_ct_test(_setup, _test, _teardown) lfg_ct_test_impl((_setup), (_test), (_teardown), #_test)
+
+#else /* body-only registration (default) */
+
 /** Execute a suite of tests. Registration is body-only: the suite
  *  function is the single argument. Setup and teardown are plain static
  *  functions the suite body calls itself -- the framework binds no
@@ -274,6 +303,8 @@
  *  body (assertions are non-fatal and return their result).
  */
 #define lfg_ct_test(_test) lfg_ct_test_impl((_test), #_test)
+
+#endif /* LFG_CT_COMPAT_3ARG */
 
 /** Mark the current test as skipped, record @p _reason, and return from
  *  the test body immediately. Buckets the test as SKIP (separate from
@@ -391,6 +422,22 @@ int lfg_ct_is_verbose(void);
  */
 int lfg_ct_name_runs(const char *name);
 
+#ifdef LFG_CT_COMPAT_3ARG
+
+/** Deprecated 3-argument backing entry for @ref lfg_ct_suite under the
+ *  @c LFG_CT_COMPAT_3ARG compatibility window. Pass @c NULL for any hook
+ *  that should be skipped.
+ */
+void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+
+/** Deprecated 3-argument backing entry for @ref lfg_ct_test under the
+ *  @c LFG_CT_COMPAT_3ARG compatibility window. Pass @c NULL for any hook
+ *  that should be skipped.
+ */
+void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+
+#else /* body-only registration (default) */
+
 /** Execute a suite of tests. See @ref lfg_ct_suite; the suite body owns
  *  any setup/teardown it needs.
  */
@@ -400,6 +447,8 @@ void lfg_ct_suite_impl(void (*fn)(void), const char *name);
  *  any setup/teardown it needs.
  */
 void lfg_ct_test_impl(void (*fn)(void), const char *name);
+
+#endif /* LFG_CT_COMPAT_3ARG */
 
 /** Implementation backing the @ref lfg_ct_skip macro. Use the macro --
  *  it captures @c __FILE__ / @c __LINE__ / function name automatically.

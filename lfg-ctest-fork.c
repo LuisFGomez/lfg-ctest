@@ -68,7 +68,11 @@ typedef struct
 
 /* Bridges provided by lfg-ctest.c. Declared local to this TU so the
  * core header stays focused on the public surface. */
+#ifdef LFG_CT_COMPAT_3ARG
+extern void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+#else
 extern void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name);
+#endif
 extern void _lfg_ct_counter_snapshot(int *executed, int *passed, int *failed);
 extern const lfg_ct_reporter_t *_lfg_ct_get_reporter(void);
 extern void _lfg_ct_set_active_reporter_direct(const lfg_ct_reporter_t *reporter);
@@ -101,7 +105,12 @@ _lfg_ct_fork_available(void)
 }
 
 int
+#ifdef LFG_CT_COMPAT_3ARG
+_lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        unsigned timeout_ms)
+#else
 _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
+#endif
 {
     int pipefd[2];
     pid_t pid;
@@ -163,7 +172,11 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         _lfg_ct_set_active_reporter_direct(&capture);
 
         _lfg_ct_counter_snapshot(&exec0, &pass0, &fail0);
+#ifdef LFG_CT_COMPAT_3ARG
+        _lfg_ct_test_impl_inproc(setup, fn, teardown, name);
+#else
         _lfg_ct_test_impl_inproc(fn, name);
+#endif
         _lfg_ct_counter_snapshot(&exec1, &pass1, &fail1);
 
         _lfg_ct_set_active_reporter_direct(saved);
@@ -292,8 +305,17 @@ _lfg_ct_fork_available(void)
 }
 
 int
+#ifdef LFG_CT_COMPAT_3ARG
+_lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        unsigned timeout_ms)
+#else
 _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
+#endif
 {
+#ifdef LFG_CT_COMPAT_3ARG
+    (void)setup;
+    (void)teardown;
+#endif
     (void)fn;
     (void)name;
     (void)timeout_ms;
