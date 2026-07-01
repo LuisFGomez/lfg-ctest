@@ -685,6 +685,144 @@ static void test_convention_suite_wrapping_test_nesting_order(void)
 }
 
 /* ============================================================================
+ * lfg_ct_failure_count() accessor tests
+ *
+ * The accessor exposes the runner's global failed-assertion tally. These
+ * tests drive inner test bodies through the real runner (lfg_ct_test_impl,
+ * NOT expect-failures mode) so the deliberate failures actually bump the
+ * counter, and classify each inner test XFAIL / SKIP so the failure is
+ * absorbed back out at the boundary and the self-test binary stays green.
+ * They cover the three documented uses: snapshot-and-compare loop
+ * fail-fast, buried-setup-failure detection, and the classification
+ * absorption boundary.
+ * ============================================================================ */
+
+/* Observation state written from inside the inner bodies and read by the
+ * outer tests after the inner test returns. */
+static int _fc_loop_iterations;
+static int _fc_observed_delta;
+static int _fc_setup_teardown_trace;
+
+/* A helper full of non-fatal asserts, one of which fails -- mirrors the
+ * "run_bar_tests()" region in the issue's fail-fast example. */
+static void _fc_failing_region(void)
+{
+    ASSERT_INT_EQUAL(7, 7); /* passes */
+    ASSERT_INT_EQUAL(1, 2); /* fails -- bumps the counter */
+}
+
+/* Inner body: snapshot the count, run the region in a loop, and break as
+ * soon as the counter moves -- fail-fast with no per-assert wiring. Then
+ * classify XFAIL so the deliberate failure is absorbed. */
+static void _fc_body_loop_fail_fast(void)
+{
+    size_t baseline = lfg_ct_failure_count();
+    int i;
+
+    _fc_loop_iterations = 0;
+    for (i = 0; i < 1000; ++i)
+    {
+        _fc_loop_iterations++;
+        _fc_failing_region();
+        if (lfg_ct_failure_count() > baseline)
+        {
+            break; /* fail-fast */
+        }
+    }
+    _fc_observed_delta = (int)(lfg_ct_failure_count() - baseline);
+    lfg_ct_xfail("failure-count fail-fast probe");
+}
+
+static void test_failure_count_loop_fail_fast_breaks_on_first_failure(void)
+{
+    size_t before = lfg_ct_failure_count();
+
+    lfg_ct_test_impl(_fc_body_loop_fail_fast, "mock_fc_loop_fail_fast");
+
+    /* The loop broke on the first failing iteration rather than running
+     * all 1000 -- the accessor was the only fail-fast signal used. */
+    ASSERT_INT_EQUAL(1, _fc_loop_iterations);
+    /* Within the body the counter observed exactly one new failure. */
+    ASSERT_INT_EQUAL(1, _fc_observed_delta);
+    /* XFAIL classification absorbed the deliberate failure, so the global
+     * count returns to its pre-test value at the boundary. */
+    ASSERT_INT_EQUAL(0, (int)(lfg_ct_failure_count() - before));
+}
+
+/* A setup helper whose failure is buried inside it (an assert, not a
+ * returned status) -- snapshot-and-compare is the only way to catch it. */
+static void _fc_setup_that_fails(void)
+{
+    _fc_setup_teardown_trace |= 0x1;
+    ASSERT_TRUE(0); /* buried failure */
+}
+
+static void _fc_teardown(void)
+{
+    _fc_setup_teardown_trace |= 0x2;
+}
+
+/* Inner body implementing the "setup that can fail" convention: snapshot
+ * the count, run setup, and if the count moved, tear down and skip -- the
+ * body proper (0x4) must never run. */
+static void _fc_body_setup_failure_detected(void)
+{
+    size_t baseline = lfg_ct_failure_count();
+
+    _fc_setup_that_fails();
+    if (lfg_ct_failure_count() > baseline)
+    {
+        _fc_teardown();
+        lfg_ct_skip("setup failed");
+        return;
+    }
+    _fc_setup_teardown_trace |= 0x4; /* body proper */
+    _fc_teardown();
+}
+
+static void test_failure_count_detects_buried_setup_failure(void)
+{
+    size_t before = lfg_ct_failure_count();
+    int before_skipped = lfg_ct_self_skipped_count();
+
+    _fc_setup_teardown_trace = 0;
+    lfg_ct_test_impl(_fc_body_setup_failure_detected, "mock_fc_setup_failure");
+
+    /* setup ran (0x1) and teardown ran (0x2); the body proper (0x4) was
+     * skipped because the count moved inside setup. */
+    ASSERT_INT_EQUAL(0x1 | 0x2, _fc_setup_teardown_trace);
+    /* Bucketed as SKIP, and the setup failure was absorbed back out. */
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    ASSERT_INT_EQUAL(0, (int)(lfg_ct_failure_count() - before));
+}
+
+/* All-passing inner body -- contributes no failures. */
+static void _fc_body_all_pass(void)
+{
+    ASSERT_TRUE(1);
+}
+
+static void test_failure_count_matches_internal_and_stable_on_pass(void)
+{
+    size_t before = lfg_ct_failure_count();
+
+    /* The public accessor and the self-test accessor read one counter. */
+    ASSERT_INT_EQUAL((int)lfg_ct_failure_count(), lfg_ct_self_assertions_failed());
+
+    /* A nested all-passing test contributes no failures, so the count is
+     * unchanged across the test boundary. */
+    lfg_ct_test_impl(_fc_body_all_pass, "mock_fc_all_pass");
+    ASSERT_INT_EQUAL(0, (int)(lfg_ct_failure_count() - before));
+}
+
+static void suite_failure_count_tests(void)
+{
+    lfg_ct_test(test_failure_count_loop_fail_fast_breaks_on_first_failure);
+    lfg_ct_test(test_failure_count_detects_buried_setup_failure);
+    lfg_ct_test(test_failure_count_matches_internal_and_stable_on_pass);
+}
+
+/* ============================================================================
  * --list / --filter / --filter-exclude argument-parsing tests
  *
  * These exercise lfg_ct_parse_args() and its consumption by the runner.
@@ -1681,6 +1819,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 3: BODY-OWNED SETUP/TEARDOWN CONVENTION TESTS ---\n");
     printf("(Verifies the body-owned setup -> body -> teardown convention)\n");
     lfg_ct_suite(suite_hook_lifecycle_tests);
+
+    printf("\n--- SUITE 3b: lfg_ct_failure_count() ACCESSOR TESTS ---\n");
+    printf("(Verifies the public failed-assertion accessor and its boundary)\n");
+    lfg_ct_suite(suite_failure_count_tests);
 
     printf("\n--- SUITE 4: --list / --filter / --filter-exclude ARG PARSING ---\n");
     printf("(Verifies lfg_ct_parse_args and the runner's filter-state consumption)\n");
