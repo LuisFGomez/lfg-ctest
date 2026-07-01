@@ -42,7 +42,7 @@ void test_example(void)
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_test(NULL, test_example, NULL);
+    lfg_ct_test(test_example);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

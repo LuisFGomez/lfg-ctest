@@ -85,7 +85,7 @@ static void test_my_new_assert_detects_mismatch(void)
 Then register it in whichever suite function is appropriate:
 
 ```c
-lfg_ct_test(NULL, test_my_new_assert_detects_mismatch, NULL);
+lfg_ct_test(test_my_new_assert_detects_mismatch);
 ```
 
 Positive cases (assertion passes when it should) don't need expect-failures —
