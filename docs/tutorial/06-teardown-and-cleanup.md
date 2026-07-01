@@ -43,6 +43,21 @@ static void test_with_cleanup(void)
 }
 ```
 
+For the skip path specifically, `lfg_ct_skip_cleanup(cleanup, reason)` folds the
+teardown-before-skip pair into a single call: it invokes `cleanup` (a plain
+`void(void)`, the shape a teardown already has) and then skips. It is optional
+sugar — nothing more than the two lines it replaces — so reach for whichever
+reads clearer at the call site:
+
+```c
+    if (!precondition_met())
+    {
+        lfg_ct_skip_cleanup(teardown, "preconditions not met");
+    }
+```
+
+Pass `NULL` for `cleanup` and it behaves exactly like a plain `lfg_ct_skip`.
+
 ## `mock_reset_all()` — the canonical teardown
 
 `mock_reset_all()` (declared in `<lfg-ctest-mock.h>`) resets **every** mock the

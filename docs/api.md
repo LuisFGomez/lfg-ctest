@@ -226,6 +226,7 @@ lfg_ct_xfail("known flaky under valgrind");
 | Macro | Effect |
 |-------|--------|
 | `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately (`longjmp`s out). Called from a setup helper, it unwinds the rest of the body too — run any teardown before it. SKIP does not count toward pass or fail. |
+| `lfg_ct_skip_cleanup(cleanup, reason)` | Same as `lfg_ct_skip`, but first invokes the `cleanup` function pointer (a plain `void(void)`, the shape a teardown already has) before unwinding. Sugar for the two-line `teardown(); lfg_ct_skip(reason);` step so the skip path is one call. `cleanup` may be `NULL`, which degrades to a plain `lfg_ct_skip`. Purely optional — the two-line form remains equally valid. |
 | `lfg_ct_xfail(reason)` | Mark the test as expected-to-fail and continue executing. After the body completes: if any assertion failed, the test is **XFAIL** (separate bucket); if none failed, the test is **XPASS** (separate bucket). Repeated calls keep the latest reason. |
 
 **Scope:** per-test only. Both macros are no-ops with a stderr warning
@@ -469,7 +470,9 @@ The blessed convention:
   call are an early `return` and `lfg_ct_skip(...)`. Call `teardown()`
   immediately before either. "Teardown before skip" is load-bearing — the
   skip `longjmp`s out of the body and unwinds past a trailing in-body
-  `teardown()`.
+  `teardown()`. For the skip path, `lfg_ct_skip_cleanup(teardown, reason)`
+  folds the two lines into one call (optional sugar; the explicit two-line
+  form is equally valid).
 - **Setup that can fail:** snapshot `lfg_ct_failure_count()` before `setup()`
   and compare after (catches a soft-fail anywhere in setup, including inside a
   helper); or, if `setup()` returns the assertion result, branch on it (every
