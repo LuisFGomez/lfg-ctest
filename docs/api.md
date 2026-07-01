@@ -72,7 +72,49 @@ int main(void)
 | `lfg_ct_xfail(reason)` | Mark current test as expected-to-fail; body runs to completion. Subsequent assertion failure -> XFAIL, no failure -> XPASS. Last reason wins on repeated calls. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_print_summary()` | Print pass/fail/skip/xfail/xpass summary |
 | `lfg_ct_return()` | Get overall return code (0=clean, non-zero=fail or xpass-with-`--strict-xpass`) |
+| `lfg_ct_failure_count()` | Running tally of failed assertions (`size_t`). Snapshot-and-compare inside a body for fail-fast / setup-failure detection. See [Failure count](#failure-count). |
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
+
+### Failure count
+
+Every `ASSERT_*` is non-fatal (record-and-continue) and there is no
+`REQUIRE`-style fatal variant, so `lfg_ct_failure_count()` is the supported
+way to fail-fast out of a region of assertions: snapshot it at the top of
+the region and compare.
+
+```c
+void test_foo(void)
+{
+    size_t baseline = lfg_ct_failure_count();
+    for (size_t i = 0; i < 1000; ++i)
+    {
+        run_bar_tests();                                /* many non-fatal asserts */
+        if (lfg_ct_failure_count() > baseline) break;   /* fail-fast */
+    }
+}
+```
+
+The same snapshot-and-compare catches a failure buried in a setup helper
+(an assert, not a returned status) without branching on each assert:
+
+```c
+size_t baseline = lfg_ct_failure_count();
+setup();
+if (lfg_ct_failure_count() > baseline)
+{
+    teardown();
+    lfg_ct_skip("setup failed");   /* teardown before skip */
+    return;
+}
+```
+
+**Boundary semantics.** The returned value is the _global_ running count,
+not a per-test slice. It is strictly monotonic only _within_ a single test
+or setup body: at classification the runner absorbs a completed test's
+assertion failures back out of the tally for `SKIP` / `XFAIL` / `XPASS`
+outcomes, so the count can move down at a test boundary. Always
+snapshot-and-compare inside one body; never rely on cross-test
+monotonicity.
 
 ### Listing and filtering
 
