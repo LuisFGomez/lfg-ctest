@@ -518,6 +518,12 @@ Apply setup/teardown at whichever level fits the resource's scope: per-test
 when each case needs isolation, per-suite when one acquisition is shared
 across the whole batch, or nothing at all when no fixture is required.
 
+Note the `--list` interaction for a body-owned suite setup: under `--list`
+the suite body is still invoked so its contained tests can list their names
+(see [Listing and filtering](#listing-and-filtering)), which means a
+side-effectful `suite_setup()` would run during a plain listing. Gate it
+behind `if (!lfg_ct_is_list_mode())` when it does real work.
+
 **Crash-safety is not a teardown property.** Under
 [`LFG_CT_ISOLATE_FORK`](#isolation-modes) a crashed child is discarded whole,
 so a missed teardown on the crash path is harmless (the state died with the

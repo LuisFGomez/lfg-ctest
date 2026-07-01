@@ -140,6 +140,12 @@ calls with the shared acquire/release. Apply each at the level that matches
 the resource's scope — per-test when each case needs a clean slate, per-suite
 when one acquisition is shared across the whole batch.
 
+One gotcha for a per-suite `setup`: the suite body still runs under `--list`
+(that is how the contained tests announce their names), so a side-effectful
+suite setup would fire during a plain listing. Gate it behind
+`if (!lfg_ct_is_list_mode())` — see [chapter
+2](02-running-and-filtering.md#listing-what-a-binary-contains).
+
 ## The assertions you will actually use
 
 There are 49 assertions in total ([full table in api.md](../api.md#assertion-reference)).
