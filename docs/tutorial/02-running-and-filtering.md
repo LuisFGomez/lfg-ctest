@@ -24,8 +24,8 @@ int main(int argc, char *argv[])
     }
 
     lfg_ct_start();
-    lfg_ct_suite(NULL, math_suite, NULL);
-    lfg_ct_suite(NULL, string_suite, NULL);
+    lfg_ct_suite(math_suite);
+    lfg_ct_suite(string_suite);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -61,9 +61,10 @@ test_split
 ```
 
 Suite bodies are still *invoked* under `--list` (that is how the tests inside
-them get a chance to announce themselves), but the setup/teardown of suites
-and tests are skipped. If you print your own diagnostics from inside a suite
-body, gate them so they don't pollute the clean name list:
+them get a chance to announce themselves), but individual test bodies are not
+run — so any setup, teardown, or assertions they contain never execute. If you
+print your own diagnostics from inside a suite body, gate them so they don't
+pollute the clean name list:
 
 ```c
 if (!lfg_ct_is_list_mode())

@@ -14,7 +14,7 @@ are the same `DECLARE`/`DEFINE` + transparent-substitution mechanics from
 > All three examples use macro substitution (`#define real_fn real_fn__mock`)
 > to swap the library function for its mock in the translation unit under
 > test. Define the `*_MOCK_REPLACE` guard before including the mock header, as
-> in chapter 4. Always `mock_reset_all()` in teardown
+> in chapter 4. Always sweep mock state with `mock_reset_all()`
 > ([chapter 6](06-teardown-and-cleanup.md)) — omitted from the bodies below
 > for brevity.
 
@@ -363,7 +363,8 @@ The recipe generalises to any C library:
 3. In the test: queue return values (`__return_queue`), inject/capture buffers
    (`__param_actions`), or compute results live (`__callback`).
 4. Assert on `__call_count` and `__param_history`.
-5. `mock_reset_all()` in teardown.
+5. `mock_reset_all()` to sweep mock state (at the top of the next test, or in
+   a teardown the body calls).
 
 Variadic functions get fixed at a representative arity via the macro
 substitution (the libcurl note above); everything else maps directly.

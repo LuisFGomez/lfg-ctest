@@ -51,16 +51,23 @@ configured mode is left in place. The default is `LFG_CT_ISOLATE_NONE`
 | Sanitizer attribution | First leak blamed wherever it surfaces. | Leaks/UB attributed to the test that caused them. |
 | Speed | Fastest. | One `fork` per test. |
 
-Mechanically: for each `lfg_ct_test`, the parent `fork`s; the child runs
-setup -> body -> teardown by the normal in-process path and ships its outcome
-back over a pipe; the parent decodes it onto its own counters and reporter.
-The failure modes are all accounted for explicitly — no silent passes:
+Mechanically: for each `lfg_ct_test`, the parent `fork`s; the child runs the
+test body by the normal in-process path and ships its outcome back over a
+pipe; the parent decodes it onto its own counters and reporter. The failure
+modes are all accounted for explicitly — no silent passes:
 
 - A child killed by a signal (SIGSEGV, SIGABRT, SIGBUS, ...) is reaped and
   recorded as `FAILED` with a "killed by signal N" message.
 - A child that exits non-zero **without** writing a payload (e.g. it called
   `_exit(N)` directly) is recorded as `FAILED` with "child exited N with no
   payload".
+
+Crash-safety here is a property of fork isolation, **not** of teardown. When a
+child crashes it is discarded whole — its entire address space, including any
+fixture it acquired, dies with it, so there is nothing to tear down and no
+in-body `teardown()` runs (nor needs to). The next test forks fresh from the
+pristine parent. Don't rely on teardown as a crash mechanism; it is ordinary
+cleanup on the normal path.
 
 Expensive shared setup done *before* the dispatch — open file descriptors,
 parsed fixtures, a DB handle — is inherited by every child for free via

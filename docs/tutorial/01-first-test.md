@@ -1,8 +1,8 @@
 # 1. Your first test + runner
 
 This chapter gets a test binary compiling, running, and reporting. By the end
-you will have written a test, grouped tests into a suite, attached
-setup/teardown, and reached for the most common assertions.
+you will have written a test, grouped tests into a suite, called
+setup/teardown from a test body, and reached for the most common assertions.
 
 No mocking yet — just the runner and the assertion macros. Everything here
 lives in `<lfg-ctest.h>`.
@@ -29,7 +29,7 @@ static void test_add(void)
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_test(NULL, test_add, NULL);
+    lfg_ct_test(test_add);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -40,11 +40,11 @@ Four runner calls frame every binary:
 | Call | Role |
 |------|------|
 | `lfg_ct_start()` | Initialise the runner. Call once, before any test. |
-| `lfg_ct_test(setup, fn, teardown)` | Run one test. `setup` / `teardown` are optional — pass `NULL` to skip. |
+| `lfg_ct_test(fn)` | Run one test. The body is the only argument; any setup/teardown are plain calls the body makes itself. |
 | `lfg_ct_print_summary()` | Print the pass/fail/skip/xfail/xpass tally. |
 | `lfg_ct_return()` | The process exit code: `0` clean, non-zero if anything failed. |
 
-`lfg_ct_test`'s second argument is the test function; the framework derives
+`lfg_ct_test`'s only argument is the test function; the framework derives
 the reported name from the identifier you pass (`test_add` above), so name
 your functions for the report you want to read.
 
@@ -73,15 +73,15 @@ static void test_add_zero(void)     { ASSERT_EQ(7, add(7, 0)); }
 
 static void math_suite(void)
 {
-    lfg_ct_test(NULL, test_add_positive, NULL);
-    lfg_ct_test(NULL, test_add_negative, NULL);
-    lfg_ct_test(NULL, test_add_zero, NULL);
+    lfg_ct_test(test_add_positive);
+    lfg_ct_test(test_add_negative);
+    lfg_ct_test(test_add_zero);
 }
 
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_suite(NULL, math_suite, NULL);
+    lfg_ct_suite(math_suite);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -93,18 +93,15 @@ for the name-glob filtering in [chapter 2](02-running-and-filtering.md).
 
 ## Setup and teardown
 
-Both `lfg_ct_test` and `lfg_ct_suite` take a `setup` and a `teardown`
-callback. Each is a `void fn(void)`; pass `NULL` for any phase you don't
-need. The lifecycle is:
+The framework binds **no** lifecycle hooks. Setup and teardown are plain
+static functions your test body calls itself — the calls are right there in
+the body, so a reader sees exactly when they fire (no hidden control flow to
+chase back to a registration call). The habit:
 
-1. `setup()` runs first (if non-`NULL`).
-2. `fn()` (the body) runs next — **skipped** if `setup()` raised an assertion
-   failure.
-3. `teardown()` runs last (if non-`NULL`). **Always** runs — even if the body
-   or setup failed.
-
-That "teardown always runs" guarantee is what makes it safe to release
-resources there:
+- Call `setup()` at the top of the body and `teardown()` at the bottom.
+- Because assertions are non-fatal (they record a failure and keep going —
+  there is no fatal `REQUIRE`), a trailing `teardown()` is still reached after
+  a failed assertion in the body. Nothing special is needed for that case.
 
 ```c
 static FILE *fixture;
@@ -114,29 +111,34 @@ static void close_fixture(void) { if (fixture) { fclose(fixture); fixture = NULL
 
 static void test_writes_header(void)
 {
+    open_fixture();
     write_header(fixture);
     /* ... assertions against the file ... */
+    close_fixture();
 }
 
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_test(open_fixture, test_writes_header, close_fixture);
+    lfg_ct_test(test_writes_header);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
 ```
 
-When a suite wraps tests, hooks nest in the natural order:
+Only two paths leave a body *before* that trailing call: an early `return`
+and `lfg_ct_skip(...)` (which `longjmp`s out). Put `teardown()` immediately
+before either one — "teardown before skip" is load-bearing, since the skip
+unwinds straight past a trailing in-body `teardown()`. [Chapter
+3](03-skip-xfail-xpass.md) shows the skip path, and [chapter
+6](06-teardown-and-cleanup.md) covers setup that can itself fail plus the
+`mock_reset_all()` teardown you will reach for once you start mocking.
 
-```
-suite-setup -> test-setup -> test -> test-teardown -> suite-teardown
-```
-
-Apply each hook at the level that matches the resource's scope: per-test when
-each case needs a clean slate, per-suite when one acquisition is shared across
-the whole batch. Teardown is where `mock_reset_all()` belongs once you start
-mocking — see [chapter 6](06-teardown-and-cleanup.md).
+A suite is just a body that calls `lfg_ct_test`, so per-suite setup/teardown
+is the same idea one level up: the suite body brackets its `lfg_ct_test`
+calls with the shared acquire/release. Apply each at the level that matches
+the resource's scope — per-test when each case needs a clean slate, per-suite
+when one acquisition is shared across the whole batch.
 
 ## The assertions you will actually use
 

@@ -5,8 +5,8 @@ fixture, a platform-specific path); some are *known* broken for a tracked
 reason but you still want to exercise the code path. lfg-ctest gives each of
 these its own bucket so they don't distort the pass/fail tally.
 
-Two macros, both callable from inside a test body (and from the test's
-`setup`):
+Two macros, both callable from inside a test body (and from any setup helper
+the body calls):
 
 ```c
 lfg_ct_skip("waiting on driver fix");
@@ -33,9 +33,11 @@ static void test_uses_ipv6(void)
 }
 ```
 
-Calling `lfg_ct_skip` from the test's `setup` is also legal and natural — it
-reads as "preconditions not met". The body is not invoked, but teardown still
-runs, so anything setup acquired before the skip is still released.
+Calling `lfg_ct_skip` from a setup helper the body invokes is equally legal
+and natural — it reads as "preconditions not met". It `longjmp`s straight out
+of the body, so run any teardown you need *before* the skip (the "teardown
+before skip" rule); nothing after the skip call executes. See
+[chapter 6](06-teardown-and-cleanup.md) for the setup-that-can-fail pattern.
 
 There is no first-class *suite*-level skip. To skip a whole group on a runtime
 condition, gate the `lfg_ct_test(...)` calls inside the suite body with an
@@ -48,8 +50,8 @@ static void hardware_suite(void)
     {
         return;   /* register nothing; the suite is effectively skipped */
     }
-    lfg_ct_test(NULL, test_device_reset, NULL);
-    lfg_ct_test(NULL, test_device_read, NULL);
+    lfg_ct_test(test_device_reset);
+    lfg_ct_test(test_device_read);
 }
 ```
 
@@ -84,10 +86,10 @@ If you call `lfg_ct_xfail` more than once in a body, the last reason wins.
 
 ## Scope: per-test only
 
-Both macros are per-test. Called from anywhere else — `main`, a suite-level
-setup/body/teardown, a per-test teardown, or between tests — they are no-ops
-that print a warning to stderr. Keep them inside the test body (or, for
-`lfg_ct_skip`, the test's setup).
+Both macros are per-test. Called from anywhere else — `main`, a suite body, or
+between tests — they are no-ops that print a warning to stderr. Keep them
+inside a test body, or inside a setup/teardown helper that body calls (which
+runs within the same per-test context).
 
 ## What the report looks like
 
