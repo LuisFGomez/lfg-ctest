@@ -23,6 +23,10 @@
 # Default is a dry run: it prints what it would rewrite and what still needs a
 # human, and changes nothing. Pass --apply to rewrite matched files in place.
 #
+# Limitation: the matching is line-oriented. A single 3-arg registration split
+# across multiple physical lines is neither stripped nor reported — reflow such
+# call sites onto one line (clang-format does this) before running the codemod.
+#
 # Exit status: 0 on success, 2 on usage error.
 
 set -euo pipefail
@@ -69,7 +73,9 @@ process_file()
     local file="$1" apply="$2"
     local mech residue transformed
 
-    mech="$(grep -cE "$MECH_MATCH" "$file" || true)"
+    # Count occurrences, not matching lines: the /g subst rewrites every site
+    # on a line, so a line with two registrations must count as two.
+    mech="$(grep -oE "$MECH_MATCH" "$file" | grep -c '' || true)"
 
     # Residual fixtured sites are computed against the POST-transform text, so
     # the "needs human" list never counts a NULL/NULL site the strip removes.

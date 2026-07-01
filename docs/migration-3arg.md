@@ -56,6 +56,12 @@ The script is preferred over the bare `sed` because it also enumerates the
 Shape-2 residue you still have to hand-edit — the `sed` silently leaves those
 alone with no report.
 
+> **Single-line assumption.** The codemod, the `sed`, and the verification grep
+> below are all line-oriented. A single 3-arg registration split across multiple
+> physical lines is neither stripped, reported as NEEDS HUMAN, nor caught by the
+> verification grep — it silently passes as if migrated. Reflow such call sites
+> onto one line (`clang-format` does this) before running the tooling.
+
 ### Shape 2 — fixtured (per-call-site human edit)
 
 ```c
