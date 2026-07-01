@@ -1678,8 +1678,8 @@ int main(int argc, char *argv[])
     printf("(Verifies the framework correctly detects assertion failures)\n");
     lfg_ct_suite(suite_failure_detection_tests);
 
-    printf("\n--- SUITE 3: SETUP/TEARDOWN HOOK LIFECYCLE TESTS ---\n");
-    printf("(Verifies setup -> body -> teardown sequencing and NULL handling)\n");
+    printf("\n--- SUITE 3: BODY-OWNED SETUP/TEARDOWN CONVENTION TESTS ---\n");
+    printf("(Verifies the body-owned setup -> body -> teardown convention)\n");
     lfg_ct_suite(suite_hook_lifecycle_tests);
 
     printf("\n--- SUITE 4: --list / --filter / --filter-exclude ARG PARSING ---\n");
