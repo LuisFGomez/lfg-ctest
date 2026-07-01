@@ -530,6 +530,28 @@ so a missed teardown on the crash path is harmless (the state died with the
 child); under in-process mode a crash takes down the runner regardless.
 Teardown is ordinary cleanup on the normal path, not a crash mechanism.
 
+#### Deprecated: 3-argument registration (`LFG_CT_COMPAT_3ARG`)
+
+The pre-body-only API bound setup/teardown at registration time —
+`lfg_ct_test(setup, test, teardown)` and `lfg_ct_suite(setup, suite, teardown)`.
+That signature is **removed** by default. For a **single-release migration
+window**, defining `LFG_CT_COMPAT_3ARG` on the whole build restores the old
+3-argument macros: they forward to the retained internal lifecycle helper
+(`setup → body → teardown`, teardown always runs, a setup assertion failure or
+`lfg_ct_skip` skips the body but still runs teardown), and every include emits
+a deprecation `#warning`.
+
+```c
+/* -DLFG_CT_COMPAT_3ARG on the library build AND every consumer TU, so the
+ * shared lfg_ct_test_impl / lfg_ct_suite_impl ABI signatures match. */
+lfg_ct_test(my_setup, test_thing, my_teardown);   /* NULL for a skipped hook */
+```
+
+This shim exists only to avoid a flag-day migration; it is **slated for removal
+after one release**. Migrate call sites to body-owned setup/teardown (above)
+and drop the define. It is opt-in, so the default build stays body-only with no
+`#warning`.
+
 ### Assertion Reference
 
 **49 assertions** covering all common C testing scenarios.

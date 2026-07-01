@@ -412,6 +412,10 @@ main(int argc, char **argv)
             " *   LFG_CTEST_HAS_DOUBLE   -- enable 64-bit double asserts (needs libm).\n"
             " *   LFG_CTEST_NO_FUNC      -- disable __func__ reporting.\n"
             " *   LFG_CTEST_SELF_TEST    -- enable expect-failures self-test mode.\n"
+            " *   LFG_CT_COMPAT_3ARG     -- deprecated one-release shim: restore the\n"
+            " *                             3-argument lfg_ct_test/lfg_ct_suite(setup,\n"
+            " *                             test, teardown) registration; emits a\n"
+            " *                             deprecation #warning. Removed next release.\n"
             " */\n\n"
             "#ifndef LFG_CTEST_SINGLE_H_\n"
             "#define LFG_CTEST_SINGLE_H_\n\n");
