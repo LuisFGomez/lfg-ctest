@@ -576,6 +576,38 @@ void lfg_ct_set_reporter(const lfg_ct_reporter_t *reporter);
  */
 int lfg_ct_return(void);
 
+/** Running tally of failed assertions, promoted to the public ABI so a
+ *  test body can detect its own failures without per-assert branching.
+ *
+ *  Every @c ASSERT_* is non-fatal (record-and-continue) and there is no
+ *  @c REQUIRE-style fatal variant, so this accessor is the supported way
+ *  to fail-fast out of a region of assertions: snapshot it at the top of
+ *  the region and compare.
+ *
+ *  @code
+ *  void test_foo(void)
+ *  {
+ *      size_t baseline = lfg_ct_failure_count();
+ *      for (size_t i = 0; i < 1000; ++i)
+ *      {
+ *          run_bar_tests();                                // many non-fatal asserts
+ *          if (lfg_ct_failure_count() > baseline) break;   // fail-fast
+ *      }
+ *  }
+ *  @endcode
+ *
+ *  @par Boundary semantics
+ *  The value is the @e global running count, not a per-test slice. It is
+ *  strictly monotonic only @e within a single test or setup body: at
+ *  classification the runner absorbs a completed test's assertion failures
+ *  back out of the tally for @c SKIP / @c XFAIL / @c XPASS outcomes, so the
+ *  count can move down at a test boundary. Always snapshot-and-compare
+ *  inside one body; never rely on cross-test monotonicity.
+ *
+ *  @return Number of failed assertions recorded so far.
+ */
+size_t lfg_ct_failure_count(void);
+
 int lfg_ct_assert_false_impl(
         bool condition, char *filename, int line_no, const char *function, const char *condition_str);
 

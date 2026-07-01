@@ -1039,6 +1039,22 @@ int lfg_ct_return(void)
     return 0;
 }
 
+size_t lfg_ct_failure_count(void)
+{
+    /* Global running tally, not a per-test slice. Within a single test or
+     * setup body it is strictly monotonic -- every failed assertion bumps
+     * it -- which is exactly what the snapshot-and-compare uses (loop
+     * fail-fast, setup-failure detection) rely on. At a test boundary the
+     * classifier absorbs a completed test's failures back out for
+     * SKIP / XFAIL / XPASS, so the count is only guaranteed monotonic
+     * inside one body; consumers snapshot at the top of a region and
+     * compare, never assume cross-test monotonicity. Reads the same
+     * counter the runner keeps internally (and that the LFG_CTEST_SELF_TEST
+     * accessor exposes) -- the value is never negative in any observable
+     * state, so the cast to size_t is total. */
+    return (size_t)_assertions_failed;
+}
+
 void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function)
 {
     if (!_skip_env_active)
