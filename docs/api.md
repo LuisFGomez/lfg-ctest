@@ -29,7 +29,7 @@ void test_example(void)
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_test(NULL, test_example, NULL);
+    lfg_ct_test(test_example);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -42,16 +42,16 @@ Suites are also `void` functions that group related tests:
 ```c
 void math_suite(void)
 {
-    lfg_ct_test(NULL, test_addition, NULL);
-    lfg_ct_test(NULL, test_subtraction, NULL);
-    lfg_ct_test(NULL, test_multiplication, NULL);
+    lfg_ct_test(test_addition);
+    lfg_ct_test(test_subtraction);
+    lfg_ct_test(test_multiplication);
 }
 
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_suite(NULL, math_suite, NULL);
-    lfg_ct_suite(NULL, string_suite, NULL);
+    lfg_ct_suite(math_suite);
+    lfg_ct_suite(string_suite);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
@@ -66,9 +66,9 @@ int main(void)
 | `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering) and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). |
-| `lfg_ct_test(setup, fn, teardown)` | Execute a single test (`void fn(void)`) with optional `setup` / `teardown` hooks (pass `NULL` to skip). Teardown runs even if the body or setup fails. |
-| `lfg_ct_suite(setup, fn, teardown)` | Execute a test suite (`void fn(void)`) with optional `setup` / `teardown` hooks; same lifecycle as `lfg_ct_test`. |
-| `lfg_ct_skip(reason)` | Mark current test as SKIP and return from the body immediately. Legal in setup (body skipped, teardown still runs). See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_test(fn)` | Execute a single test (`void fn(void)`). Body-only: any setup/teardown are plain functions the body calls itself. See [Setup and teardown](#setup-and-teardown). |
+| `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`). Body-only, same as `lfg_ct_test`; the suite body brackets its `lfg_ct_test` calls with any shared setup/teardown. |
+| `lfg_ct_skip(reason)` | Mark current test as SKIP and return from the body immediately (`longjmp`s out). Legal from a setup helper the body calls; run any teardown *before* the skip. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_xfail(reason)` | Mark current test as expected-to-fail; body runs to completion. Subsequent assertion failure -> XFAIL, no failure -> XPASS. Last reason wins on repeated calls. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_print_summary()` | Print pass/fail/skip/xfail/xpass summary |
 | `lfg_ct_return()` | Get overall return code (0=clean, non-zero=fail or xpass-with-`--strict-xpass`) |
@@ -215,8 +215,8 @@ the duration of the child.
 Tests that are known-failing for a tracked reason (a deferred fix, an
 environment-specific path, a flake under investigation) can declare
 their expected disposition inline. Two macros, callable from inside a
-test body (and from the test's `setup`, where `lfg_ct_skip` is the
-natural way to express "preconditions not met"):
+test body (and from any setup helper the body calls, where `lfg_ct_skip`
+is the natural way to express "preconditions not met"):
 
 ```c
 lfg_ct_skip("waiting on driver fix");
@@ -225,15 +225,16 @@ lfg_ct_xfail("known flaky under valgrind");
 
 | Macro | Effect |
 |-------|--------|
-| `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately. From the test's `setup`, the body is not invoked but `teardown` still runs. SKIP does not count toward pass or fail. |
+| `lfg_ct_skip(reason)` | Mark the test as **SKIP**, record `reason`, and return from the body immediately (`longjmp`s out). Called from a setup helper, it unwinds the rest of the body too — run any teardown before it. SKIP does not count toward pass or fail. |
 | `lfg_ct_xfail(reason)` | Mark the test as expected-to-fail and continue executing. After the body completes: if any assertion failed, the test is **XFAIL** (separate bucket); if none failed, the test is **XPASS** (separate bucket). Repeated calls keep the latest reason. |
 
 **Scope:** per-test only. Both macros are no-ops with a stderr warning
-when called from anywhere else — `main`, a suite-level `setup` / body /
-`teardown`, a per-test `teardown`, or between tests. Suite-level skip
-is not (yet) a first-class feature; if you need to skip a whole suite
-based on a runtime precondition, gate the `lfg_ct_test(...)` calls
-inside the suite body on a regular `if` instead.
+when called from anywhere else — `main`, a suite body, or between tests.
+They are legal inside a test body and inside any setup/teardown helper
+that body calls (which runs within the same per-test context).
+Suite-level skip is not (yet) a first-class feature; if you need to skip
+a whole suite based on a runtime precondition, gate the `lfg_ct_test(...)`
+calls inside the suite body on a regular `if` instead.
 
 Per-test reporting:
 
@@ -286,14 +287,16 @@ subsequent `lfg_ct_test` invocation:
 
 Fork mode mechanics:
 
-- For each `lfg_ct_test(...)`, the parent `fork`s. The child runs
-  setup → body → teardown via the in-process path and ships an
-  outcome payload back over a pipe. The parent decodes, projects the
-  outcome onto its own counters / reporter, and continues with the
-  next test.
+- For each `lfg_ct_test(...)`, the parent `fork`s. The child runs the
+  test body via the in-process path and ships an outcome payload back
+  over a pipe. The parent decodes, projects the outcome onto its own
+  counters / reporter, and continues with the next test.
 - A child that dies on a signal (SIGSEGV, SIGABRT, SIGBUS, ...) is
   reaped by the parent and recorded as `FAILED` with a "killed by
-  signal N" message; the runner advances to the next test.
+  signal N" message; the runner advances to the next test. The crashed
+  child is discarded whole — its entire address space dies with it, so
+  crash-safety comes from fork isolation, not from teardown, and no
+  in-body `teardown()` runs on that path (nor needs to).
 - A child that exits non-zero **without** writing the payload (e.g.
   the body calls `_exit(N)`) is recorded as `FAILED` with a "child
   exited N with no payload" message — no silent pass.
@@ -449,17 +452,33 @@ prompts before creating it, and opens `$EDITOR` for the annotation message.
 
 ### Setup and Teardown
 
-Both `lfg_ct_test` and `lfg_ct_suite` take a `setup` and a `teardown`
-callback alongside the body. Lifecycle, with `body` being the suite or test
-function:
+The framework binds **no** lifecycle hooks. `lfg_ct_test` / `lfg_ct_suite`
+take the body only; setup and teardown are plain static functions the body
+calls itself. The calls are visible in the body — no registration-time
+indirection — and, being ordinary function calls, they can take whatever
+parameters and return whatever value you like.
 
-1. `setup()` runs first, if non-`NULL`.
-2. `body()` runs next — **skipped** if `setup()` triggered an assertion failure.
-3. `teardown()` runs last, if non-`NULL`. **Always** runs, even if the body
-   or its assertions failed, and even if `setup()` failed.
+The blessed convention:
 
-Callbacks take no arguments and return `void`. Pass `NULL` for any phase
-you don't need:
+- **Fixtureless test:** `lfg_ct_test(test);` — nothing else.
+- **Test with cleanup:** call `setup()` at the top of the body and
+  `teardown()` at the bottom. Assertions are non-fatal (record-and-continue;
+  there is no fatal `REQUIRE`), so a trailing `teardown()` is still reached
+  after a failed assertion in the body.
+- **Early exit:** the only two paths that leave a body *before* the trailing
+  call are an early `return` and `lfg_ct_skip(...)`. Call `teardown()`
+  immediately before either. "Teardown before skip" is load-bearing — the
+  skip `longjmp`s out of the body and unwinds past a trailing in-body
+  `teardown()`.
+- **Setup that can fail:** snapshot `lfg_ct_failure_count()` before `setup()`
+  and compare after (catches a soft-fail anywhere in setup, including inside a
+  helper); or, if `setup()` returns the assertion result, branch on it (every
+  `ASSERT_*` returns `0` on pass, non-zero on failure). Either way run
+  `teardown()` then `lfg_ct_skip(reason)` (or `teardown()` then `return` to
+  count it failed). See [Failure count](#failure-count).
+- **Mock-only cleanup:** `mock_reset_all()` is idempotent, so calling it at
+  the top of each test is equivalent to a teardown and sidesteps the
+  early-exit question entirely.
 
 ```c
 static void setup(void)    { mock_reset_all(); global_state = initial_value; }
@@ -467,29 +486,43 @@ static void teardown(void) { mock_reset_all(); free(allocated_memory); }
 
 void test_something(void)
 {
-    ASSERT_EQ(expected, some_function());
+    setup();
+    ASSERT_EQ(expected, some_function());   /* soft-fails still reach teardown */
+    teardown();
 }
 
 int main(void)
 {
     lfg_ct_start();
-    lfg_ct_test(setup, test_something, teardown);
+    lfg_ct_test(test_something);
     lfg_ct_print_summary();
     return lfg_ct_return();
 }
 ```
 
-When `lfg_ct_suite` wraps `lfg_ct_test` calls, hooks fire in standard
-nesting order:
+A suite is just a body that calls `lfg_ct_test`, so per-suite setup/teardown
+is the same idea one level up — the suite body brackets its `lfg_ct_test`
+calls with the shared acquire/release:
 
-```
-suite-setup -> test-setup -> test -> test-teardown -> suite-teardown
+```c
+void math_suite(void)
+{
+    suite_setup();
+    lfg_ct_test(test_addition);
+    lfg_ct_test(test_subtraction);
+    suite_teardown();
+}
 ```
 
 Apply setup/teardown at whichever level fits the resource's scope: per-test
 when each case needs isolation, per-suite when one acquisition is shared
-across the whole batch, or skip the argument entirely (`NULL`) when no
-fixture is required.
+across the whole batch, or nothing at all when no fixture is required.
+
+**Crash-safety is not a teardown property.** Under
+[`LFG_CT_ISOLATE_FORK`](#isolation-modes) a crashed child is discarded whole,
+so a missed teardown on the crash path is harmless (the state died with the
+child); under in-process mode a crash takes down the runner regardless.
+Teardown is ordinary cleanup on the normal path, not a crash mechanism.
 
 ### Assertion Reference
 
@@ -721,7 +754,7 @@ Each mock generates these symbols (using `get_value` as example):
 | Symbol | Type | Description |
 |--------|------|-------------|
 | `get_value__mock(...)` | function | The mock function to call |
-| `get_value__mock_reset()` | function | Reset this mock's state. Auto-registered with the framework's reset registry on first call; prefer `mock_reset_all()` in teardown. |
+| `get_value__mock_reset()` | function | Reset this mock's state. Auto-registered with the framework's reset registry on first call; prefer `mock_reset_all()` for cleanup. |
 | `get_value__call_count` | `size_t` | Number of times mock was called |
 | `get_value__param_history[]` | array | Captured parameters from each call |
 | `get_value__return_queue[]` | array | Return values (for R_* mocks) |
@@ -735,8 +768,11 @@ Each mock generates these symbols (using `get_value` as example):
 > Tutorial: [Teardown and cleanup](tutorial/06-teardown-and-cleanup.md) covers
 > `mock_reset_all()` and the `mock_register_cleanup` hook in context.
 
-`mock_reset_all()` (declared in `<lfg-ctest-mock.h>`) is the canonical teardown
-call. Every `DEFINE_MOCK_*` invocation auto-registers its `__mock_reset` thunk
+`mock_reset_all()` (declared in `<lfg-ctest-mock.h>`) is the canonical
+mock-cleanup call — the teardown for mock state. Being idempotent, it works
+equally at the top of each test or as the last call in a body-owned
+`teardown()` (see [Setup and teardown](#setup-and-teardown)). Every
+`DEFINE_MOCK_*` invocation auto-registers its `__mock_reset` thunk
 with the framework's reset registry the first time the mock is called, so a
 single `mock_reset_all()` sweeps every mock the test TU defined — no per-mock
 bookkeeping. Mocks that own non-trivial heap state can opt their custom walker
@@ -744,13 +780,14 @@ into the same sweep via `mock_register_cleanup(void (*)(void))`; one call then
 runs both the auto-generated thunks and the consumer hooks (see
 [Consumer Cleanup Hooks](#consumer-cleanup-hooks)).
 
-Always reach for `mock_reset_all()` in teardown. Forgetting to add a matching
-per-mock reset after introducing a new `DEFINE_MOCK_*` silently leaks state
-across tests; `mock_reset_all()` removes the entire class of bug.
+Always reach for `mock_reset_all()` when clearing mock state between tests.
+Forgetting to add a matching per-mock reset after introducing a new
+`DEFINE_MOCK_*` silently leaks state across tests; `mock_reset_all()` removes
+the entire class of bug.
 
 Per-mock `foo__mock_reset()` remains a lower-level escape hatch for the rare
 case where a single mock must be reset mid-test without disturbing others — not
-the recommended teardown pattern.
+the recommended cleanup pattern.
 
 ### Storage Limits
 
