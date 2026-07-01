@@ -1115,6 +1115,24 @@ static void _disp_body_skip_runs_teardown_first(void)
     _disp_setup_teardown_trace |= 0x4; /* must NOT fire -- skip unwinds */
 }
 
+/* Same skip path as _disp_body_skip_runs_teardown_first, but expressed with
+ * the lfg_ct_skip_cleanup sugar: one call runs teardown then skips. The
+ * cleanup must fire before the longjmp unwinds, and the post-skip store must
+ * not execute -- proving the sugar is equivalent to the two-line convention. */
+static void _disp_body_skip_cleanup_runs_first(void)
+{
+    _disp_setup_teardown_trace |= 0x1;                              /* setup work, done in the body */
+    lfg_ct_skip_cleanup(_disp_teardown_marker, "preconditions not met"); /* teardown (0x8) then skip */
+    _disp_setup_teardown_trace |= 0x4;                             /* must NOT fire -- skip unwinds */
+}
+
+/* NULL cleanup must degrade to a plain lfg_ct_skip: no crash, still skips. */
+static void _disp_body_skip_cleanup_null(void)
+{
+    lfg_ct_skip_cleanup(NULL, "body asked to skip");
+    _disp_post_skip_marker = 1; /* must NOT execute -- skip unwinds */
+}
+
 static void _disp_body_xfail_with_failure(void)
 {
     lfg_ct_xfail("known broken");
@@ -1193,6 +1211,36 @@ static void test_disposition_skip_runs_body_owned_teardown_first(void)
     /* setup work ran (0x1), teardown ran before the skip (0x8), and the
      * post-skip store never fired (no 0x4) -- the skip unwound the body. */
     ASSERT_INT_EQUAL(0x1 | 0x8, _disp_setup_teardown_trace);
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+}
+
+static void test_disposition_skip_cleanup_runs_before_unwind(void)
+{
+    int before_skipped = lfg_ct_self_skipped_count();
+    int before_failed = lfg_ct_self_failed_count();
+
+    _disp_setup_teardown_trace = 0;
+    lfg_ct_test_impl(_disp_body_skip_cleanup_runs_first, "mock_skip_cleanup");
+
+    /* setup work ran (0x1), the cleanup callback ran before the skip (0x8),
+     * and the post-skip store never fired (no 0x4) -- the sugar unwound the
+     * body just like the two-line teardown-before-skip form. */
+    ASSERT_INT_EQUAL(0x1 | 0x8, _disp_setup_teardown_trace);
+    ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+}
+
+static void test_disposition_skip_cleanup_null_degrades_to_plain_skip(void)
+{
+    int before_skipped = lfg_ct_self_skipped_count();
+    int before_failed = lfg_ct_self_failed_count();
+
+    _disp_post_skip_marker = 0;
+    lfg_ct_test_impl(_disp_body_skip_cleanup_null, "mock_skip_cleanup_null");
+
+    /* A NULL cleanup is a no-op; the call still skips and unwinds the body. */
+    ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
     ASSERT_INT_EQUAL(before_skipped + 1, lfg_ct_self_skipped_count());
     ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
 }
@@ -1316,6 +1364,8 @@ static void suite_disposition_tests(void)
 {
     lfg_ct_test(test_disposition_skip_from_body_increments_skipped_bucket);
     lfg_ct_test(test_disposition_skip_runs_body_owned_teardown_first);
+    lfg_ct_test(test_disposition_skip_cleanup_runs_before_unwind);
+    lfg_ct_test(test_disposition_skip_cleanup_null_degrades_to_plain_skip);
     lfg_ct_test(test_disposition_xfail_with_assertion_failure_buckets_as_xfail);
     lfg_ct_test(test_disposition_xfail_without_failure_buckets_as_xpass);
     lfg_ct_test(test_disposition_xfail_repeated_calls_keep_last_reason);

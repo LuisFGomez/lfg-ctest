@@ -319,6 +319,27 @@
  */
 #define lfg_ct_skip(_reason) lfg_ct_skip_impl((_reason), __FILE__, __LINE__, LFG_CT_FUNCTION)
 
+/** Skip the current test after first invoking @p _cleanup. Ergonomic sugar
+ *  over the blessed convention's teardown-before-skip step: instead of the
+ *  two lines
+ *  @code
+ *      teardown();
+ *      lfg_ct_skip("reason");
+ *  @endcode
+ *  write the single call @c lfg_ct_skip_cleanup(teardown, "reason"). The
+ *  @p _cleanup function pointer (a plain @c void(void), the shape a
+ *  body-owned teardown already has) runs before the skip unwinds the body,
+ *  so any resources acquired on the skip path are released. Semantically
+ *  identical to the two-line form; it only closes the skip hole and does
+ *  not touch the setup-failure case or a plain C @c return.
+ *
+ *  @p _cleanup may be @c NULL, in which case this behaves exactly like
+ *  @ref lfg_ct_skip. Same per-test scope as @ref lfg_ct_skip: outside an
+ *  active test context it is a no-op with a warning to stderr and
+ *  @p _cleanup is @b not invoked.
+ */
+#define lfg_ct_skip_cleanup(_cleanup, _reason) lfg_ct_skip_cleanup_impl((_cleanup), (_reason), __FILE__, __LINE__, LFG_CT_FUNCTION)
+
 /** Mark the current test as expected-to-fail and record @p _reason.
  *  Unlike @ref lfg_ct_skip, this does @b not return from the body --
  *  the body runs to completion and the disposition is decided after
@@ -457,6 +478,15 @@ void lfg_ct_test_impl(void (*fn)(void), const char *name);
  *  is a no-op with a warning to stderr.
  */
 void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function);
+
+/** Implementation backing the @ref lfg_ct_skip_cleanup macro. Use the
+ *  macro -- it captures @c __FILE__ / @c __LINE__ / function name
+ *  automatically. Invokes @p cleanup (unless @c NULL) before triggering a
+ *  @c longjmp out of the current test or setup phase; the function does not
+ *  return to its caller. Outside a test context this is a no-op with a
+ *  warning to stderr and @p cleanup is not invoked.
+ */
+void lfg_ct_skip_cleanup_impl(void (*cleanup)(void), const char *reason, const char *file, int line, const char *function);
 
 /** Implementation backing the @ref lfg_ct_xfail macro. Use the macro --
  *  it captures @c __FILE__ / @c __LINE__ / function name automatically.

@@ -1171,7 +1171,7 @@ size_t lfg_ct_failure_count(void)
     return (size_t)_assertions_failed;
 }
 
-void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function)
+void lfg_ct_skip_cleanup_impl(void (*cleanup)(void), const char *reason, const char *file, int line, const char *function)
 {
     if (!_skip_env_active)
     {
@@ -1179,9 +1179,20 @@ void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char
                 file ? file : "(unknown)", line, function ? function : "(unknown)", reason ? reason : "");
         return;
     }
+    /* Run cleanup before the longjmp unwinds the body -- identical to the
+     * two-line teardown-before-skip convention this call sugars over. */
+    if (cleanup)
+    {
+        cleanup();
+    }
     _current_disposition = LFG_CT_DISP_SKIPPED;
     _current_skip_reason = reason;
     longjmp(_skip_env, 1);
+}
+
+void lfg_ct_skip_impl(const char *reason, const char *file, int line, const char *function)
+{
+    lfg_ct_skip_cleanup_impl(NULL, reason, file, line, function);
 }
 
 void lfg_ct_xfail_impl(const char *reason, const char *file, int line, const char *function)
