@@ -1175,7 +1175,7 @@ void lfg_ct_skip_cleanup_impl(void (*cleanup)(void), const char *reason, const c
 {
     if (!_skip_env_active)
     {
-        fprintf(stderr, "*** %s: %d: WARNING in %s(): lfg_ct_skip(\"%s\") called outside a test context; ignoring\r\n",
+        fprintf(stderr, "*** %s: %d: WARNING in %s(): skip(\"%s\") called outside a test context; ignoring\r\n",
                 file ? file : "(unknown)", line, function ? function : "(unknown)", reason ? reason : "");
         return;
     }
