@@ -260,27 +260,29 @@
 #define ASSERT_NULL(_a) ASSERT_PTR_NULL(_a)
 #define ASSERT_NOT_NULL(_a) ASSERT_PTR_NOT_NULL(_a)
 
-/** Execute a suite of tests with optional setup/teardown hooks.
- *  Pass NULL for @p _setup or @p _teardown to skip that phase.
- *  Teardown runs even if the body or its assertions fail; if @p _setup
- *  itself triggers an assertion failure the body is skipped but teardown
- *  still runs. All three callbacks are @c void(void).
+/** Execute a suite of tests. Registration is body-only: the suite
+ *  function is the single argument. Setup and teardown are plain static
+ *  functions the suite body calls itself -- the framework binds no
+ *  lifecycle hooks at registration time.
  */
-#define lfg_ct_suite(_setup, _suite, _teardown) lfg_ct_suite_impl((_setup), (_suite), (_teardown), #_suite)
+#define lfg_ct_suite(_suite) lfg_ct_suite_impl((_suite), #_suite)
 
-/** Execute a single unit test with optional setup/teardown hooks.
- *  Same lifecycle semantics as @ref lfg_ct_suite.
+/** Execute a single unit test. Registration is body-only: the test
+ *  function is the single argument. Setup and teardown are plain static
+ *  functions the test body calls itself; a failure-path teardown after a
+ *  soft assert, early @c return, or @ref lfg_ct_skip is expressed in the
+ *  body (assertions are non-fatal and return their result).
  */
-#define lfg_ct_test(_setup, _test, _teardown) lfg_ct_test_impl((_setup), (_test), (_teardown), #_test)
+#define lfg_ct_test(_test) lfg_ct_test_impl((_test), #_test)
 
 /** Mark the current test as skipped, record @p _reason, and return from
  *  the test body immediately. Buckets the test as SKIP (separate from
- *  pass/fail). Legal in a per-test setup; the body is then not invoked
- *  but @c teardown still runs (same guarantee as a setup-failure path).
+ *  pass/fail). Because the body owns its own teardown, code that must run
+ *  on the skip path belongs before the @ref lfg_ct_skip call.
  *
- *  @b Scope: per-test only. Calling from a suite-level setup/body, from
- *  teardown, or from any other point outside an active test context is
- *  a no-op with a warning to stderr -- suite-level skip is intentionally
+ *  @b Scope: per-test only. Calling from a suite body or from any other
+ *  point outside an active test context is a no-op with a warning to
+ *  stderr -- suite-level skip is intentionally
  *  not supported and would need its own design pass before being
  *  exposed as a first-class feature.
  */
@@ -389,17 +391,15 @@ int lfg_ct_is_verbose(void);
  */
 int lfg_ct_name_runs(const char *name);
 
-/** Execute a suite of tests with optional setup/teardown hooks.
- *  See @ref lfg_ct_suite for lifecycle semantics. Pass @c NULL for any
- *  hook that should be skipped.
+/** Execute a suite of tests. See @ref lfg_ct_suite; the suite body owns
+ *  any setup/teardown it needs.
  */
-void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+void lfg_ct_suite_impl(void (*fn)(void), const char *name);
 
-/** Execute a single unit test with optional setup/teardown hooks.
- *  See @ref lfg_ct_test for lifecycle semantics. Pass @c NULL for any
- *  hook that should be skipped.
+/** Execute a single unit test. See @ref lfg_ct_test; the test body owns
+ *  any setup/teardown it needs.
  */
-void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+void lfg_ct_test_impl(void (*fn)(void), const char *name);
 
 /** Implementation backing the @ref lfg_ct_skip macro. Use the macro --
  *  it captures @c __FILE__ / @c __LINE__ / function name automatically.

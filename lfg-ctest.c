@@ -62,12 +62,12 @@ static const char *_current_xfail_reason = NULL;
 static const char *_last_classified_xfail_reason = NULL;
 
 /* Boundary for lfg_ct_skip's "return from body immediately" semantics.
- * Set up around setup() and body() invocations in the lifecycle helper;
- * lfg_ct_skip longjmps out when active and no-ops otherwise. The
- * lifecycle helper save/restores this buffer + active flag so a nested
- * lfg_ct_test_impl (the pattern the framework's own self-tests use to
- * drive mock tests through the real runner) cannot strand the outer
- * test's body without a working boundary. */
+ * Set up around the body invocation in _lfg_ct_test_impl_inproc;
+ * lfg_ct_skip longjmps out when active and no-ops otherwise. That entry
+ * save/restores this buffer + active flag so a nested lfg_ct_test_impl
+ * (the pattern the framework's own self-tests use to drive mock tests
+ * through the real runner) cannot strand the outer test's body without a
+ * working boundary. */
 static jmp_buf _skip_env;
 static int _skip_env_active = 0;
 
@@ -136,12 +136,11 @@ static unsigned _fork_timeout_ms = 0;
  * the compile-time opt-out / unsupported-platform path provides a
  * stub returning 0 / -1 with no fork-related code linked in. */
 extern int _lfg_ct_fork_available(void);
-extern int _lfg_ct_fork_run_test(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
-        unsigned timeout_ms);
+extern int _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms);
 
 /* Forward declaration for the in-process dispatch helper -- definition
  * lives below; the isolation shim in lfg_ct_test_impl calls into it. */
-void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
+void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name);
 
 /* lfg_ct_parse_args() runtime state. The glob arrays hold borrowed pointers
  * into the caller's argv (which has program lifetime under standard main()
@@ -465,54 +464,7 @@ lfg_ct_name_runs(const char *name)
     return _filter_admits(name);
 }
 
-/* Setup-failure detector: any assertion failure flips
- * _assertions_failed (normal mode) or _expected_failures_count
- * (expect-failures self-test mode). Summing both lets the lifecycle
- * helper notice setup failures regardless of which mode is active.
- */
-static int
-_lifecycle_failure_total(void)
-{
-#ifdef LFG_CTEST_SELF_TEST
-    return _assertions_failed + _expected_failures_count;
-#else
-    return _assertions_failed;
-#endif
-}
-
-/* Shared setup -> body -> teardown lifecycle. Teardown runs whenever
- * provided, even if the body or its assertions failed. If setup itself
- * fails an assertion the body is skipped but teardown still runs --
- * setup may have partially acquired resources before failing. The
- * skip-aware setjmp boundary lives in lfg_ct_test_impl (skip is a
- * per-test gesture; suite-context skips are intentionally a no-op
- * warning -- see lfg_ct_suite_impl).
- */
-static void
-_lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(void))
-{
-    int setup_failures_before = 0;
-    int setup_failed = 0;
-
-    if (setup)
-    {
-        setup_failures_before = _lifecycle_failure_total();
-        setup();
-        setup_failed = (_lifecycle_failure_total() > setup_failures_before);
-    }
-
-    if (!setup_failed && body)
-    {
-        body();
-    }
-
-    if (teardown)
-    {
-        teardown();
-    }
-}
-
-void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+void lfg_ct_suite_impl(void (*fn)(void), const char *name)
 {
     int suite_assertions_failed_before;
     int inherited_pushed = 0;
@@ -521,8 +473,8 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
 
     if (_list_mode)
     {
-        /* Print the suite name and recurse into the body without setup/
-         * teardown so contained lfg_ct_test() calls can list themselves. */
+        /* Print the suite name and recurse into the body so contained
+         * lfg_ct_test() calls can list themselves. */
         printf("%s\r\n", name);
         if (fn)
         {
@@ -546,21 +498,20 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
         inherited_pushed = 1;
     }
 
-    /* Suite-level setup/teardown failures aren't owned by any test, so
-     * track real assertion failures across the whole suite scope to
-     * decide whether to print "suite FAILURE". Use _assertions_failed
-     * (not _lifecycle_failure_total) so the print stays quiet when
-     * self-tests intentionally drive suite-level failures inside
-     * expect-failures mode. */
+    /* A suite body may drive assertions directly (not just via contained
+     * tests), so track real assertion failures across the whole suite
+     * scope to decide whether to print "suite FAILURE". Use
+     * _assertions_failed so the print stays quiet when self-tests
+     * intentionally drive suite-level failures inside expect-failures
+     * mode. */
     suite_assertions_failed_before = _assertions_failed;
 
     /* lfg_ct_skip is a per-test gesture; suite-context skips are
      * intentionally unsupported. Force the skip boundary off across the
-     * suite's setup/body/teardown so a stray lfg_ct_skip from a
-     * suite-level callback warns to stderr and no-ops rather than
-     * longjmping to a stale outer boundary or silently skipping the
-     * suite body. lfg_ct_test calls inside the body re-enable the
-     * boundary themselves on entry. */
+     * suite body so a stray lfg_ct_skip from suite-level code warns to
+     * stderr and no-ops rather than longjmping to a stale outer boundary
+     * or silently skipping the suite body. lfg_ct_test calls inside the
+     * body re-enable the boundary themselves on entry. */
     saved_skip_active = _skip_env_active;
     _skip_env_active = 0;
 
@@ -571,7 +522,10 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
     _current_suite_name = name;
 
     _current_suite_failures = 0;
-    _lfg_ct_run_lifecycle(setup, fn, teardown);
+    if (fn)
+    {
+        fn();
+    }
 
     _current_suite_name = saved_suite_name;
     _skip_env_active = saved_skip_active;
@@ -598,7 +552,7 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
  * verbose-mode START banners serialised in the parent regardless of
  * isolation, and the child's reentry into @c _lfg_ct_test_impl_inproc
  * intentionally does not re-fire to avoid duplicates. */
-void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+void lfg_ct_test_impl(void (*fn)(void), const char *name)
 {
     if (_list_mode)
     {
@@ -615,20 +569,18 @@ void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(vo
     }
     if (LFG_CT_ISOLATE_FORK == _isolation)
     {
-        _lfg_ct_fork_run_test(setup, fn, teardown, name, _fork_timeout_ms);
+        _lfg_ct_fork_run_test(fn, name, _fork_timeout_ms);
         return;
     }
-    _lfg_ct_test_impl_inproc(setup, fn, teardown, name);
+    _lfg_ct_test_impl_inproc(fn, name);
 }
 
 /* Internal in-process dispatch. Was lfg_ct_test_impl historically; the
  * isolation shim now sits between the user and this entry point. Also
  * called directly by the fork TU from inside the child after the swap
  * to a capture reporter. */
-void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
 {
-    int setup_failures_before = 0;
-    int setup_failed = 0;
     /* Save/restore the outer skip boundary so a nested lfg_ct_test_impl
      * (the self-test pattern that drives mock tests through the real
      * runner) cannot strand an in-progress outer body with an
@@ -669,23 +621,11 @@ void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*tear
     memcpy(saved_env, _skip_env, sizeof(jmp_buf));
     saved_active = _skip_env_active;
 
-    if (setup)
-    {
-        setup_failures_before = _lifecycle_failure_total();
-        _skip_env_active = 1;
-        if (0 == setjmp(_skip_env))
-        {
-            setup();
-        }
-        _skip_env_active = 0;
-        setup_failed = (_lifecycle_failure_total() > setup_failures_before);
-    }
-
-    /* lfg_ct_skip in setup propagates by setting _current_disposition;
-     * the body is skipped in that case so callers see the same
-     * "preconditions not met" semantics whether the skip fired in setup
-     * or in the body. */
-    if (LFG_CT_DISP_SKIPPED != _current_disposition && !setup_failed && fn)
+    /* Single skip-aware boundary around the body. Setup and teardown are
+     * the body's own concern now, so lfg_ct_skip inside the body unwinds
+     * straight here; any teardown the body needs on the skip path runs
+     * before the skip call (the blessed convention). */
+    if (fn)
     {
         _skip_env_active = 1;
         if (0 == setjmp(_skip_env))
@@ -693,11 +633,6 @@ void _lfg_ct_test_impl_inproc(void (*setup)(void), void (*fn)(void), void (*tear
             fn();
         }
         _skip_env_active = 0;
-    }
-
-    if (teardown)
-    {
-        teardown();
     }
 
     memcpy(_skip_env, saved_env, sizeof(jmp_buf));
