@@ -67,7 +67,10 @@ int main(void)
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed, 0 otherwise. Separate from the value because `0` is a legal seed. |
 | `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. |
-| `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). |
+| `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. |
+| `lfg_ct_test_runs(name)` | Same query for the test named `name` **in this file and the enclosing suite**. Captures `__FILE__`, so it sees the same id `--list` prints. See [Entry ids](#entry-ids). |
+| `lfg_ct_id_runs(file, suite, name)` | Explicit form behind `lfg_ct_test_runs`. `suite = NULL` means "the suite currently on the registration stack"; `""` means "no enclosing suite". |
+| `lfg_ct_format_id(buf, cap, file, suite, test)` | Render an entry id into `buf` exactly as `--list` emits it. `test = NULL` renders a suite id. Truncates silently; returns the written length. |
 | `lfg_ct_test(fn)` | Execute a single test (`void fn(void)`). Body-only: any setup/teardown are plain functions the body calls itself. See [Setup and teardown](#setup-and-teardown). |
 | `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`). Body-only, same as `lfg_ct_test`; the suite body brackets its `lfg_ct_test` calls with any shared setup/teardown. |
 | `lfg_ct_skip(reason)` | Mark current test as SKIP and return from the body immediately (`longjmp`s out). Legal from a setup helper the body calls; run any teardown *before* the skip. See [Skip, xfail, xpass](#skip-xfail-xpass). |
@@ -118,13 +121,44 @@ outcomes, so the count can move down at a test boundary. Always
 snapshot-and-compare inside one body; never rely on cross-test
 monotonicity.
 
+### Entry ids
+
+> Tutorial: [Running and filtering](tutorial/02-running-and-filtering.md#entry-ids).
+
+Test and suite names are not unique within a binary, so every registered entry
+also has an id:
+
+```
+<file>::<suite>::<test>      a test
+<file>::<suite>              a suite
+```
+
+`<file>` is the **basename** of the registration site's `__FILE__` — captured
+by the `lfg_ct_test` / `lfg_ct_suite` macros, so no call site changes. Using
+the basename keeps ids stable across build directories and out-of-tree builds;
+nothing in an id derives from run order or an address, so a `--list` run and
+the filtered run after it always agree.
+
+A missing component is spelled `(none)` (`LFG_CT_ID_NO_SUITE`) rather than left
+empty, so a test registered outside any suite is `foo.c::(none)::test_x` and
+never a malformed `foo.c::::test_x`. The separator is `LFG_CT_ID_SEPARATOR`
+(`::`) — the same one the verbose reporter already uses for `suite::test`.
+
+Ids stay distinct under the single-header amalgamation: the registration macros
+expand at the consumer's call site, so `__FILE__` is the consumer's test file,
+not the amalgamated header.
+
+Full qualification is unique unless the same test name is registered twice in
+the same suite in the same file. That is a duplicate registration; the
+framework does not diagnose it, and the id addresses both.
+
 ### Listing and filtering
 
 > Tutorial: [Running and filtering](tutorial/02-running-and-filtering.md) walks
 > `--list` / `--filter` and the one-binary-many-CTest-entries pattern.
 
 `lfg_ct_parse_args(argc, argv)` lets a single test binary expose the
-registered names and a name-glob selector — the natural pairing for
+registered ids and a glob selector — the natural pairing for
 CMake-driven `ctest --parallel` workloads where one binary backs many
 `add_test` entries:
 
@@ -138,12 +172,37 @@ Recognized flags:
 
 | Flag | Effect |
 |------|--------|
-| `--list` | Print every test/suite name encountered (one per line, on stdout). Suite bodies are still invoked so their contained tests can list themselves; setup/teardown of suites and tests are skipped. |
-| `--filter <glob>` | Run only entries whose registered name matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite name matches, every entry inside the suite inherits the match — useful with the `add_test` pattern above. |
-| `--filter-exclude <glob>` | Skip entries whose name matches the glob. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same name. |
+| `--list` | Print every test/suite [id](#entry-ids) encountered (one per line on stdout, `\n`-terminated). Suite bodies are still invoked so their contained tests can list themselves; setup/teardown of suites and tests are skipped. Each line is directly usable as a `--filter` argument. |
+| `--filter <glob>` | Run only entries whose id — **or any trailing `::`-delimited suffix of it** — matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite matches, every entry inside it inherits the match — useful with the `add_test` pattern above. |
+| `--filter-exclude <glob>` | Skip entries whose id matches the glob, same suffix rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
+
+Because a bare name is the shortest suffix of an id, every glob that selected
+an entry before ids existed selects exactly the same set now — existing
+`--filter "suite_sma_*"` shards need no edit. Qualify as far as you need to:
+
+```bash
+./test_indicators --filter 'test_roundtrip'                        # every test of that name
+./test_indicators --filter 'suite_sma::test_roundtrip'             # ...in that suite
+./test_indicators --filter 'test-ind-sma.c::suite_sma::test_roundtrip'  # exactly one
+```
+
+`*` is not `::`-aware and spans separators freely; that is deliberate, but a
+glob meant to be unique should spell out the components it depends on.
+
+`--list` composes back into `--filter`:
+
+```bash
+./test_indicators --list | grep roundtrip | xargs -I{} ./test_indicators --filter '{}'
+```
+
+> **Output change.** `--list` previously printed bare names terminated with
+> `\r\n`. It now prints ids terminated with `\n` (the human-facing report still
+> uses `\r\n`) so the listing pipes cleanly into `xargs`. A script that parsed
+> the old listing needs updating; one that fed it back into `--filter` is
+> unaffected.
 
 An unmatched filter is not an error: zero tests run, the binary exits 0.
 Unknown flags print usage to stderr and return non-zero — `main` should
@@ -165,10 +224,12 @@ int main(int argc, char *argv[])
 
 `lfg_ct_name_runs(name)` lets a consumer short-circuit expensive setup
 outside the framework (e.g. opening a database connection) when the
-current filter state would skip the test anyway. `lfg_ct_is_list_mode()`
+current filter state would skip the test anyway. It keeps its bare-name
+meaning; `lfg_ct_test_runs(name)` is the id-aware form, capturing `__FILE__`
+so the query resolves the same entry `--list` names. `lfg_ct_is_list_mode()`
 exposes the `--list` bit directly — gate your own diagnostic prints on
 `!lfg_ct_is_list_mode()` if you want stdout to be a clean
-newline-separated list of names. `lfg_ct_is_verbose()` exposes the
+newline-separated list of ids. `lfg_ct_is_verbose()` exposes the
 `-v` / `--verbose` bit; consumer-side reporters can use it to decide
 whether to suppress redundant output of their own. Each call to
 `lfg_ct_parse_args` replaces any previously parsed state, including
@@ -199,7 +260,7 @@ $ ./test_indicators --seed 3314123391  # same scenario, as many times as you nee
 The banner prints the *effective* seed either way, so a replayed run and
 the run it reproduces emit an identical line. Under `--list` the banner
 stays suppressed (list output remains a clean newline-separated list of
-names) but the seed is still applied.
+ids) but the seed is still applied.
 
 `lfg_ct_is_seed_set()` reports whether `--seed` was parsed and
 `lfg_ct_get_seed()` returns the parsed value; the two are separate

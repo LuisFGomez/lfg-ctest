@@ -19,6 +19,9 @@ read/write actions, and a per-call callback hook.
 - `lfg_ct_parse_args(argc, argv)` handles `--list` / `--filter <glob>` /
   `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` so one binary can
   back many `ctest` entries.
+- Every entry has an id — `<file>::<suite>::<test>` — that `--list` emits and
+  `--filter` matches by full id or any trailing `::` suffix, so a bare name
+  still works and a fully-qualified id runs exactly one test.
 - `--seed <n>` replays a prior run's `rand()` sequence; without it the runner
   generates a full-range seed per run and prints it.
 - `lfg_ct_skip("reason")` and `lfg_ct_xfail("reason")` bucket tests as
@@ -71,7 +74,7 @@ int main(void)
 | `lfg-ctest-fork.c` | Fork-per-test isolation runner (`LFG_CT_ISOLATE_FORK`). Platform-gated + opt-out-gated; default-on Unix builds. |
 | `contrib/junit-xml/` | Opt-in JUnit-XML reporter (registers via `lfg_ct_set_reporter`). Builds standalone only. |
 | `test-unified.c` / `test-mock.c` / `test-amalg.c` | Self-tests (built only when this repo is the top-level CMake source). |
-| `tools/` | C99 amalgamator (`amalgamate.c` + `amalgamate.manifest`), version stamper (`mkversion.c`), release helper (`mkrelease.c`), 3-arg migration codemod (`migrate-3arg.sh`). |
+| `tools/` | C99 amalgamator (`amalgamate.c` + `amalgamate.manifest`), version stamper (`mkversion.c`), release helper (`mkrelease.c`), 3-arg migration codemod (`migrate-3arg.sh`), `--list`/`--filter` round-trip check (`check-id-roundtrip.sh`). |
 | `dist/` | Generated single-header (gitignored; built by `cmake --build build --target amalgamate`). |
 | `CMakeLists.txt`, `CMakePresets.json` | Build config — float/double auto-detection, install rules, only `debug` preset. |
 | `.clang-format` | BSD/Allman, 4-space indent, 120-col, pointer-right, case labels flush with switch. Authoritative for this repo. |

@@ -51,16 +51,31 @@ internally triggered many failures.
 against the `lfg-ctest` static library — it provides its own impl via
 `LFG_CTEST_IMPLEMENTATION`. CTest registers it alongside the other two.
 
+`test-id-roundtrip` is not a C binary: it is `tools/check-id-roundtrip.sh`,
+which runs `--list | grep | xargs --filter` against `test-amalg` for real and
+asserts each listed id selects exactly one test. The matching *rule* is covered
+in-process by `test-unified`; only a subprocess can cover the stdout bytes the
+pipeline actually depends on. Registered under `if(UNIX)` since it needs a
+POSIX shell.
+
 ### Run one specific test
 
-Test functions are plain `void fn(void)` compiled into the binary — there is
-no per-test CLI filter. To run just one:
+Every registered entry has an id — `<file>::<suite>::<test>` — and `--filter`
+matches the full id or any trailing `::` suffix of it. Ask the binary what it
+contains, then name one:
 
-1. Edit the test's `main()` or suite function to register only the case(s)
-   you care about.
-2. Rebuild and rerun the binary.
+```
+./build/test-unified --list
+./build/test-unified --filter 'test-unified.c::suite_filter_args_tests::test_id_bare_name_glob_still_selects'
+```
 
-Don't commit these edits. They're a local iteration tool, not a workflow.
+No source edit, no rebuild. See
+[docs/api.md — Entry ids](api.md#entry-ids) for the format and the suffix rule.
+
+Note that `test-unified`'s own filter tests call `lfg_ct_parse_args` mid-run to
+exercise the parser, which resets the filter for everything registered after
+them — so a filtered run of *that* binary reports more tests than it selected.
+Every other self-test binary filters normally.
 
 ## Add a self-test
 

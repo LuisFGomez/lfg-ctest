@@ -1,7 +1,7 @@
 # 2. Running and filtering
 
 A single test binary often backs many independent test cases. `lfg_ct_parse_args`
-lets you list the registered names and select a subset by glob from the command
+lets you list the registered entries and select a subset by glob from the command
 line — so one executable can answer to many `ctest` entries, run in parallel,
 and stay scriptable in CI.
 
@@ -39,33 +39,71 @@ The flags it recognises:
 
 | Flag | Effect |
 |------|--------|
-| `--list` | Print every test/suite name encountered, one per line on stdout. |
-| `--filter <glob>` | Run only entries whose name matches the `fnmatch(3)` glob (`*`, `?`, `[...]`). Repeat to OR-combine. |
-| `--filter-exclude <glob>` | Skip entries whose name matches. Repeat to OR-combine. **Exclude wins** if both match the same name. |
+| `--list` | Print every test/suite **id** encountered, one per line on stdout. |
+| `--filter <glob>` | Run only entries whose id — or any trailing `::` suffix of it — matches the `fnmatch(3)` glob (`*`, `?`, `[...]`). Repeat to OR-combine. |
+| `--filter-exclude <glob>` | Skip entries whose id matches, same rule. Repeat to OR-combine. **Exclude wins** if both match the same entry. |
 | `--strict-xpass` | Make an otherwise-clean run exit non-zero if any test XPASSed (see [chapter 3](03-skip-xfail-xpass.md)). |
 | `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
 | `-v`, `--verbose` | Stream a per-test progress line. |
 
+## Entry ids
+
+Test names are not unique inside a binary, and neither are suite names — a
+project with one `test_roundtrip` per translation unit, or forty files each
+declaring their own `static void suite_e2e(void)`, is normal. So every
+registered entry also has an **id**:
+
+```
+<file>::<suite>::<test>      a test
+<file>::<suite>              a suite
+```
+
+`<file>` is the **basename** of the registration site's `__FILE__`, so ids do
+not change between build directories or under an out-of-tree build. Nothing in
+an id derives from run order or an address: a `--list` run and the filtered run
+that follows it always agree.
+
+A component that does not exist is spelled `(none)` rather than left empty — a
+test registered outside any suite is `foo.c::(none)::test_x`, never a malformed
+`foo.c::::test_x`.
+
+Two entries only collide after full qualification if the same test name is
+registered twice in the same suite in the same file. The framework does not
+diagnose that; it is a duplicate registration, and the id addresses both.
+
 ## Listing what a binary contains
 
-`--list` walks the registrations and prints names without running any test
+`--list` walks the registrations and prints ids without running any test
 bodies' assertions:
 
 ```bash
 $ ./test_indicators --list
-math_suite
-test_add_positive
-test_add_negative
-string_suite
-test_trim
-test_split
+math.c::math_suite
+math.c::math_suite::test_add_positive
+math.c::math_suite::test_add_negative
+strings.c::string_suite
+strings.c::string_suite::test_trim
+strings.c::string_suite::test_split
+```
+
+> **Output change.** Before ids existed, `--list` printed bare names. It now
+> prints ids, and terminates each line with a bare `\n` (the human-facing
+> report still uses `\r\n`) so the listing pipes cleanly. A script that parsed
+> the old output needs updating; one that fed it straight back into `--filter`
+> keeps working, because a bare name is still a valid way to name an entry.
+
+Each line is directly usable as a `--filter` argument, which is what makes the
+list-then-run pipeline work:
+
+```bash
+./test_indicators --list | grep roundtrip | xargs -I{} ./test_indicators --filter '{}'
 ```
 
 Suite bodies are still *invoked* under `--list` (that is how the tests inside
 them get a chance to announce themselves), but individual test bodies are not
 run — so any setup, teardown, or assertions they contain never execute. If you
 print your own diagnostics from inside a suite body, gate them so they don't
-pollute the clean name list:
+pollute the clean id list:
 
 ```c
 if (!lfg_ct_is_list_mode())
@@ -74,11 +112,25 @@ if (!lfg_ct_is_list_mode())
 }
 ```
 
-## Filtering by name
+## Filtering
 
-`--filter` takes a shell-style glob matched against the registered name.
-Matching a *suite* name pulls in every test inside it — which is what makes
-the one-binary-many-entries pattern work:
+`--filter` takes a shell-style glob. It selects an entry if it matches the
+entry's full id **or any trailing `::`-delimited suffix of it** — so `test`,
+`suite::test`, and `file.c::suite::test` all name the same entry, and you can
+qualify only as far as you need to make the selection unique:
+
+```bash
+./test_indicators --filter 'test_add_positive'                 # every test of that name
+./test_indicators --filter 'math_suite::test_add_positive'     # ...in that suite
+./test_indicators --filter 'math.c::math_suite::test_add_positive'  # exactly one
+```
+
+A bare name is the shortest suffix, so **every glob that worked before ids
+existed selects exactly what it selected before** — existing `add_test(...
+--filter "suite_sma_*")` shards need no edit.
+
+Matching a *suite* pulls in every test inside it, which is what makes the
+one-binary-many-entries pattern work:
 
 ```bash
 ./test_indicators --filter 'math_suite'      # the suite and all its tests
@@ -86,10 +138,18 @@ the one-binary-many-entries pattern work:
 ./test_indicators --filter 'test_*' --filter-exclude '*_slow'
 ```
 
+`*` is not `::`-aware — it happily spans separators, so `math*positive` matches
+across the whole id. That is deliberate, but it means a glob written to be
+unique should be anchored with the components you actually care about.
+
 An unmatched filter is **not** an error: zero tests run and the binary exits
 `0`. Unknown *flags*, by contrast, are fatal (non-zero) — the distinction
 keeps a selective CI shard that happens to match nothing from being mistaken
 for a configuration error.
+
+Under the single-header amalgamation the id is unaffected: the registration
+macros expand at *your* call site, so `__FILE__` is still your test file, not
+the amalgamated header.
 
 ## One binary, many CTest entries
 
@@ -116,6 +176,18 @@ named `name` actually run right now?":
 if (lfg_ct_name_runs("test_db_roundtrip"))
 {
     db = open_test_database();   /* skip the cost when filtered out */
+}
+```
+
+`lfg_ct_name_runs` keeps its bare-name meaning. When the same test name lives
+in several files and you need the answer for *this* one, use the `lfg_ct_test_runs`
+macro instead — it captures `__FILE__` so the query sees the same id `--list`
+prints:
+
+```c
+if (lfg_ct_test_runs("test_db_roundtrip"))
+{
+    db = open_test_database();
 }
 ```
 
