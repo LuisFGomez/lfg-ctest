@@ -1029,6 +1029,100 @@ static void test_filter_runner_suite_match_propagates_to_inner_tests(void)
     ASSERT_INT_EQUAL(0, _filter_inner_called);
 }
 
+static void test_seed_parse_sets_value(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"4294967295"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_seed_set());
+    ASSERT_UINT_EQUAL(4294967295U, lfg_ct_get_seed());
+}
+
+static void test_seed_parse_zero_is_a_real_seed(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"0"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    /* 0 is settable, so "was it supplied" cannot be a sentinel test. */
+    ASSERT_INT_EQUAL(1, lfg_ct_is_seed_set());
+    ASSERT_UINT_EQUAL(0U, lfg_ct_get_seed());
+}
+
+static void test_seed_parse_missing_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+}
+
+static void test_seed_parse_non_numeric_fails(void)
+{
+    char *argv_alpha[] = {(char *)"prog", (char *)"--seed", (char *)"abc"};
+    char *argv_trailing[] = {(char *)"prog", (char *)"--seed", (char *)"12x"};
+    char *argv_negative[] = {(char *)"prog", (char *)"--seed", (char *)"-1"};
+    char *argv_empty[] = {(char *)"prog", (char *)"--seed", (char *)""};
+
+    /* Rejected, never coerced to 0 -- a silent 0 would look like a
+     * deliberate --seed 0 run. */
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_alpha));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_trailing));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_negative));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_empty));
+}
+
+static void test_seed_parse_out_of_range_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"99999999999999999999"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv));
+}
+
+static void test_seed_parse_repeated_last_wins(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"11", (char *)"--seed", (char *)"22"};
+    /* Scalar flag: unlike --filter it replaces rather than accumulates. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_UINT_EQUAL(22U, lfg_ct_get_seed());
+}
+
+static void test_seed_resets_across_parse_calls(void)
+{
+    char *argv_on[] = {(char *)"prog", (char *)"--seed", (char *)"1234"};
+    char *argv_off[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_on));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_seed_set());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_off));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_seed_set());
+    ASSERT_UINT_EQUAL(0U, lfg_ct_get_seed());
+}
+
+static void test_seed_combines_with_list_mode(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--list", (char *)"--seed", (char *)"7"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_list_mode());
+    ASSERT_UINT_EQUAL(7U, lfg_ct_get_seed());
+}
+
+static void test_seed_replays_rand_sequence(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"98765"};
+    int first[4];
+    int i;
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    srand(lfg_ct_get_seed());
+    for (i = 0; i < 4; i++)
+    {
+        first[i] = rand();
+    }
+
+    /* The whole point of the flag: same seed back in, same sequence out. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    srand(lfg_ct_get_seed());
+    for (i = 0; i < 4; i++)
+    {
+        ASSERT_INT_EQUAL(first[i], rand());
+    }
+}
+
 static void test_filter_reset_state_for_remaining_tests(void)
 {
     /* The final test in this suite restores default state so subsequent
@@ -1058,6 +1152,24 @@ static void suite_filter_args_tests(void)
     lfg_ct_test(test_filter_runner_skips_excluded_test_body);
     lfg_ct_test(test_filter_runner_skips_all_bodies_in_list_mode);
     lfg_ct_test(test_filter_runner_suite_match_propagates_to_inner_tests);
+
+    /* The suite-match test above leaves a filter in place; clear it so the
+     * --seed tests are not themselves filtered out at registration. */
+    {
+        char *seed_reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, seed_reset_argv);
+    }
+    lfg_ct_test(test_seed_parse_sets_value);
+    lfg_ct_test(test_seed_parse_zero_is_a_real_seed);
+    lfg_ct_test(test_seed_parse_missing_arg_fails);
+    lfg_ct_test(test_seed_parse_non_numeric_fails);
+    lfg_ct_test(test_seed_parse_out_of_range_fails);
+    lfg_ct_test(test_seed_parse_repeated_last_wins);
+    lfg_ct_test(test_seed_resets_across_parse_calls);
+    lfg_ct_test(test_seed_replays_rand_sequence);
+    /* Last of the seed group: it leaves --list mode set, which the
+     * unconditional reset below clears before the verifying test. */
+    lfg_ct_test(test_seed_combines_with_list_mode);
 
     /* Unconditional reset before the verifying test runs -- without this,
      * the verifying test is itself filter-gated by whatever the prior
