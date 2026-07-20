@@ -140,12 +140,13 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         return -1;
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &t_start);
     /* Drain every output stream before the address space is copied:
      * whatever is still buffered here would otherwise be duplicated by
      * the child's own pre-_exit flush. NULL covers stdout, stderr and
-     * any stream the test body opened. */
+     * any stream the test body opened. Kept above the clock read so the
+     * cost of draining the parent's backlog isn't billed to the test. */
     fflush(NULL);
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
     pid = fork();
     if (pid < 0)
     {

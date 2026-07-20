@@ -523,6 +523,11 @@ test_fork_child_output_survives_non_tty_stdout(void)
     _slurp(tmpl, captured, sizeof(captured));
     unlink(tmpl);
 
+    /* Assert this first: a capture child that died early (failed
+     * freopen, crash) would otherwise surface as a confusing "detail
+     * line missing" instead of naming the real cause. */
+    ASSERT_TRUE(WIFEXITED(status) && 0 == WEXITSTATUS(status));
+
     /* The forked test's assertion detail reached the file at all. */
     ASSERT_TRUE(NULL != strstr(captured, "FAILURE in"));
     /* Exactly once -- child-side flush, and only one of them. */

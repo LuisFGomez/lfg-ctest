@@ -221,6 +221,11 @@ buffering flushes at each newline. Without the parent's, the child
 inherits a copy of the parent's pending buffer and re-emits it on its
 own flush, duplicating parent output once per forked test.
 
+The signal- and timeout-killed paths never reach the child's flush, so
+detail the body printed before dying is still lost under redirection
+while a TTY run shows it. That gap is inherent to `SIGKILL` and to
+crashing, not something the two-sided flush can close.
+
 ### Bridge surface (lfg-ctest.c <-> lfg-ctest-fork.c)
 
 Three internal symbols (extern-declared in the fork TU, not in any
