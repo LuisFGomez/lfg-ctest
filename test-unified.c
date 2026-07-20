@@ -1402,8 +1402,12 @@ static void test_id_format_truncates_rather_than_overflows(void)
     ASSERT_UINT_EQUAL(30U, (unsigned)lfg_ct_format_id(id, sizeof(id), "alpha.c", "suite_one", "test_thing"));
     ASSERT_STR_EQUAL("alpha.c", id);
 
-    /* Zero capacity is a no-op, not a crash. */
-    ASSERT_UINT_EQUAL(0U, (unsigned)lfg_ct_format_id(id, 0, "alpha.c", "suite_one", "test_thing"));
+    /* Zero capacity writes nothing but still reports the needed length, so
+     * the standard snprintf(3) sizing idiom works: probe with (NULL, 0),
+     * allocate, then render. A NULL destination is legal only at cap 0. */
+    ASSERT_UINT_EQUAL(30U, (unsigned)lfg_ct_format_id(id, 0, "alpha.c", "suite_one", "test_thing"));
+    ASSERT_UINT_EQUAL(30U, (unsigned)lfg_ct_format_id(NULL, 0, "alpha.c", "suite_one", "test_thing"));
+    ASSERT_STR_EQUAL("alpha.c", id);
 }
 
 static void test_filter_reset_state_for_remaining_tests(void)

@@ -556,17 +556,18 @@ _id_basename(const char *path)
  * long names, never correctness of the run.
  *
  * Returns the snprintf(3) length the id *would* have needed, so a caller
- * that cares can detect truncation (result >= cap). The internal call
- * sites deliberately ignore it. */
+ * that cares can detect truncation (result >= cap) or size a buffer with
+ * a (NULL, 0) probe. The internal call sites deliberately ignore it. */
 static int
 _id_build(char *buf, size_t cap, const char *file, const char *suite, const char *test)
 {
     const char *base = _id_basename(file);
     const char *mid = (NULL != suite && '\0' != suite[0]) ? suite : LFG_CT_ID_NO_SUITE;
 
-    if (NULL == buf || 0 == cap)
+    /* snprintf only accepts a NULL destination when the size is 0. */
+    if (NULL == buf)
     {
-        return 0;
+        cap = 0;
     }
     if (NULL == test)
     {
@@ -581,11 +582,10 @@ lfg_ct_format_id(char *buf, size_t cap, const char *file, const char *suite, con
 {
     int needed;
 
-    if (NULL == buf || 0 == cap)
+    if (NULL != buf && cap > 0)
     {
-        return 0;
+        buf[0] = '\0';
     }
-    buf[0] = '\0';
     needed = _id_build(buf, cap, file, suite, test);
     /* snprintf semantics: the length the id would have needed. A result
      * >= cap means the buffer held a truncated id. */

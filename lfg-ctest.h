@@ -417,8 +417,9 @@ void lfg_ct_end(void);
  *                                  suite matches, every entry inside
  *                                  the suite is considered matched.
  *   - @c --filter-exclude \<glob\> : skip entries whose id matches the glob
- *                                  under the same component-depth rule. Inverse of
- *                                  @c --filter, same repeat / OR semantics.
+ *                                  under the same component-depth rule.
+ *                                  Inverse of @c --filter, same repeat / OR
+ *                                  semantics.
  *                                  Exclude wins on overlap with @c --filter.
  *   - @c --strict-xpass          : flip an otherwise-clean run that contains
  *                                  one or more @c xpass outcomes to a
@@ -531,7 +532,9 @@ int lfg_ct_id_runs(const char *file, const char *suite, const char *name);
  *  failing the run, which costs only addressability of pathologically long
  *  names. 320 bytes is comfortably above any real filename/identifier pair.
  *
- *  @param buf   Destination; always NUL-terminated when @p cap > 0.
+ *  @param buf   Destination; always NUL-terminated when @p cap > 0. May be
+ *               @c NULL with a @p cap of 0 to size a buffer from the return
+ *               value without writing anything.
  *  @param cap   Size of @p buf in bytes.
  *  @param file  Registration site's @c __FILE__; only its basename is used.
  *               @c NULL yields @ref LFG_CT_ID_NO_SUITE in that position.
