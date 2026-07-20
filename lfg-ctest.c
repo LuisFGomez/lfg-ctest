@@ -102,6 +102,14 @@ static char *_failure_msg_heap = NULL;
  * cleanly. */
 static const char *_current_suite_name = NULL;
 
+/* Registration site's __FILE__ for the test currently being dispatched.
+ * A baton rather than a threaded parameter so the internal in-process and
+ * fork re-entry paths (which re-check the filter) see the same id the
+ * public entry gated on, without changing their signatures. Set and
+ * restored around the dispatch in lfg_ct_test_impl_at; NULL when a caller
+ * reached the runner through the retained bare-name entry. */
+static const char *_current_test_file = NULL;
+
 /* Reporter slot. Single pointer; one downstream consumer at a time.
  * Borrowed -- caller keeps the struct alive across runner calls
  * (file-static in the consumer is the intended usage).
@@ -167,6 +175,11 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name);
  * into the caller's argv (which has program lifetime under standard main()
  * usage), so no string copies or frees are needed. */
 #define LFG_CT_FILTER_MAX 64
+
+/* Scratch size for a rendered <file>::<suite>::<test> id. Stack-local at
+ * every use site so nothing is allocated on the registration hot path;
+ * generous enough that real C identifiers and filenames never truncate. */
+#define LFG_CT_ID_MAX 320
 
 static int _list_mode = 0;
 static const char *_filter_globs[LFG_CT_FILTER_MAX];
@@ -484,6 +497,97 @@ _glob_list_matches(const char *name, const char *const *globs, int count)
     return 0;
 }
 
+/* Strip any directory prefix from @p path. The id has to be stable across
+ * build directories and out-of-tree builds, and __FILE__ carries whatever
+ * path the compiler was invoked with, so only the basename is addressable.
+ * Handles both separators so a Windows-hosted build ids the same way. */
+static const char *
+_id_basename(const char *path)
+{
+    const char *p;
+    const char *base;
+
+    if (NULL == path || '\0' == path[0])
+    {
+        return LFG_CT_ID_NO_SUITE;
+    }
+    base = path;
+    for (p = path; '\0' != *p; p++)
+    {
+        if ('/' == *p || '\\' == *p)
+        {
+            base = p + 1;
+        }
+    }
+    /* A path ending in a separator leaves an empty basename; fall back
+     * rather than emitting a zero-width component. */
+    return ('\0' == base[0]) ? LFG_CT_ID_NO_SUITE : base;
+}
+
+/* Render an entry's addressable id into @p buf.
+ *
+ * Tests get <file>::<suite>::<test>; suites get <file>::<suite> (pass NULL
+ * for @p test). A NULL component becomes LFG_CT_ID_NO_SUITE so the id is
+ * always well-formed -- never a malformed "file::::test". Truncation is
+ * silent (snprintf), which only costs addressability of pathologically
+ * long names, never correctness of the run. */
+static void
+_id_build(char *buf, size_t cap, const char *file, const char *suite, const char *test)
+{
+    const char *base = _id_basename(file);
+    const char *mid = (NULL != suite && '\0' != suite[0]) ? suite : LFG_CT_ID_NO_SUITE;
+
+    if (NULL == buf || 0 == cap)
+    {
+        return;
+    }
+    if (NULL == test)
+    {
+        snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s", base, mid);
+        return;
+    }
+    snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s" LFG_CT_ID_SEPARATOR "%s", base, mid, test);
+}
+
+size_t
+lfg_ct_format_id(char *buf, size_t cap, const char *file, const char *suite, const char *test)
+{
+    if (NULL == buf || 0 == cap)
+    {
+        return 0;
+    }
+    buf[0] = '\0';
+    _id_build(buf, cap, file, suite, test);
+    return strlen(buf);
+}
+
+/* Match @p id against the glob list, retrying at every trailing
+ * "::"-delimited suffix. "file.c::suite::test", "suite::test" and "test"
+ * are therefore all valid ways to name the same entry, and a caller can
+ * qualify progressively until the selection is unique.
+ *
+ * The bare name is the shortest suffix, so every glob that selected an
+ * entry before ids existed still selects it. */
+static int
+_glob_list_matches_id(const char *id, const char *const *globs, int count)
+{
+    const char *suffix = id;
+
+    while (NULL != suffix)
+    {
+        if (_glob_list_matches(suffix, globs, count))
+        {
+            return 1;
+        }
+        suffix = strstr(suffix, LFG_CT_ID_SEPARATOR);
+        if (NULL != suffix)
+        {
+            suffix += sizeof(LFG_CT_ID_SEPARATOR) - 1;
+        }
+    }
+    return 0;
+}
+
 /* Recompute the active reporter slot from the verbose toggle and the
  * consumer-installed reporter. Called whenever either input changes
  * (parse_args toggling verbose, lfg_ct_set_reporter installing or
@@ -526,13 +630,15 @@ _filter_print_usage(const char *progname)
 {
     fprintf(stderr,
             "Usage: %s [options]\r\n"
-            "  --list                   List registered test/suite names and exit 0\r\n"
-            "  --filter <glob>          Run only entries whose name matches <glob>\r\n"
-            "  --filter-exclude <glob>  Skip entries whose name matches <glob>\r\n"
+            "  --list                   List registered test/suite ids and exit 0\r\n"
+            "  --filter <glob>          Run only entries whose id matches <glob>\r\n"
+            "  --filter-exclude <glob>  Skip entries whose id matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
             "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
+            "An entry id is <file>::<suite>::<test>; a glob matches the full id or\r\n"
+            "any trailing ::-delimited suffix of it, so a bare test name still works.\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
             progname ? progname : "test");
 }
@@ -675,12 +781,12 @@ lfg_ct_get_seed(void)
     return _seed_value;
 }
 
-/* Pure name predicate -- ignores list mode (which suppresses execution
- * regardless of filter state). */
+/* Pure id predicate -- ignores list mode (which suppresses execution
+ * regardless of filter state). Exclude is decisive and is evaluated first. */
 static int
-_filter_admits(const char *name)
+_filter_admits_id(const char *id)
 {
-    if (_exclude_glob_count > 0 && _glob_list_matches(name, _exclude_globs, _exclude_glob_count))
+    if (_exclude_glob_count > 0 && _glob_list_matches_id(id, _exclude_globs, _exclude_glob_count))
     {
         return 0;
     }
@@ -688,7 +794,20 @@ _filter_admits(const char *name)
     {
         return 1;
     }
-    return _glob_list_matches(name, _filter_globs, _filter_glob_count);
+    return _glob_list_matches_id(id, _filter_globs, _filter_glob_count);
+}
+
+/* Admission for a test named @p name registered in the current file/suite
+ * context. The id is rebuilt from the batons rather than passed down, so
+ * the public entry, the in-process entry and the fork child all gate on the
+ * identical string. */
+static int
+_filter_admits_test(const char *name)
+{
+    char id[LFG_CT_ID_MAX];
+
+    _id_build(id, sizeof(id), _current_test_file, _current_suite_name, name);
+    return _filter_admits_id(id);
 }
 
 int
@@ -698,7 +817,20 @@ lfg_ct_name_runs(const char *name)
     {
         return 0;
     }
-    return _filter_admits(name);
+    return _filter_admits_test(name);
+}
+
+int
+lfg_ct_id_runs(const char *file, const char *suite, const char *name)
+{
+    char id[LFG_CT_ID_MAX];
+
+    if (_list_mode)
+    {
+        return 0;
+    }
+    _id_build(id, sizeof(id), file, (NULL != suite) ? suite : _current_suite_name, name);
+    return _filter_admits_id(id);
 }
 
 #ifdef LFG_CT_COMPAT_3ARG
@@ -752,23 +884,49 @@ _lfg_ct_run_lifecycle(void (*setup)(void), void (*body)(void), void (*teardown)(
 
 #ifdef LFG_CT_COMPAT_3ARG
 void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+{
+    lfg_ct_suite_impl_at(setup, fn, teardown, name, NULL);
+}
+
+void lfg_ct_suite_impl_at(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        const char *file)
 #else
 void lfg_ct_suite_impl(void (*fn)(void), const char *name)
+{
+    lfg_ct_suite_impl_at(fn, name, NULL);
+}
+
+void lfg_ct_suite_impl_at(void (*fn)(void), const char *name, const char *file)
 #endif
 {
     int suite_assertions_failed_before;
     int inherited_pushed = 0;
     int saved_skip_active;
     const char *saved_suite_name;
+    char id[LFG_CT_ID_MAX];
+
+    /* A suite id has no test component: <file>::<suite>. */
+    _id_build(id, sizeof(id), file, name, NULL);
 
     if (_list_mode)
     {
-        /* Print the suite name and recurse into the body so contained
-         * lfg_ct_test() calls can list themselves. */
-        printf("%s\r\n", name);
+        /* Print the suite id and recurse into the body so contained
+         * lfg_ct_test() calls can list themselves. The suite baton is
+         * published across the descent even though nothing executes:
+         * without it the listed ids would carry LFG_CT_ID_NO_SUITE where
+         * the real run carries the suite name, and --list output would no
+         * longer feed back into --filter.
+         *
+         * LF-only, unlike the CRLF the human-facing report uses: a listing
+         * line is machine input (`--list | grep | xargs --filter`), and a
+         * trailing CR would ride into the glob and match nothing. */
+        printf("%s\n", id);
         if (fn)
         {
+            saved_suite_name = _current_suite_name;
+            _current_suite_name = name;
             fn();
+            _current_suite_name = saved_suite_name;
         }
         return;
     }
@@ -777,12 +935,12 @@ void lfg_ct_suite_impl(void (*fn)(void), const char *name)
      * entirely, no descent. Filter is checked second; a non-match still
      * descends so inner tests can be evaluated individually. A suite that
      * matches the filter propagates the pass to every descendant. */
-    if (_exclude_glob_count > 0 && _glob_list_matches(name, _exclude_globs, _exclude_glob_count))
+    if (_exclude_glob_count > 0 && _glob_list_matches_id(id, _exclude_globs, _exclude_glob_count))
     {
         return;
     }
     if (_filter_glob_count > 0 && 0 == _filter_inherited_depth
-            && _glob_list_matches(name, _filter_globs, _filter_glob_count))
+            && _glob_list_matches_id(id, _filter_globs, _filter_glob_count))
     {
         _filter_inherited_depth++;
         inherited_pushed = 1;
@@ -848,17 +1006,44 @@ void lfg_ct_suite_impl(void (*fn)(void), const char *name)
  * intentionally does not re-fire to avoid duplicates. */
 #ifdef LFG_CT_COMPAT_3ARG
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name)
+{
+    lfg_ct_test_impl_at(setup, fn, teardown, name, NULL);
+}
+
+void lfg_ct_test_impl_at(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        const char *file)
 #else
 void lfg_ct_test_impl(void (*fn)(void), const char *name)
+{
+    lfg_ct_test_impl_at(fn, name, NULL);
+}
+
+void lfg_ct_test_impl_at(void (*fn)(void), const char *name, const char *file)
 #endif
 {
+    const char *saved_test_file;
+    char id[LFG_CT_ID_MAX];
+
+    _id_build(id, sizeof(id), file, _current_suite_name, name);
+
+    /* Publish the file baton across the whole dispatch so the in-process
+     * entry -- and the fork child re-entering it -- rebuild this same id
+     * when they re-check the filter. Saved/restored because a test body may
+     * itself register a nested test (the self-test pattern). */
+    saved_test_file = _current_test_file;
+    _current_test_file = file;
+
     if (_list_mode)
     {
-        printf("%s\r\n", name);
+        /* LF-only: see the suite listing above. */
+        printf("%s\n", id);
+        _current_test_file = saved_test_file;
         return;
     }
-    if (!_filter_admits(name))
+
+    if (!_filter_admits_id(id))
     {
+        _current_test_file = saved_test_file;
         return;
     }
     if (_reporter && _reporter->on_test_start)
@@ -872,6 +1057,7 @@ void lfg_ct_test_impl(void (*fn)(void), const char *name)
 #else
         _lfg_ct_fork_run_test(fn, name, _fork_timeout_ms);
 #endif
+        _current_test_file = saved_test_file;
         return;
     }
 #ifdef LFG_CT_COMPAT_3ARG
@@ -879,6 +1065,7 @@ void lfg_ct_test_impl(void (*fn)(void), const char *name)
 #else
     _lfg_ct_test_impl_inproc(fn, name);
 #endif
+    _current_test_file = saved_test_file;
 }
 
 /* Internal in-process dispatch. Was lfg_ct_test_impl historically; the
@@ -909,10 +1096,14 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
 
     if (_list_mode)
     {
-        printf("%s\r\n", name);
+        char id[LFG_CT_ID_MAX];
+
+        _id_build(id, sizeof(id), _current_test_file, _current_suite_name, name);
+        /* LF-only: see lfg_ct_suite_impl_at. */
+        printf("%s\n", id);
         return;
     }
-    if (!_filter_admits(name))
+    if (!_filter_admits_test(name))
     {
         return;
     }

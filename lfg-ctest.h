@@ -260,6 +260,21 @@
 #define ASSERT_NULL(_a) ASSERT_PTR_NULL(_a)
 #define ASSERT_NOT_NULL(_a) ASSERT_PTR_NOT_NULL(_a)
 
+/** Separator between the components of an addressable entry id.
+ *  An entry's id is @c \<file\>::\<suite\>::\<test\> (tests) or
+ *  @c \<file\>::\<suite\> (suites); @c \<file\> is the basename of the
+ *  registration site's @c __FILE__, so ids are stable across build
+ *  directories and out-of-tree builds.
+ */
+#define LFG_CT_ID_SEPARATOR "::"
+
+/** Placeholder occupying the suite component of a test registered outside
+ *  any @ref lfg_ct_suite, so a top-level test still has a well-formed
+ *  three-component id (@c file.c::(none)::test_x) rather than a malformed
+ *  @c file.c::::test_x.
+ */
+#define LFG_CT_ID_NO_SUITE "(none)"
+
 #ifdef LFG_CT_COMPAT_3ARG
 
 /* Deprecated single-release compatibility window for the pre-#35
@@ -278,14 +293,16 @@
  *  teardown. Compiled only under @c LFG_CT_COMPAT_3ARG; migrate to the
  *  body-only @c lfg_ct_suite(_suite).
  */
-#define lfg_ct_suite(_setup, _suite, _teardown) lfg_ct_suite_impl((_setup), (_suite), (_teardown), #_suite)
+#define lfg_ct_suite(_setup, _suite, _teardown) \
+    lfg_ct_suite_impl_at((_setup), (_suite), (_teardown), #_suite, __FILE__)
 
 /** Deprecated. Execute a single unit test with registration-time
  *  setup/teardown hooks. Same lifecycle semantics as the deprecated
  *  @ref lfg_ct_suite. Compiled only under @c LFG_CT_COMPAT_3ARG; migrate
  *  to the body-only @c lfg_ct_test(_test).
  */
-#define lfg_ct_test(_setup, _test, _teardown) lfg_ct_test_impl((_setup), (_test), (_teardown), #_test)
+#define lfg_ct_test(_setup, _test, _teardown) \
+    lfg_ct_test_impl_at((_setup), (_test), (_teardown), #_test, __FILE__)
 
 #else /* body-only registration (default) */
 
@@ -294,7 +311,7 @@
  *  functions the suite body calls itself -- the framework binds no
  *  lifecycle hooks at registration time.
  */
-#define lfg_ct_suite(_suite) lfg_ct_suite_impl((_suite), #_suite)
+#define lfg_ct_suite(_suite) lfg_ct_suite_impl_at((_suite), #_suite, __FILE__)
 
 /** Execute a single unit test. Registration is body-only: the test
  *  function is the single argument. Setup and teardown are plain static
@@ -302,7 +319,7 @@
  *  soft assert, early @c return, or @ref lfg_ct_skip is expressed in the
  *  body (assertions are non-fatal and return their result).
  */
-#define lfg_ct_test(_test) lfg_ct_test_impl((_test), #_test)
+#define lfg_ct_test(_test) lfg_ct_test_impl_at((_test), #_test, __FILE__)
 
 #endif /* LFG_CT_COMPAT_3ARG */
 
@@ -380,22 +397,26 @@ void lfg_ct_end(void);
 /** Parse command-line flags consumed by the runner.
  *
  *  Recognized flags:
- *   - @c --list                  : print every test/suite name encountered
+ *   - @c --list                  : print every test/suite id encountered
  *                                  (one per line, on stdout) without executing
  *                                  their bodies. Setup/teardown of tests and
  *                                  suites are skipped; a suite's body is still
- *                                  invoked so the names of contained tests
- *                                  can be listed.
- *   - @c --filter \<glob\>         : only run entries whose registered name
+ *                                  invoked so the ids of contained tests
+ *                                  can be listed. Each line is directly usable
+ *                                  as a @c --filter argument.
+ *   - @c --filter \<glob\>         : only run entries whose id -- or any
+ *                                  trailing @c :: -delimited suffix of it --
  *                                  matches the shell-style glob (@c fnmatch(3)
- *                                  syntax: @c *, @c ?, @c [...]). Repeating
+ *                                  syntax: @c *, @c ?, @c [...]). A bare name
+ *                                  is the shortest such suffix, so pre-id
+ *                                  filters keep their meaning. Repeating
  *                                  the flag OR-combines the patterns. If a
- *                                  suite's name matches, every entry inside
+ *                                  suite matches, every entry inside
  *                                  the suite is considered matched.
- *   - @c --filter-exclude \<glob\> : skip entries whose registered name
- *                                  matches the glob. Inverse of @c --filter,
- *                                  same repeat / OR semantics. Exclude wins
- *                                  on overlap with @c --filter.
+ *   - @c --filter-exclude \<glob\> : skip entries whose id matches the glob
+ *                                  under the same suffix rule. Inverse of
+ *                                  @c --filter, same repeat / OR semantics.
+ *                                  Exclude wins on overlap with @c --filter.
  *   - @c --strict-xpass          : flip an otherwise-clean run that contains
  *                                  one or more @c xpass outcomes to a
  *                                  non-zero exit code. Default behavior is
@@ -469,6 +490,47 @@ unsigned lfg_ct_get_seed(void);
  */
 int lfg_ct_name_runs(const char *name);
 
+/** Qualified form of @ref lfg_ct_name_runs: build the entry's full id from
+ *  @p file / @p suite / @p name and evaluate the same filter rules against
+ *  it and every trailing @c :: suffix.
+ *
+ *  Additive -- @ref lfg_ct_name_runs keeps its bare-name meaning. Prefer
+ *  the @ref lfg_ct_test_runs macro, which fills @p file in for you.
+ *
+ *  @param file  Registration site's @c __FILE__; basename only. @c NULL
+ *               yields @ref LFG_CT_ID_NO_SUITE in that position.
+ *  @param suite Enclosing suite name, or @c NULL to use the suite currently
+ *               on the registration stack (@ref LFG_CT_ID_NO_SUITE at
+ *               top level).
+ *  @param name  Registered test name to check.
+ *  @return 1 if the entry would run, 0 if filtered, excluded, or in list mode.
+ */
+int lfg_ct_id_runs(const char *file, const char *suite, const char *name);
+
+/** Ask whether the test named @p _name, registered in the current file and
+ *  the enclosing suite, would run under the parsed filters. Captures
+ *  @c __FILE__ so the query sees the same id @c --list prints.
+ */
+#define lfg_ct_test_runs(_name) lfg_ct_id_runs(__FILE__, NULL, (_name))
+
+/** Render an entry's addressable id into @p buf, exactly as @c --list emits
+ *  it. Pass @c NULL for @p test to render a suite id (@c \<file\>::\<suite\>).
+ *
+ *  Truncation is silent: an id longer than @p cap is cut short rather than
+ *  failing the run, which costs only addressability of pathologically long
+ *  names. 320 bytes is comfortably above any real filename/identifier pair.
+ *
+ *  @param buf   Destination; always NUL-terminated when @p cap > 0.
+ *  @param cap   Size of @p buf in bytes.
+ *  @param file  Registration site's @c __FILE__; only its basename is used.
+ *               @c NULL yields @ref LFG_CT_ID_NO_SUITE in that position.
+ *  @param suite Enclosing suite name, or @c NULL / empty for
+ *               @ref LFG_CT_ID_NO_SUITE.
+ *  @param test  Test name, or @c NULL to render a suite id.
+ *  @return Length of the id written to @p buf, excluding the terminator.
+ */
+size_t lfg_ct_format_id(char *buf, size_t cap, const char *file, const char *suite, const char *test);
+
 #ifdef LFG_CT_COMPAT_3ARG
 
 /** Deprecated 3-argument backing entry for @ref lfg_ct_suite under the
@@ -483,17 +545,58 @@ void lfg_ct_suite_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(v
  */
 void lfg_ct_test_impl(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name);
 
+/** Deprecated 3-argument file-aware backing entry for @ref lfg_ct_suite.
+ *  @see lfg_ct_suite_impl_at (body-only form) for the @p file semantics.
+ */
+void lfg_ct_suite_impl_at(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        const char *file);
+
+/** Deprecated 3-argument file-aware backing entry for @ref lfg_ct_test.
+ *  @see lfg_ct_test_impl_at (body-only form) for the @p file semantics.
+ */
+void lfg_ct_test_impl_at(void (*setup)(void), void (*fn)(void), void (*teardown)(void), const char *name,
+        const char *file);
+
 #else /* body-only registration (default) */
 
 /** Execute a suite of tests. See @ref lfg_ct_suite; the suite body owns
  *  any setup/teardown it needs.
+ *
+ *  Retained bare-name entry: equivalent to @ref lfg_ct_suite_impl_at with a
+ *  @c NULL @p file, so the id's file component becomes
+ *  @ref LFG_CT_ID_NO_SUITE. Prefer the @c _at form (what @ref lfg_ct_suite
+ *  expands to) so the entry is addressable by its file.
  */
 void lfg_ct_suite_impl(void (*fn)(void), const char *name);
 
 /** Execute a single unit test. See @ref lfg_ct_test; the test body owns
  *  any setup/teardown it needs.
+ *
+ *  Retained bare-name entry: equivalent to @ref lfg_ct_test_impl_at with a
+ *  @c NULL @p file. Prefer the @c _at form.
  */
 void lfg_ct_test_impl(void (*fn)(void), const char *name);
+
+/** Execute a suite of tests, recording @p file as the id's file component.
+ *  This is what @ref lfg_ct_suite expands to; the macro supplies
+ *  @c __FILE__ so consumers never write the argument themselves.
+ *
+ *  @param fn   Suite body.
+ *  @param name Registered suite name.
+ *  @param file Registration site's @c __FILE__; only its basename is used.
+ *              @c NULL yields @ref LFG_CT_ID_NO_SUITE in that position.
+ */
+void lfg_ct_suite_impl_at(void (*fn)(void), const char *name, const char *file);
+
+/** Execute a single unit test, recording @p file as the id's file component.
+ *  This is what @ref lfg_ct_test expands to.
+ *
+ *  @param fn   Test body.
+ *  @param name Registered test name.
+ *  @param file Registration site's @c __FILE__; only its basename is used.
+ *              @c NULL yields @ref LFG_CT_ID_NO_SUITE in that position.
+ */
+void lfg_ct_test_impl_at(void (*fn)(void), const char *name, const char *file);
 
 #endif /* LFG_CT_COMPAT_3ARG */
 
