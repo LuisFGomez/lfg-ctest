@@ -207,10 +207,14 @@ The fork runner:
 3. **Parent**: drains the pipe *while* waiting, never after — a message
    larger than the pipe buffer blocks the child in `write(2)`, so
    reaping first would deadlock the pair. With a timeout configured
-   the drain uses non-blocking reads interleaved with a 5ms
-   `waitpid(WNOHANG)` poll, escalating to `kill(SIGKILL)` on expiry;
-   without one it blocks on reads to EOF and then reaps. Decodes
-   `WIFSIGNALED` / `WIFEXITED` and projects the outcome via
+   the drain uses non-blocking reads, then a 5ms `waitpid(WNOHANG)`
+   poll, both bounded by a single `CLOCK_MONOTONIC` deadline that
+   escalates to `kill(SIGKILL)` on expiry; without one it blocks on
+   reads to EOF and then reaps. Note that EOF is *not* child exit —
+   the child closes the write end before its final `fflush(NULL)` —
+   so the reap is polled under the same deadline rather than blocked
+   on, or a child wedged in that flush would escape the timeout.
+   Decodes `WIFSIGNALED` / `WIFEXITED` and projects the outcome via
    `_lfg_ct_record_external`.
 
 Both sides keep a stack fast path for short messages and allocate

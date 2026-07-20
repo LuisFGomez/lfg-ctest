@@ -279,6 +279,26 @@ _fork_set_nonblocking(int fd)
     }
 }
 
+/* Milliseconds of CLOCK_MONOTONIC elapsed since @p start. The timed
+ * path derives its deadline from this rather than summing its sleep
+ * steps, so the timeout holds whether the child stalls (all sleep) or
+ * streams (no sleep at all), and does not drift when a nanosleep
+ * oversleeps or is cut short by a signal. */
+static unsigned
+_fork_elapsed_ms(const struct timespec *start)
+{
+    struct timespec now;
+    long long ms;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    ms = (long long)(now.tv_sec - start->tv_sec) * 1000LL + (now.tv_nsec - start->tv_nsec) / 1000000LL;
+    if (ms < 0)
+    {
+        return 0;
+    }
+    return (unsigned)ms;
+}
+
 /* Bridges provided by lfg-ctest.c. Declared local to this TU so the
  * core header stays focused on the public surface. */
 #ifdef LFG_CT_COMPAT_3ARG
@@ -469,10 +489,20 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
 
     if (timeout_ms > 0)
     {
-        /* Timed path: non-blocking reads interleaved with the WNOHANG
-         * poll, so a hung child is still killed on expiry. */
+        /* Timed path: non-blocking drain first, then a polled reap,
+         * both governed by one monotonic deadline measured from
+         * t_start. Deriving elapsed from the clock rather than
+         * accumulating sleep steps is what makes the deadline hold for
+         * a child that streams continuously (it never sleeps) as well
+         * as one that stalls.
+         *
+         * EOF is not the same event as child exit: the child closes
+         * the write end before its final fflush(NULL), so a child
+         * wedged in that flush has already produced EOF. Hence the
+         * reap below polls under the deadline too, instead of blocking
+         * -- a blocking wait there would let such a child escape the
+         * timeout entirely. */
         char chunk[4096];
-        unsigned elapsed_ms = 0;
         const unsigned step_ms = 5;
         int reaped = 0;
 
@@ -484,41 +514,45 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
             if (r > 0)
             {
                 _fork_parent_consume(&in, chunk, (size_t)r);
-                continue;
             }
-            if (0 == r)
+            else if (0 == r)
             {
                 break; /* EOF: child closed the write end */
             }
-            if (EINTR == errno)
+            else if (EINTR == errno)
             {
                 continue;
             }
-            if (EAGAIN != errno && EWOULDBLOCK != errno)
+            else if (EAGAIN != errno && EWOULDBLOCK != errno)
             {
                 break;
             }
-            /* Nothing readable yet. A reaped child cannot produce
-             * more, so any further EAGAIN means the descriptor is
-             * done with us -- stop rather than spin. */
-            if (reaped)
-            {
-                break;
-            }
-            {
-                pid_t w = waitpid(pid, &status, WNOHANG);
 
-                if (w == pid)
-                {
-                    reaped = 1;
-                    continue; /* drain the remainder, then hit EOF */
-                }
-                if (w < 0 && EINTR != errno)
-                {
-                    break;
-                }
+            if (_fork_elapsed_ms(&t_start) >= timeout_ms)
+            {
+                break;
             }
-            if (elapsed_ms >= timeout_ms)
+            if (r < 0)
+            {
+                /* Nothing readable yet -- back off before retrying. */
+                nanosleep(&(struct timespec){0, step_ms * 1000000L}, NULL);
+            }
+        }
+
+        while (!reaped)
+        {
+            pid_t w = waitpid(pid, &status, WNOHANG);
+
+            if (w == pid)
+            {
+                reaped = 1;
+                break;
+            }
+            if (w < 0 && EINTR != errno)
+            {
+                break;
+            }
+            if (_fork_elapsed_ms(&t_start) >= timeout_ms)
             {
                 kill(pid, SIGKILL);
                 while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
@@ -529,13 +563,6 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
                 break;
             }
             nanosleep(&(struct timespec){0, step_ms * 1000000L}, NULL);
-            elapsed_ms += step_ms;
-        }
-        if (!reaped)
-        {
-            while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
-            {
-            }
         }
     }
     else
