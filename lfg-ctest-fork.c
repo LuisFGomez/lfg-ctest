@@ -27,6 +27,18 @@
  *  without any explicit capture wiring; the parent only re-emits the
  *  banner when the child died before printing it (signal/timeout/no
  *  payload).
+ *
+ *  That inheritance contract is on the *descriptor*, not on the stdio
+ *  buffer, so it holds only under a two-sided flush discipline:
+ *
+ *    - Parent flushes before @c fork(), or the child inherits a copy
+ *      of the parent's pending buffer and re-emits it on its own
+ *      flush -- duplicating parent output once per forked test.
+ *    - Child flushes before @c _exit(), which by design does not run
+ *      the stdio cleanup @c exit() would. Without it, everything the
+ *      child buffered is discarded. Only visible when stdout is not a
+ *      TTY: line buffering hides the bug by flushing at each newline,
+ *      while a pipe or file buffers 4-8KB and loses the lot.
  */
 
 /* POSIX.1-2008 surface (clock_gettime, CLOCK_MONOTONIC, struct timespec,
@@ -129,6 +141,11 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
     }
 
     clock_gettime(CLOCK_MONOTONIC, &t_start);
+    /* Drain every output stream before the address space is copied:
+     * whatever is still buffered here would otherwise be duplicated by
+     * the child's own pre-_exit flush. NULL covers stdout, stderr and
+     * any stream the test body opened. */
+    fflush(NULL);
     pid = fork();
     if (pid < 0)
     {
@@ -188,6 +205,12 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         w = write(pipefd[1], &out, sizeof(out));
         (void)w; /* short writes accepted; parent treats missing payload as crash */
         close(pipefd[1]);
+
+        /* _exit() skips stdio cleanup, so push the test's own output
+         * (assertion-failure lines, anything the body printed) to the
+         * shared descriptor first. Sole child exit point, so one flush
+         * covers every path through the branch. */
+        fflush(NULL);
 
         _exit(LFG_CT_FAILED == (lfg_ct_outcome_t)out.outcome ? 1 : 0);
     }
