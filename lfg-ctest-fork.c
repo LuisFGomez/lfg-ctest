@@ -543,7 +543,9 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
                 if (w == pid)
                 {
                     /* A write may have landed between the read and the
-                     * reap -- take what is there before leaving. */
+                     * reap -- take what is there before leaving. Still
+                     * under the deadline: an inherited write end in a
+                     * live grandchild can keep this readable forever. */
                     for (;;)
                     {
                         ssize_t d = read(pipefd[0], chunk, sizeof(chunk));
@@ -551,6 +553,10 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
                         if (d > 0)
                         {
                             _fork_parent_consume(&in, chunk, (size_t)d);
+                            if (_fork_elapsed_ms(&t_start) >= timeout_ms)
+                            {
+                                break;
+                            }
                             continue;
                         }
                         if (d < 0 && EINTR == errno)
