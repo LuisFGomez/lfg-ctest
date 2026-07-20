@@ -364,6 +364,12 @@
 const char *lfg_ct_version(void);
 
 /** Mark the beginning of unit testing.
+ *
+ *  Seeds @c rand(3) and announces the effective seed as
+ *  @c "*** random seed is \<n\>" (suppressed under @c --list). The seed is
+ *  the @c --seed value when one was parsed, otherwise a generated one
+ *  spanning the full @c unsigned range. Call after
+ *  @ref lfg_ct_parse_args so a supplied seed is in place.
  */
 void lfg_ct_start(void);
 
@@ -394,6 +400,14 @@ void lfg_ct_end(void);
  *                                  one or more @c xpass outcomes to a
  *                                  non-zero exit code. Default behavior is
  *                                  permissive (xpass is a warning).
+ *   - @c --seed \<n\>             : seed @c rand(3) with @c n instead of a
+ *                                  generated value. @ref lfg_ct_start prints
+ *                                  the effective seed either way, so reading
+ *                                  the seed off a failing run and passing it
+ *                                  back reproduces that run's @c rand()
+ *                                  sequence. @c n is decimal and must fit an
+ *                                  @c unsigned; 0 is a legal seed. Repeating
+ *                                  the flag keeps the last value.
  *   - @c -v / @c --verbose       : stream a per-test @c START line before
  *                                  each test body is dispatched and a
  *                                  per-test outcome line (@c PASS / @c FAIL /
@@ -430,6 +444,18 @@ int lfg_ct_is_list_mode(void);
  *  @return 1 if @c -v / @c --verbose was parsed, 0 otherwise.
  */
 int lfg_ct_is_verbose(void);
+
+/** Query whether a seed was supplied via @c --seed.
+ *  Distinct from the seed value because 0 is a legal seed.
+ *  @return 1 if @c --seed was parsed, 0 otherwise.
+ */
+int lfg_ct_is_seed_set(void);
+
+/** Query the seed supplied via @c --seed.
+ *  @return The parsed seed, or 0 when no @c --seed was given (check
+ *          @ref lfg_ct_is_seed_set to tell the two apart).
+ */
+unsigned lfg_ct_get_seed(void);
 
 /** Query whether a hypothetical test/suite with @p name would be executed by
  *  the runner under the currently parsed filter/exclude rules.

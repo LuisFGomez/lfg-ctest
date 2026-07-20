@@ -10,6 +10,8 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <time.h>
+#include <errno.h>
+#include <limits.h>
 #include <string.h>
 #include <fnmatch.h>
 #include <setjmp.h>
@@ -175,6 +177,12 @@ static int _exclude_glob_count = 0;
  * a suite inherit the filter-pass (so "--filter suite_foo*" runs every test
  * the suite holds without each test having to match individually). */
 static int _filter_inherited_depth = 0;
+
+/* --seed <n>: user-supplied srand() seed. The "was it supplied" answer is
+ * its own flag rather than a sentinel value, because 0 is a legal seed the
+ * user may pass deliberately. When unset, lfg_ct_start() generates one. */
+static int _seed_set = 0;
+static unsigned _seed_value = 0;
 
 /*============================================================================
  *  Self-Test Support (internal only)
@@ -402,9 +410,43 @@ lfg_ct_version(void)
     return LFG_CTEST_VERSION_FULL;
 }
 
+/* FNV-1a fold of one value's bytes into the running hash. Bounded by
+ * sizeof(v) so the shift never reaches the width of the type. */
+static unsigned
+_seed_mix(unsigned h, unsigned long v)
+{
+    unsigned i;
+
+    for (i = 0; i < (unsigned)sizeof(v); i++)
+    {
+        h ^= (unsigned)((v >> (i * 8)) & 0xFFUL);
+        h *= 16777619U;
+    }
+    return h;
+}
+
+/* Generate a seed spanning the full unsigned range from sources that are
+ * available wherever C89 is: wall clock (coarse but always distinct across
+ * runs seconds apart), process CPU clock (sub-second, distinct across runs
+ * started within the same second), and a stack address (varies per run
+ * under ASLR). Hashed together rather than added so no single weak source
+ * dominates the low bits. Deliberately not a CSPRNG -- this seeds rand()
+ * for scenario selection, not key material. */
+static unsigned
+_seed_generate(void)
+{
+    unsigned char probe = 0;
+    unsigned h = 2166136261U;
+
+    h = _seed_mix(h, (unsigned long)time(NULL));
+    h = _seed_mix(h, (unsigned long)clock());
+    h = _seed_mix(h, (unsigned long)(size_t)(void *)&probe);
+    return h;
+}
+
 void lfg_ct_start(void)
 {
-    unsigned rand_seed = time(NULL) % 1000;
+    unsigned rand_seed = _seed_set ? _seed_value : _seed_generate();
     /* List mode wants stdout to be a clean newline-separated list of names;
      * skip the banner and the seed announcement. srand still runs so any
      * deterministic-by-seed test behavior stays consistent if the user
@@ -474,6 +516,8 @@ _filter_state_reset(void)
     _filter_inherited_depth = 0;
     _strict_xpass = 0;
     _verbose_mode = 0;
+    _seed_set = 0;
+    _seed_value = 0;
     _reporter_activate();
 }
 
@@ -486,6 +530,7 @@ _filter_print_usage(const char *progname)
             "  --filter <glob>          Run only entries whose name matches <glob>\r\n"
             "  --filter-exclude <glob>  Skip entries whose name matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
+            "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
@@ -522,6 +567,52 @@ lfg_ct_parse_args(int argc, char *argv[])
         {
             _verbose_mode = 1;
             _reporter_activate();
+            continue;
+        }
+        if (0 == strcmp(a, "--seed"))
+        {
+            /* Scalar, not accumulating, so it gets its own bounds check
+             * instead of riding the slot/count tail below. Last flag wins. */
+            const char *val;
+            char *endptr;
+            unsigned long parsed;
+
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            val = argv[++i];
+
+            /* strtoul happily accepts leading signs and whitespace and
+             * wraps a negative into a huge unsigned; require a bare digit
+             * run so "-1" and " 7" are rejected rather than coerced. */
+            errno = 0;
+            endptr = NULL;
+            parsed = strtoul(val, &endptr, 10);
+            if ('\0' == val[0] || val[0] < '0' || val[0] > '9' || NULL == endptr || '\0' != *endptr)
+            {
+                fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+#if ULONG_MAX > UINT_MAX
+            if (ERANGE == errno || parsed > (unsigned long)UINT_MAX)
+#else
+            if (ERANGE == errno)
+#endif
+            {
+                fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+
+            _seed_value = (unsigned)parsed;
+            _seed_set = 1;
             continue;
         }
         if (0 == strcmp(a, "--filter"))
@@ -570,6 +661,18 @@ int
 lfg_ct_is_verbose(void)
 {
     return _verbose_mode ? 1 : 0;
+}
+
+int
+lfg_ct_is_seed_set(void)
+{
+    return _seed_set ? 1 : 0;
+}
+
+unsigned
+lfg_ct_get_seed(void)
+{
+    return _seed_value;
 }
 
 /* Pure name predicate -- ignores list mode (which suppresses execution
