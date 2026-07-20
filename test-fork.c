@@ -558,6 +558,341 @@ test_fork_xfail_round_trip(void)
 }
 
 /* ============================================================================
+ *  Long-message survival (all three fixed-width chokepoints)
+ *
+ *  Regression cover for the silent 512-byte clip: an assertion message
+ *  of arbitrary length must reach stdout, the reporter record, and --
+ *  under fork isolation -- the parent across the pipe, with no byte
+ *  dropped and no truncation marker emitted.
+ *
+ *  Every case runs inside a capture child. Driving a genuine FAILED
+ *  classification is the only way to observe the failure-message path
+ *  (expect-failures mode bypasses the capture by design), and a real
+ *  failure would otherwise poison the outer binary's tally. The child
+ *  re-points its stdout at a file, runs the case, and reports the
+ *  reporter-side verdict through its exit code; the parent checks the
+ *  verdict and then greps the captured stdout.
+ * ========================================================================== */
+
+/* Comfortably past a 64KB pipe buffer: the fork case doubles as the
+ * regression guard for the parent draining concurrently with its wait
+ * rather than reaping first (which would deadlock on a message this
+ * size). */
+#define _LONG_MSG_BYTES 131072
+#define _LONG_MSG_HEAD "LONGMSG-HEAD-MARKER"
+#define _LONG_MSG_TAIL "LONGMSG-TAIL-MARKER"
+
+/* Second, differently-marked message for the nested case. */
+#define _OUTER_MSG_BYTES 4096
+#define _OUTER_MSG_HEAD "OUTERMSG-HEAD-MARKER"
+#define _OUTER_MSG_TAIL "OUTERMSG-TAIL-MARKER"
+
+/* Child exit codes. Distinct per cause so a regression names itself
+ * instead of surfacing as a bare non-zero exit. */
+enum
+{
+    _LONG_OK = 0,
+    _LONG_ERR_SETUP = 2,
+    _LONG_ERR_NO_RECORD = 3,
+    _LONG_ERR_HEAD = 4,
+    _LONG_ERR_TAIL = 5,
+    _LONG_ERR_MARKER = 6,
+    _LONG_ERR_ORDER = 7
+};
+
+#define _LONG_LOG_SLOTS 4
+
+static char *_long_msg;
+static char *_long_msg_outer;
+static char *_long_log[_LONG_LOG_SLOTS];
+static int _long_log_count;
+
+/* Heap-copying reporter: record->message is borrowed for the callback
+ * only, and the cases below inspect it after the runner has moved on. */
+static void
+_long_on_record(const lfg_ct_record_t *record, void *userdata)
+{
+    size_t len;
+
+    (void)userdata;
+    if (_long_log_count >= _LONG_LOG_SLOTS)
+    {
+        return;
+    }
+    if (NULL == record->message)
+    {
+        _long_log[_long_log_count++] = NULL;
+        return;
+    }
+    len = strlen(record->message);
+    _long_log[_long_log_count] = (char *)malloc(len + 1);
+    if (_long_log[_long_log_count])
+    {
+        memcpy(_long_log[_long_log_count], record->message, len + 1);
+    }
+    _long_log_count++;
+}
+
+static char *
+_make_marked_message(size_t len, const char *head, const char *tail)
+{
+    char *m = (char *)malloc(len + 1);
+    size_t hl = strlen(head);
+    size_t tl = strlen(tail);
+
+    if (NULL == m)
+    {
+        return NULL;
+    }
+    memset(m, 'x', len);
+    m[len] = '\0';
+    memcpy(m, head, hl);
+    memcpy(m + len - tl, tail, tl);
+    return m;
+}
+
+static int
+_check_message(const char *msg, const char *head, const char *tail)
+{
+    if (NULL == msg)
+    {
+        return _LONG_ERR_NO_RECORD;
+    }
+    if (NULL == strstr(msg, head))
+    {
+        return _LONG_ERR_HEAD;
+    }
+    if (NULL == strstr(msg, tail))
+    {
+        return _LONG_ERR_TAIL;
+    }
+    /* Length-correct paths must not degrade: a marker here means the
+     * message went through a truncating fallback. */
+    if (NULL != strstr(msg, "[truncated"))
+    {
+        return _LONG_ERR_MARKER;
+    }
+    return _LONG_OK;
+}
+
+static void
+_body_long_message_failure(void)
+{
+    ASSERT_FAIL(_long_msg);
+}
+
+/* Outer body captures its message BEFORE driving a nested lifecycle,
+ * so the nested call has to move the outer's message out of the slot
+ * and hand it back intact -- the ownership path a heap-backed capture
+ * slot introduces. The trailing failure is what re-arms the outer's
+ * FAILED classification (a nested lifecycle resets the enclosing
+ * test's failure count); its text must lose to the first one under
+ * the "first failure per test wins" rule. */
+static void
+_body_outer_long_then_nested(void)
+{
+    ASSERT_FAIL(_long_msg_outer);
+    lfg_ct_test_impl(_body_long_message_failure, "long_msg_nested_inner");
+    ASSERT_FAIL("SECOND-FAILURE-MUST-NOT-WIN");
+}
+
+static void
+_long_message_cleanup(void)
+{
+    int i;
+
+    for (i = 0; i < _LONG_LOG_SLOTS; i++)
+    {
+        free(_long_log[i]);
+        _long_log[i] = NULL;
+    }
+    _long_log_count = 0;
+    free(_long_msg);
+    free(_long_msg_outer);
+    _long_msg = NULL;
+    _long_msg_outer = NULL;
+}
+
+/* Body of the capture child. Returns the exit code the child reports. */
+static int
+_long_message_child(const char *out_path, lfg_ct_isolation_t isolation, int nested)
+{
+    lfg_ct_reporter_t r;
+    int verdict;
+
+    if (NULL == freopen(out_path, "w", stdout))
+    {
+        return _LONG_ERR_SETUP;
+    }
+
+    _long_msg = _make_marked_message(_LONG_MSG_BYTES, _LONG_MSG_HEAD, _LONG_MSG_TAIL);
+    _long_msg_outer = _make_marked_message(_OUTER_MSG_BYTES, _OUTER_MSG_HEAD, _OUTER_MSG_TAIL);
+    if (NULL == _long_msg || NULL == _long_msg_outer)
+    {
+        return _LONG_ERR_SETUP;
+    }
+
+    memset(&r, 0, sizeof(r));
+    r.on_record = _long_on_record;
+    lfg_ct_set_reporter(&r);
+    lfg_ct_set_isolation(isolation);
+
+    if (nested)
+    {
+        lfg_ct_test_impl(_body_outer_long_then_nested, "long_msg_outer");
+    }
+    else
+    {
+        lfg_ct_test_impl(_body_long_message_failure, "long_msg_case");
+    }
+
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    lfg_ct_set_reporter(NULL);
+
+    if (!nested)
+    {
+        verdict = (1 == _long_log_count) ? _check_message(_long_log[0], _LONG_MSG_HEAD, _LONG_MSG_TAIL)
+                                         : _LONG_ERR_NO_RECORD;
+        _long_message_cleanup();
+        return verdict;
+    }
+
+    /* Nested: inner classifies first, then the outer. Each must carry
+     * its own text, and the outer must not have inherited the
+     * nested one's. */
+    verdict = (2 == _long_log_count) ? _LONG_OK : _LONG_ERR_ORDER;
+    if (_LONG_OK == verdict)
+    {
+        verdict = _check_message(_long_log[0], _LONG_MSG_HEAD, _LONG_MSG_TAIL);
+    }
+    if (_LONG_OK == verdict)
+    {
+        verdict = _check_message(_long_log[1], _OUTER_MSG_HEAD, _OUTER_MSG_TAIL);
+    }
+    if (_LONG_OK == verdict
+            && (NULL != strstr(_long_log[1], _LONG_MSG_TAIL) || NULL != strstr(_long_log[1], "MUST-NOT-WIN")))
+    {
+        verdict = _LONG_ERR_ORDER;
+    }
+    _long_message_cleanup();
+    return verdict;
+}
+
+static char *
+_slurp_alloc(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    char *buf;
+    long size;
+    size_t n;
+
+    if (NULL == f)
+    {
+        return NULL;
+    }
+    if (0 != fseek(f, 0, SEEK_END))
+    {
+        fclose(f);
+        return NULL;
+    }
+    size = ftell(f);
+    rewind(f);
+    if (size < 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+    buf = (char *)malloc((size_t)size + 1);
+    if (NULL == buf)
+    {
+        fclose(f);
+        return NULL;
+    }
+    n = fread(buf, 1, (size_t)size, f);
+    buf[n] = '\0';
+    fclose(f);
+    return buf;
+}
+
+static void
+_run_long_message_case(lfg_ct_isolation_t isolation, int nested)
+{
+    char tmpl[] = "/tmp/lfg-ctest-longmsgXXXXXX";
+    char *captured;
+    int fd;
+    pid_t pid;
+    int status = 0;
+
+    fd = mkstemp(tmpl);
+    ASSERT_GT(fd, -1);
+    close(fd);
+
+    /* Same pre-fork discipline the runner itself applies: the outer
+     * binary's pending stdout must not be inherited and re-emitted. */
+    fflush(NULL);
+
+    pid = fork();
+    ASSERT_GT((int)pid, -1);
+    if (0 == pid)
+    {
+        int code = _long_message_child(tmpl, isolation, nested);
+
+        /* _exit skips stdio cleanup, and the re-pointed stdout is a
+         * regular file (fully buffered) -- without this the captured
+         * failure line never reaches the file. */
+        fflush(NULL);
+        _exit(code);
+    }
+
+    while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
+    {
+    }
+
+    captured = _slurp_alloc(tmpl);
+    unlink(tmpl);
+
+    /* Reporter-side verdict first -- it names the specific failure. */
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_INT_EQUAL(_LONG_OK, WEXITSTATUS(status));
+
+    /* Stdout side: the "*** file: line: FAILURE in fn(): ..." line
+     * carries the message tail, undamaged and unmarked. */
+    ASSERT_NOT_NULL(captured);
+    if (captured)
+    {
+        ASSERT_TRUE(NULL != strstr(captured, _LONG_MSG_HEAD));
+        ASSERT_TRUE(NULL != strstr(captured, _LONG_MSG_TAIL));
+        ASSERT_TRUE(NULL == strstr(captured, "[truncated"));
+        free(captured);
+    }
+}
+
+static void
+test_long_message_survives_in_process_path(void)
+{
+    /* Sites (1) and (2): the stdout failure line and the reporter
+     * record, in-process. */
+    _run_long_message_case(LFG_CT_ISOLATE_NONE, 0);
+}
+
+static void
+test_long_message_survives_fork_transport(void)
+{
+    /* Site (3): the same message across the child->parent pipe. At
+     * 128KB it also proves the transport does not deadlock once the
+     * message outgrows the pipe buffer. */
+    _run_long_message_case(LFG_CT_ISOLATE_FORK, 0);
+}
+
+static void
+test_long_message_nested_preserves_outer_capture(void)
+{
+    /* The save/restore around a nested lifecycle must hand the outer
+     * test its own long message back, unswapped and unfreed. */
+    _run_long_message_case(LFG_CT_ISOLATE_NONE, 1);
+}
+
+/* ============================================================================
  *  Suite + main
  * ========================================================================== */
 
@@ -577,6 +912,9 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_fork_xfail_round_trip);
     lfg_ct_test(test_fork_verbose_start_fires_once_in_parent);
     lfg_ct_test(test_fork_child_output_survives_non_tty_stdout);
+    lfg_ct_test(test_long_message_survives_in_process_path);
+    lfg_ct_test(test_long_message_survives_fork_transport);
+    lfg_ct_test(test_long_message_nested_preserves_outer_capture);
 }
 
 int
