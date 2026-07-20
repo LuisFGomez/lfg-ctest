@@ -344,8 +344,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_test(NAME test-compat-3arg COMMAND test-compat-3arg)
 
     # `--list | grep | xargs --filter` is a documented contract (#55) and can
-    # only be checked outside the runner, on the real stdout bytes. Needs a
-    # POSIX shell, so it is skipped where one is not assumed.
+    # only be checked outside the runner, on the real stdout bytes. The script
+    # is strictly POSIX sh (macOS is UNIX but ships bash 3.2), so this guard
+    # is honest: it is skipped only where no POSIX shell is assumed.
     if(UNIX)
         add_test(NAME test-id-roundtrip
             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/check-id-roundtrip.sh $<TARGET_FILE:test-amalg>)

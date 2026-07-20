@@ -1201,6 +1201,52 @@ static void test_id_bare_name_glob_still_selects(void)
     _id_restore_default_args();
 }
 
+static void test_id_wildcard_glob_does_not_reach_file_component(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"test_*"};
+
+    /* The regression the suffix rule invites: "test_*.c" is the ubiquitous
+     * test-file naming convention, so a bare "test_*" shard would start
+     * matching the *file* component of every id in such a file and drag in
+     * unrelated entries. A glob addresses exactly as many components as it
+     * spells out, so a one-component glob only ever sees the test name. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("test_math.c", "math_suite", "test_add"));
+    ASSERT_FALSE(lfg_ct_id_runs("test_math.c", "math_suite", "helper_sanity"));
+    /* Nor may it match the suite id and inherit the whole suite. */
+    ASSERT_FALSE(lfg_ct_id_runs("test_math.c", "test_suite", "helper_sanity"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_wildcard_spans_only_the_components_it_spells(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"*::test_thing"};
+
+    /* A two-component glob addresses suite::test. "*" fills exactly one
+     * component -- it does not cross a "::" to swallow the file too. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_two", "test_thing"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_other"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_file_qualified_wildcard_selects_whole_file(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"alpha.c::*::*"};
+
+    /* Qualifying the file and wildcarding the rest is how a caller shards
+     * by translation unit -- the case the file component exists to serve. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_two", "test_other"));
+    ASSERT_FALSE(lfg_ct_id_runs("beta.c", "suite_one", "test_thing"));
+
+    _id_restore_default_args();
+}
+
 static void test_id_suite_qualified_glob_selects(void)
 {
     char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"suite_one::test_thing"};
@@ -1343,8 +1389,11 @@ static void test_id_format_truncates_rather_than_overflows(void)
     char id[8];
 
     /* Silent truncation costs addressability of a pathological name, never
-     * correctness of the run -- and never a write past the buffer. */
-    ASSERT_UINT_EQUAL(7U, (unsigned)lfg_ct_format_id(id, sizeof(id), "alpha.c", "suite_one", "test_thing"));
+     * correctness of the run -- and never a write past the buffer. The
+     * return is snprintf(3)'s: the length the id *needed*, so a caller that
+     * cares can spot truncation as result >= cap.
+     * "alpha.c::suite_one::test_thing" is 30 bytes; 7 fit. */
+    ASSERT_UINT_EQUAL(30U, (unsigned)lfg_ct_format_id(id, sizeof(id), "alpha.c", "suite_one", "test_thing"));
     ASSERT_STR_EQUAL("alpha.c", id);
 
     /* Zero capacity is a no-op, not a crash. */
@@ -1400,6 +1449,9 @@ static void suite_filter_args_tests(void)
     lfg_ct_test(test_id_format_uses_basename_only);
     lfg_ct_test(test_id_missing_components_get_placeholder);
     lfg_ct_test(test_id_bare_name_glob_still_selects);
+    lfg_ct_test(test_id_wildcard_glob_does_not_reach_file_component);
+    lfg_ct_test(test_id_wildcard_spans_only_the_components_it_spells);
+    lfg_ct_test(test_id_file_qualified_wildcard_selects_whole_file);
     lfg_ct_test(test_id_suite_qualified_glob_selects);
     lfg_ct_test(test_id_fully_qualified_glob_selects_exactly_one);
     lfg_ct_test(test_id_duplicate_names_across_files_resolve_distinctly);

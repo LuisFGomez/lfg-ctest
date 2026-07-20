@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # check-id-roundtrip.sh — assert that `--list` output composes back into
 # `--filter` (lfg/ctest#55 "No way to address a single test").
@@ -13,9 +13,13 @@
 #
 # and asserts each listed id selects exactly one entry.
 #
+# Strictly POSIX sh: CMake gates this on if(UNIX), which includes macOS, and
+# stock macOS ships bash 3.2 -- so no `mapfile`, no process substitution, no
+# arrays, no `$'\r'`, no `printf %q`.
+#
 # Usage: check-id-roundtrip.sh <test-binary>
 
-set -euo pipefail
+set -eu
 
 BIN="${1:?usage: check-id-roundtrip.sh <test-binary>}"
 
@@ -25,12 +29,19 @@ then
     exit 1
 fi
 
+LIST=$(mktemp) || exit 1
+trap 'rm -f "$LIST"' EXIT INT TERM
+
+CR=$(printf '\r')
+
 # --list writes ids to stdout; the banner the runner prints around them goes
 # there too, so select the id lines by their two-separator shape rather than
 # assuming the listing is the whole stream.
-mapfile -t IDS < <("$BIN" --list | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$')
+"$BIN" --list | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$' > "$LIST" || true
 
-if [ "${#IDS[@]}" -eq 0 ]
+TOTAL=$(wc -l < "$LIST" | tr -d ' ')
+
+if [ "$TOTAL" -eq 0 ]
 then
     echo "check-id-roundtrip: $BIN listed no fully-qualified ids" >&2
     exit 1
@@ -38,13 +49,13 @@ fi
 
 FAILED=0
 
-for id in "${IDS[@]}"
+while IFS= read -r id
 do
     # A CR surviving from the listing would land inside the glob and match
     # nothing -- catch it as itself rather than as a confusing count of 0.
     case "$id" in
-        *$'\r'*)
-            echo "check-id-roundtrip: id carries a trailing CR: $(printf '%q' "$id")" >&2
+        *"$CR"*)
+            echo "check-id-roundtrip: id carries a trailing CR: [$id]" >&2
             FAILED=1
             continue
             ;;
@@ -59,11 +70,11 @@ do
         echo "check-id-roundtrip: '$id' selected ${count:-<no summary>} tests, expected 1" >&2
         FAILED=1
     fi
-done
+done < "$LIST"
 
 if [ "$FAILED" -ne 0 ]
 then
     exit 1
 fi
 
-echo "check-id-roundtrip: ${#IDS[@]} ids each selected exactly 1 test"
+echo "check-id-roundtrip: $TOTAL ids each selected exactly 1 test"
