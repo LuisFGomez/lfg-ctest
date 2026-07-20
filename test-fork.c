@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -119,8 +120,20 @@ _body_eof_then_hang(void)
      * EOF while the child is still very much alive, then outlive any
      * reasonable timeout. Reproduces the shape of a child wedged in
      * its pre-_exit fflush(NULL), which also closes the write end
-     * first. If the fd prediction misses, this degrades into a plain
-     * hung child -- still a timeout, just a weaker test. */
+     * first.
+     *
+     * Verify the prediction before acting on it. A miss would silently
+     * degrade this into a plain hung child -- indistinguishable from
+     * test_fork_timeout_kills_hung_child, and still passing. Returning
+     * instead lets the child exit promptly, so no timeout fires and the
+     * outer assertions fail loudly, which is what a stale prediction
+     * should look like. */
+    struct stat st;
+
+    if (0 != fstat(_predicted_pipe_write_fd, &st) || !S_ISFIFO(st.st_mode))
+    {
+        return;
+    }
     close(_predicted_pipe_write_fd);
     sleep(10);
 }
