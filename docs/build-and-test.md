@@ -61,8 +61,8 @@ POSIX shell.
 ### Run one specific test
 
 Every registered entry has an id — `<file>::<suite>::<test>` — and `--filter`
-matches the full id or any trailing `::` suffix of it. Ask the binary what it
-contains, then name one:
+addresses as many trailing `::`-components as the glob spells out. Ask the
+binary what it contains, then name one:
 
 ```
 ./build/test-unified --list

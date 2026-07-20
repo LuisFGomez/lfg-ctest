@@ -40,7 +40,7 @@ The flags it recognises:
 | Flag | Effect |
 |------|--------|
 | `--list` | Print every test/suite **id** encountered, one per line on stdout. |
-| `--filter <glob>` | Run only entries whose id — or any trailing `::` suffix of it — matches the `fnmatch(3)` glob (`*`, `?`, `[...]`). Repeat to OR-combine. |
+| `--filter <glob>` | Run only entries whose id matches the `fnmatch(3)` glob (`*`, `?`, `[...]`), which addresses as many trailing `::`-components as it spells out. Repeat to OR-combine. |
 | `--filter-exclude <glob>` | Skip entries whose id matches, same rule. Repeat to OR-combine. **Exclude wins** if both match the same entry. |
 | `--strict-xpass` | Make an otherwise-clean run exit non-zero if any test XPASSed (see [chapter 3](03-skip-xfail-xpass.md)). |
 | `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
@@ -114,10 +114,10 @@ if (!lfg_ct_is_list_mode())
 
 ## Filtering
 
-`--filter` takes a shell-style glob. It selects an entry if it matches the
-entry's full id **or any trailing `::`-delimited suffix of it** — so `test`,
-`suite::test`, and `file.c::suite::test` all name the same entry, and you can
-qualify only as far as you need to make the selection unique:
+`--filter` takes a shell-style glob. It addresses **exactly as many trailing
+components of the id as it spells out** — so `test`, `suite::test`, and
+`file.c::suite::test` all name the same entry, and you can qualify only as far
+as you need to make the selection unique:
 
 ```bash
 ./test_indicators --filter 'test_add_positive'                 # every test of that name
@@ -125,9 +125,10 @@ qualify only as far as you need to make the selection unique:
 ./test_indicators --filter 'math.c::math_suite::test_add_positive'  # exactly one
 ```
 
-A bare name is the shortest suffix, so **every glob that worked before ids
-existed selects exactly what it selected before** — existing `add_test(...
---filter "suite_sma_*")` shards need no edit.
+A glob with no `::` is matched against the test name alone, so **every glob
+that worked before ids existed selects exactly what it selected before** —
+existing `add_test(... --filter "suite_sma_*")` shards need no edit, wildcards
+included.
 
 Matching a *suite* pulls in every test inside it, which is what makes the
 one-binary-many-entries pattern work:
@@ -138,9 +139,16 @@ one-binary-many-entries pattern work:
 ./test_indicators --filter 'test_*' --filter-exclude '*_slow'
 ```
 
-`*` is not `::`-aware — it happily spans separators, so `math*positive` matches
-across the whole id. That is deliberate, but it means a glob written to be
-unique should be anchored with the components you actually care about.
+`*` never crosses a `::` — it fills exactly one component. That is what keeps
+`--filter 'test_*'` above meaning what it always meant: in the near-universal
+`test_*.c` naming convention it would otherwise match the *file* component of
+every id in the file (and the suite id, pulling in the whole suite). To reach
+the file, spell it out:
+
+```bash
+./test_indicators --filter 'math.c::*::*'        # every test in that file
+./test_indicators --filter '*::test_add_positive'  # that test in any suite
+```
 
 An unmatched filter is **not** an error: zero tests run and the binary exits
 `0`. Unknown *flags*, by contrast, are fatal (non-zero) — the distinction
@@ -179,9 +187,15 @@ if (lfg_ct_name_runs("test_db_roundtrip"))
 }
 ```
 
-`lfg_ct_name_runs` keeps its bare-name meaning. When the same test name lives
-in several files and you need the answer for *this* one, use the `lfg_ct_test_runs`
-macro instead — it captures `__FILE__` so the query sees the same id `--list`
+`lfg_ct_name_runs` keeps its bare-name meaning, and that is also its limit: it
+builds the id from whatever file/suite context is ambient, and in `main()`
+there is none — so it answers against `(none)::(none)::test_db_roundtrip`. A
+bare-name filter still resolves correctly, but under a *qualified* filter like
+`--filter 'alpha.c::suite_one::test_db_roundtrip'` it returns 0 while the test
+in fact runs, silently skipping the setup you were gating.
+
+Use the `lfg_ct_test_runs` macro instead whenever a qualified filter is
+possible — it captures `__FILE__` so the query sees the same id `--list`
 prints:
 
 ```c

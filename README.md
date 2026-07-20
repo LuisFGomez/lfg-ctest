@@ -20,8 +20,9 @@ read/write actions, and a per-call callback hook.
   `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` so one binary can
   back many `ctest` entries.
 - Every entry has an id — `<file>::<suite>::<test>` — that `--list` emits and
-  `--filter` matches by full id or any trailing `::` suffix, so a bare name
-  still works and a fully-qualified id runs exactly one test.
+  `--filter` matches by addressing as many trailing `::`-components as the
+  glob spells out, so a bare name still works unchanged and a fully-qualified
+  id runs exactly one test.
 - `--seed <n>` replays a prior run's `rand()` sequence; without it the runner
   generates a full-range seed per run and prints it.
 - `lfg_ct_skip("reason")` and `lfg_ct_xfail("reason")` bucket tests as

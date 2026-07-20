@@ -67,7 +67,7 @@ int main(void)
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed, 0 otherwise. Separate from the value because `0` is a legal seed. |
 | `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. |
-| `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. |
+| `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. **Cannot answer a qualified filter:** it builds the id from whatever file/suite batons are ambient, so called from `main()` (the documented usage) both are absent and the id is `(none)::(none)::name`. Under `--filter 'alpha.c::suite_one::test_db_roundtrip'` it returns 0 even though the test does run. Use `lfg_ct_id_runs` where that matters. |
 | `lfg_ct_test_runs(name)` | Same query for the test named `name` **in this file and the enclosing suite**. Captures `__FILE__`, so it sees the same id `--list` prints. See [Entry ids](#entry-ids). |
 | `lfg_ct_id_runs(file, suite, name)` | Explicit form behind `lfg_ct_test_runs`. `suite = NULL` means "the suite currently on the registration stack"; `""` means "no enclosing suite". |
 | `lfg_ct_format_id(buf, cap, file, suite, test)` | Render an entry id into `buf` exactly as `--list` emits it. `test = NULL` renders a suite id. Truncates silently; returns the written length. |
@@ -173,15 +173,16 @@ Recognized flags:
 | Flag | Effect |
 |------|--------|
 | `--list` | Print every test/suite [id](#entry-ids) encountered (one per line on stdout, `\n`-terminated). Suite bodies are still invoked so their contained tests can list themselves; setup/teardown of suites and tests are skipped. Each line is directly usable as a `--filter` argument. |
-| `--filter <glob>` | Run only entries whose id — **or any trailing `::`-delimited suffix of it** — matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite matches, every entry inside it inherits the match — useful with the `add_test` pattern above. |
-| `--filter-exclude <glob>` | Skip entries whose id matches the glob, same suffix rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
+| `--filter <glob>` | Run only entries whose id matches the shell-style glob, which **addresses exactly as many trailing `::`-delimited components as it spells out** (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite matches, every entry inside it inherits the match — useful with the `add_test` pattern above. |
+| `--filter-exclude <glob>` | Skip entries whose id matches the glob, same component-depth rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 
-Because a bare name is the shortest suffix of an id, every glob that selected
-an entry before ids existed selects exactly the same set now — existing
-`--filter "suite_sma_*"` shards need no edit. Qualify as far as you need to:
+A glob addresses **exactly as many trailing components as it spells out**: a
+glob with no `::` is matched against the test name alone, one with a single
+`::` against `suite::test`, and one with two against the full id. Qualify as
+far as you need to:
 
 ```bash
 ./test_indicators --filter 'test_roundtrip'                        # every test of that name
@@ -189,8 +190,22 @@ an entry before ids existed selects exactly the same set now — existing
 ./test_indicators --filter 'test-ind-sma.c::suite_sma::test_roundtrip'  # exactly one
 ```
 
-`*` is not `::`-aware and spans separators freely; that is deliberate, but a
-glob meant to be unique should spell out the components it depends on.
+Because the depth is pinned by the glob itself, every glob that selected an
+entry before ids existed selects exactly the same set now — existing
+`--filter "suite_sma_*"` shards need no edit, wildcards included. This is why
+the rule is depth-pinned rather than "match any suffix": under a plain
+any-suffix rule a bare `--filter 'test_*'` would also match the *file*
+component of `test_math.c::...` — and the suite id `test_math.c::math_suite`,
+dragging in that whole suite — which would silently break the near-universal
+`test_*.c` file naming convention.
+
+`*` therefore never crosses a `::`; it fills exactly one component. To reach
+the file component, spell it out:
+
+```bash
+./test_indicators --filter 'test-ind-sma.c::*::*'   # every test in that file
+./test_indicators --filter '*::test_roundtrip'      # that test in any suite
+```
 
 `--list` composes back into `--filter`:
 
