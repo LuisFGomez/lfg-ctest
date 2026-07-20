@@ -1126,10 +1126,11 @@ static void test_seed_replays_rand_sequence(void)
 /* ============================================================================
  * Addressable-id tests (#55)
  *
- * An entry's id is <file>::<suite>::<test>; a glob selects it by matching the
- * full id or any trailing ::-delimited suffix. These use lfg_ct_id_runs()
- * with explicit file/suite arguments rather than lfg_ct_name_runs(), so the
- * asserted id never depends on where in this binary the test happens to sit.
+ * An entry's id is <file>::<suite>::<test>; a glob selects it by addressing
+ * exactly as many trailing ::-delimited components as it spells out. These
+ * use lfg_ct_id_runs() with explicit file/suite arguments rather than
+ * lfg_ct_name_runs(), so the asserted id never depends on where in this
+ * binary the test happens to sit.
  *
  * Each test restores default parse state before returning: registration in
  * suite_filter_args_tests dispatches immediately, so a filter left in place
@@ -1191,8 +1192,9 @@ static void test_id_bare_name_glob_still_selects(void)
 {
     char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"test_thing"};
 
-    /* The whole back-compat guarantee: a bare name is the shortest suffix of
-     * the id, so every pre-id consumer glob keeps its exact meaning. */
+    /* The whole back-compat guarantee: a glob with no "::" is matched against
+     * the test name alone, so every pre-id consumer glob keeps its exact
+     * meaning. */
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
     ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
     ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_two", "test_thing"));
@@ -1213,7 +1215,11 @@ static void test_id_wildcard_glob_does_not_reach_file_component(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
     ASSERT_TRUE(lfg_ct_id_runs("test_math.c", "math_suite", "test_add"));
     ASSERT_FALSE(lfg_ct_id_runs("test_math.c", "math_suite", "helper_sanity"));
-    /* Nor may it match the suite id and inherit the whole suite. */
+    /* The file component stays unreachable whatever the suite is named --
+     * this evaluates the *test* id, and at depth 1 that is "helper_sanity"
+     * either way. It says nothing about suite inheritance: a suite named
+     * test_suite does match "test_*" on its own bare name at registration
+     * time and does push inherited depth, which is intended. */
     ASSERT_FALSE(lfg_ct_id_runs("test_math.c", "test_suite", "helper_sanity"));
 
     _id_restore_default_args();
