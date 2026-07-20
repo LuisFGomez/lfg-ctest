@@ -210,6 +210,17 @@ wiring. The parent only emits the banner itself on signal / timeout /
 "exited without payload" paths, where the child died before its own
 print landed.
 
+That inheritance is on the *descriptor*, not on the stdio buffer, so
+it depends on a two-sided `fflush(NULL)`: the parent flushes before
+`fork(2)`, the child flushes before `_exit`. Both halves are load
+bearing. Without the child's, everything it buffered is discarded --
+`_exit` deliberately skips stdio cleanup, so on a fully-buffered
+stdout (any pipe or file, i.e. every CI run) the per-test detail
+output vanishes while the same run on a TTY is complete, because line
+buffering flushes at each newline. Without the parent's, the child
+inherits a copy of the parent's pending buffer and re-emits it on its
+own flush, duplicating parent output once per forked test.
+
 ### Bridge surface (lfg-ctest.c <-> lfg-ctest-fork.c)
 
 Three internal symbols (extern-declared in the fork TU, not in any

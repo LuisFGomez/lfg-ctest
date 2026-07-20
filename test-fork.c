@@ -16,10 +16,12 @@
 
 #include "lfg-ctest.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* ============================================================================
@@ -131,6 +133,54 @@ _body_read_inherited_fd(void)
     ssize_t r = read(_shared_read_fd, buf, 5);
     ASSERT_INT_EQUAL(5, (int)r);
     ASSERT_STR_EQUAL("hello", buf);
+}
+
+/* Deliberately-failing body for the non-TTY flush regression. Kept
+ * false at runtime so the assertion always fails; the stringified
+ * expression rides into the "*** ...: FAILURE in ...()" line, giving
+ * the capture below a needle no other output can collide with. */
+static int _fork_flush_sentinel_false = 0;
+
+static void
+_body_flush_detail_failure(void)
+{
+    ASSERT_TRUE(_fork_flush_sentinel_false);
+}
+
+/* ============================================================================
+ *  Capture helpers (non-TTY stdout regression)
+ * ========================================================================== */
+
+static void
+_slurp(const char *path, char *buf, size_t cap)
+{
+    FILE *f;
+    size_t n;
+
+    buf[0] = '\0';
+    f = fopen(path, "r");
+    if (NULL == f)
+    {
+        return;
+    }
+    n = fread(buf, 1, cap - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+}
+
+static int
+_count_occurrences(const char *haystack, const char *needle)
+{
+    size_t nlen = strlen(needle);
+    const char *p = haystack;
+    int n = 0;
+
+    while (NULL != (p = strstr(p, needle)))
+    {
+        n++;
+        p += nlen;
+    }
+    return n;
 }
 
 /* ============================================================================
@@ -412,6 +462,77 @@ test_fork_verbose_start_fires_once_in_parent(void)
 }
 
 static void
+test_fork_child_output_survives_non_tty_stdout(void)
+{
+    /* Regression: the child used to _exit() without flushing, so on a
+     * fully-buffered stdout (pipe or file -- i.e. every CI run) its
+     * detail output was discarded wholesale. Reproducing that needs a
+     * genuinely non-TTY stdout, which we cannot impose on the outer
+     * binary without disturbing the rest of the run. So fork a capture
+     * child, re-point ITS stdout at a regular file, and drive the fork
+     * dispatcher from there.
+     *
+     * Both halves of the fix are asserted: the child-side flush (the
+     * detail line is present at all) and the parent-side pre-fork flush
+     * (the capture child's own line is not re-emitted by the forked
+     * grandchild that inherited its buffer). */
+    char tmpl[] = "/tmp/lfg-ctest-fork-flushXXXXXX";
+    char captured[8192];
+    int fd;
+    pid_t pid;
+    int status = 0;
+
+    fd = mkstemp(tmpl);
+    ASSERT_GT(fd, -1);
+    close(fd);
+
+    /* Same discipline the fix installs, applied to our own fork: the
+     * outer binary's pending stdout must not be inherited by the
+     * capture child, which would re-emit it on its final flush. */
+    fflush(NULL);
+
+    pid = fork();
+    ASSERT_GT((int)pid, -1);
+    if (0 == pid)
+    {
+        /* CAPTURE CHILD. freopen (not dup2) is what makes this a real
+         * repro: buffering mode is decided when a stream is associated
+         * with a file, so re-associating stdout with a regular file
+         * resets it to fully buffered. A bare dup2 would leave the
+         * inherited line-buffered mode in place and hide the bug. */
+        if (NULL == freopen(tmpl, "w", stdout))
+        {
+            _exit(2);
+        }
+        printf("fork-flush-parent-marker\n");
+
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+        lfg_ct_expect_failures_begin();
+        lfg_ct_test_impl(_body_flush_detail_failure, "fork_flush_inner");
+        (void)lfg_ct_expect_failures_end();
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+
+        fflush(NULL);
+        _exit(0);
+    }
+
+    while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
+    {
+    }
+
+    _slurp(tmpl, captured, sizeof(captured));
+    unlink(tmpl);
+
+    /* The forked test's assertion detail reached the file at all. */
+    ASSERT_TRUE(NULL != strstr(captured, "FAILURE in"));
+    /* Exactly once -- child-side flush, and only one of them. */
+    ASSERT_INT_EQUAL(1, _count_occurrences(captured, "_fork_flush_sentinel_false"));
+    /* The capture child's own line was not duplicated into the file by
+     * the grandchild flushing an inherited copy of its buffer. */
+    ASSERT_INT_EQUAL(1, _count_occurrences(captured, "fork-flush-parent-marker"));
+}
+
+static void
 test_fork_xfail_round_trip(void)
 {
     /* xfail body fails an assertion -> classifies XFAIL. The child's
@@ -450,6 +571,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_fork_skip_round_trip);
     lfg_ct_test(test_fork_xfail_round_trip);
     lfg_ct_test(test_fork_verbose_start_fires_once_in_parent);
+    lfg_ct_test(test_fork_child_output_survives_non_tty_stdout);
 }
 
 int
