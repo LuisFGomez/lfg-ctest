@@ -70,7 +70,8 @@ binary what it contains, then name one:
 ```
 
 No source edit, no rebuild. See
-[docs/api.md — Entry ids](api.md#entry-ids) for the format and the suffix rule.
+[docs/api.md — Entry ids](api.md#entry-ids) for the format and the
+component-depth rule.
 
 Note that `test-unified`'s own filter tests call `lfg_ct_parse_args` mid-run to
 exercise the parser, which resets the filter for everything registered after

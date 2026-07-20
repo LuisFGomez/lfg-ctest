@@ -404,17 +404,20 @@ void lfg_ct_end(void);
  *                                  invoked so the ids of contained tests
  *                                  can be listed. Each line is directly usable
  *                                  as a @c --filter argument.
- *   - @c --filter \<glob\>         : only run entries whose id -- or any
- *                                  trailing @c :: -delimited suffix of it --
- *                                  matches the shell-style glob (@c fnmatch(3)
- *                                  syntax: @c *, @c ?, @c [...]). A bare name
- *                                  is the shortest such suffix, so pre-id
- *                                  filters keep their meaning. Repeating
+ *   - @c --filter \<glob\>         : only run entries whose id matches the
+ *                                  shell-style glob (@c fnmatch(3) syntax:
+ *                                  @c *, @c ?, @c [...]), which addresses
+ *                                  exactly as many trailing @c :: -delimited
+ *                                  components as it spells out. A glob with
+ *                                  no @c :: is matched against the test name
+ *                                  alone, so pre-id filters keep their
+ *                                  meaning; @c * fills one component and
+ *                                  never crosses a @c :: . Repeating
  *                                  the flag OR-combines the patterns. If a
  *                                  suite matches, every entry inside
  *                                  the suite is considered matched.
  *   - @c --filter-exclude \<glob\> : skip entries whose id matches the glob
- *                                  under the same suffix rule. Inverse of
+ *                                  under the same component-depth rule. Inverse of
  *                                  @c --filter, same repeat / OR semantics.
  *                                  Exclude wins on overlap with @c --filter.
  *   - @c --strict-xpass          : flip an otherwise-clean run that contains
