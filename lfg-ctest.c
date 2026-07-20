@@ -80,9 +80,19 @@ static int _strict_xpass = 0;
  * <function>(): <expr>". Reset at every lfg_ct_test_impl entry,
  * read by the reporter callback at the test's classification site
  * (the downstream package copies it if it wants to buffer beyond
- * the callback's lifetime). */
+ * the callback's lifetime).
+ *
+ * Storage is two-tier so an arbitrarily long message survives while
+ * the common short one still costs nothing: text that fits lives in
+ * the inline buffer, anything longer in a heap block owned by this
+ * slot. The heap tier wins whenever it is non-NULL; exactly one tier
+ * carries text at a time. Ownership is per-lfg_ct_test_impl level --
+ * each level frees its own message on the way out and hands the
+ * outer level's block back untouched (see the save/restore pair in
+ * _lfg_ct_test_impl_inproc). */
 #define LFG_CT_FAILURE_MSG_MAX 768
-static char _current_failure_msg[LFG_CT_FAILURE_MSG_MAX] = {0};
+static char _failure_msg_inline[LFG_CT_FAILURE_MSG_MAX] = {0};
+static char *_failure_msg_heap = NULL;
 
 /* Current suite name surfaced as the reporter record's classname.
  * NULL when no suite is active (top-level tests). Tracked via
@@ -219,6 +229,86 @@ static int _expected_failures_count = 0;
 
 #endif /* LFG_CTEST_SELF_TEST */
 
+/* Widest "... [truncated N bytes]" rendering, plus slack. */
+#define LFG_CT_TRUNC_MARKER_MAX 48
+
+/* Stamp an explicit, greppable truncation marker onto a message the
+ * runner could not carry in full. @p used is the current string
+ * length in @p buf, @p cap its total size, @p lost the number of
+ * bytes dropped. The marker is appended when there is room and
+ * overwrites the tail otherwise, so the emitted text always names
+ * the loss instead of ending mid-token.
+ *
+ * Only reachable on the degraded paths (allocation failure, short
+ * pipe write); the length-correct paths never call it. */
+static void
+_lfg_ct_mark_truncated(char *buf, size_t cap, size_t used, size_t lost)
+{
+    char marker[LFG_CT_TRUNC_MARKER_MAX];
+    int n;
+
+    n = snprintf(marker, sizeof(marker), "... [truncated %lu bytes]", (unsigned long)lost);
+    if (n < 0 || (size_t)n + 1 > cap)
+    {
+        return;
+    }
+    if (used + (size_t)n + 1 > cap)
+    {
+        used = cap - (size_t)n - 1;
+    }
+    memcpy(buf + used, marker, (size_t)n + 1);
+}
+
+/* Active per-test failure message, or NULL when none was captured.
+ * The heap tier wins over the inline one; see the slot's declaration
+ * for the ownership rules. */
+static const char *
+_lfg_ct_failure_msg(void)
+{
+    if (_failure_msg_heap)
+    {
+        return _failure_msg_heap;
+    }
+    return _failure_msg_inline[0] ? _failure_msg_inline : NULL;
+}
+
+/* Drop the message this lifecycle level captured, releasing the heap
+ * tier if it is in use. Never called on a block the outer level
+ * owns -- that one is moved out of the slot before the level runs. */
+static void
+_lfg_ct_failure_msg_clear(void)
+{
+    free(_failure_msg_heap);
+    _failure_msg_heap = NULL;
+    _failure_msg_inline[0] = '\0';
+}
+
+/* Capture "<file>:<line>: in <fn>(): <text>" into the slot, promoting
+ * to the heap tier when the composed line outgrows the inline buffer.
+ * Same two-pass shape as _lfg_ct_fail: snprintf reports the required
+ * length, and only an over-long line pays for an allocation. */
+static void
+_lfg_ct_failure_msg_set(const char *file, int line, const char *function, const char *text)
+{
+    int need;
+
+    need = snprintf(_failure_msg_inline, sizeof(_failure_msg_inline), "%s:%d: in %s(): %s", file, line, function,
+            text);
+    if (need < 0 || (size_t)need < sizeof(_failure_msg_inline))
+    {
+        return;
+    }
+
+    _failure_msg_heap = (char *)malloc((size_t)need + 1);
+    if (NULL == _failure_msg_heap)
+    {
+        _lfg_ct_mark_truncated(_failure_msg_inline, sizeof(_failure_msg_inline), sizeof(_failure_msg_inline) - 1,
+                (size_t)need - (sizeof(_failure_msg_inline) - 1));
+        return;
+    }
+    snprintf(_failure_msg_heap, (size_t)need + 1, "%s:%d: in %s(): %s", file, line, function, text);
+}
+
 /* Consolidated assertion-failure helper. Formats @p fmt into a
  * scratch buffer, prints the standard "*** <file>: <line>:
  * FAILURE in <fn>(): <buf>" line to stdout (unchanged behavior),
@@ -240,12 +330,42 @@ static int _expected_failures_count = 0;
 static void
 _lfg_ct_fail(const char *file, int line, const char *function, const char *fmt, ...)
 {
-    char buf[512];
+    char stack_buf[512];
+    char *heap_buf = NULL;
+    const char *buf = stack_buf;
     va_list ap;
+    va_list ap_retry;
+    int need;
 
+    /* Two-pass format. The stack buffer serves every message that
+     * fits -- the common case, and the reason the assertion path
+     * stays allocation-free. Anything longer is re-formatted into a
+     * heap block sized from vsnprintf's own return value, so no
+     * message is clipped by the runner's choice of buffer. The first
+     * pass consumes ap, hence the va_copy taken before it. */
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_copy(ap_retry, ap);
+    need = vsnprintf(stack_buf, sizeof(stack_buf), fmt, ap);
     va_end(ap);
+
+    if (need >= (int)sizeof(stack_buf))
+    {
+        heap_buf = (char *)malloc((size_t)need + 1);
+        if (heap_buf)
+        {
+            vsnprintf(heap_buf, (size_t)need + 1, fmt, ap_retry);
+            buf = heap_buf;
+        }
+        else
+        {
+            /* Out of memory: emit what fits and name the loss.
+             * Silent clipping is what made this defect expensive to
+             * diagnose in the first place. */
+            _lfg_ct_mark_truncated(stack_buf, sizeof(stack_buf), sizeof(stack_buf) - 1,
+                    (size_t)need - (sizeof(stack_buf) - 1));
+        }
+    }
+    va_end(ap_retry);
 
     printf("*** %s: %d: FAILURE in %s(): %s\r\n", file ? file : "(unknown)", line,
             function ? function : "(unknown)", buf);
@@ -254,17 +374,18 @@ _lfg_ct_fail(const char *file, int line, const char *function, const char *fmt, 
     if (_expect_failures_mode)
     {
         _expected_failures_count++;
+        free(heap_buf);
         return;
     }
 #endif
     _current_test_failures++;
     _assertions_failed++;
 
-    if ('\0' == _current_failure_msg[0])
+    if (NULL == _lfg_ct_failure_msg())
     {
-        snprintf(_current_failure_msg, sizeof(_current_failure_msg), "%s:%d: in %s(): %s",
-                file ? file : "(unknown)", line, function ? function : "(unknown)", buf);
+        _lfg_ct_failure_msg_set(file ? file : "(unknown)", line, function ? function : "(unknown)", buf);
     }
+    free(heap_buf);
 }
 
 /*============================================================================
@@ -674,7 +795,8 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
      * is the portable way to snapshot it. */
     jmp_buf saved_env;
     int saved_active;
-    char saved_failure_msg[LFG_CT_FAILURE_MSG_MAX];
+    char saved_failure_inline[LFG_CT_FAILURE_MSG_MAX];
+    char *saved_failure_heap;
     clock_t time_start;
     double elapsed;
 
@@ -699,9 +821,13 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
      * doesn't smear its captured message over the outer test's. After
      * the nested call returns, the outer body may still log its own
      * assertion failure -- that must be the message the outer test
-     * reports, not the nested one's. */
-    memcpy(saved_failure_msg, _current_failure_msg, sizeof(saved_failure_msg));
-    _current_failure_msg[0] = '\0';
+     * reports, not the nested one's. The heap tier is *moved* into
+     * the saved slot rather than copied, so this level never owns --
+     * and never frees -- the outer test's block. */
+    memcpy(saved_failure_inline, _failure_msg_inline, sizeof(saved_failure_inline));
+    saved_failure_heap = _failure_msg_heap;
+    _failure_msg_inline[0] = '\0';
+    _failure_msg_heap = NULL;
     time_start = clock();
 
     memcpy(saved_env, _skip_env, sizeof(jmp_buf));
@@ -812,7 +938,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
             _tests_failed++;
             printf("*** test FAILURE: %s\r\n", name);
             outcome = LFG_CT_FAILED;
-            message = _current_failure_msg[0] ? _current_failure_msg : NULL;
+            message = _lfg_ct_failure_msg();
         }
         else
         {
@@ -841,7 +967,13 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     _current_skip_reason = NULL;
     _current_xfail_set = 0;
     _current_xfail_reason = NULL;
-    memcpy(_current_failure_msg, saved_failure_msg, sizeof(_current_failure_msg));
+
+    /* Release this level's own message (the reporter callback above
+     * has already returned, so the borrowed-for-the-callback contract
+     * is honoured) before moving the outer test's back in. */
+    _lfg_ct_failure_msg_clear();
+    memcpy(_failure_msg_inline, saved_failure_inline, sizeof(_failure_msg_inline));
+    _failure_msg_heap = saved_failure_heap;
 }
 
 void lfg_ct_print_summary(void)
