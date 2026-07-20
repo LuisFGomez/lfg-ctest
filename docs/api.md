@@ -203,9 +203,17 @@ names) but the seed is still applied.
 
 `lfg_ct_is_seed_set()` reports whether `--seed` was parsed and
 `lfg_ct_get_seed()` returns the parsed value; the two are separate
-because `0` is a legal seed rather than an "unset" sentinel. A consumer
-that drives its own RNG can call `srand(lfg_ct_get_seed())` off the same
-flag.
+because `0` is a legal seed rather than an "unset" sentinel. The
+accessor reports only what `--seed` supplied — on a generated-seed run
+it returns `0` — so a consumer driving its own RNG off the same flag
+must guard on the predicate:
+
+```c
+if (lfg_ct_is_seed_set())
+{
+    my_rng_seed(lfg_ct_get_seed());
+}
+```
 
 ### Verbose output
 
