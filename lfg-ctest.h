@@ -485,6 +485,13 @@ unsigned lfg_ct_get_seed(void);
  *  the matching logic in isolation. List-mode is treated as "no execution"
  *  for the purpose of this query (returns 0 when @c --list is active).
  *
+ *  @note Cannot answer a *qualified* filter. The id is built from the
+ *        ambient file/suite batons, which are absent when this is called
+ *        from @c main() -- the documented usage -- so the id is
+ *        @c (none)::(none)::name. Under @c --filter
+ *        @c 'alpha.c::suite_one::test_x' this returns 0 even though the
+ *        test runs. Use @ref lfg_ct_test_runs where that matters.
+ *
  *  @param name Registered test/suite name to check.
  *  @return 1 if the entry would run, 0 if filtered, excluded, or in list mode.
  */
@@ -492,7 +499,8 @@ int lfg_ct_name_runs(const char *name);
 
 /** Qualified form of @ref lfg_ct_name_runs: build the entry's full id from
  *  @p file / @p suite / @p name and evaluate the same filter rules against
- *  it and every trailing @c :: suffix.
+ *  it -- each glob addressing as many trailing @c :: components as it
+ *  spells out.
  *
  *  Additive -- @ref lfg_ct_name_runs keeps its bare-name meaning. Prefer
  *  the @ref lfg_ct_test_runs macro, which fills @p file in for you.
@@ -527,7 +535,9 @@ int lfg_ct_id_runs(const char *file, const char *suite, const char *name);
  *  @param suite Enclosing suite name, or @c NULL / empty for
  *               @ref LFG_CT_ID_NO_SUITE.
  *  @param test  Test name, or @c NULL to render a suite id.
- *  @return Length of the id written to @p buf, excluding the terminator.
+ *  @return Length the id needed, excluding the terminator -- snprintf(3)
+ *          semantics. A result @c >= @p cap means @p buf holds a truncated
+ *          id; the untruncated length is the return value.
  */
 size_t lfg_ct_format_id(char *buf, size_t cap, const char *file, const char *suite, const char *test);
 

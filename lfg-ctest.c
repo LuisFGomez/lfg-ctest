@@ -476,25 +476,48 @@ void lfg_ct_end(void)
 {
 }
 
-/* Match @p name against any glob in @p globs (length @p count) using
- * fnmatch(3) shell-glob semantics. */
+/* Number of "::"-delimited components in @p s (a glob or an id). */
 static int
-_glob_list_matches(const char *name, const char *const *globs, int count)
+_id_component_count(const char *s)
 {
-    int i;
+    const char *p = s;
+    int n = 1;
 
-    if (NULL == name)
+    if (NULL == s)
     {
         return 0;
     }
-    for (i = 0; i < count; i++)
+    while (NULL != (p = strstr(p, LFG_CT_ID_SEPARATOR)))
     {
-        if (0 == fnmatch(globs[i], name, 0))
-        {
-            return 1;
-        }
+        p += sizeof(LFG_CT_ID_SEPARATOR) - 1;
+        n++;
     }
-    return 0;
+    return n;
+}
+
+/* The trailing suffix of @p id consisting of exactly @p depth components,
+ * or NULL when @p id has fewer than that many. */
+static const char *
+_id_suffix_at_depth(const char *id, int depth)
+{
+    const char *p = id;
+    int skip;
+
+    if (NULL == id)
+    {
+        return NULL;
+    }
+    skip = _id_component_count(id) - depth;
+    if (skip < 0)
+    {
+        return NULL;
+    }
+    while (skip-- > 0)
+    {
+        p = strstr(p, LFG_CT_ID_SEPARATOR);
+        p += sizeof(LFG_CT_ID_SEPARATOR) - 1;
+    }
+    return p;
 }
 
 /* Strip any directory prefix from @p path. The id has to be stable across
@@ -530,8 +553,12 @@ _id_basename(const char *path)
  * for @p test). A NULL component becomes LFG_CT_ID_NO_SUITE so the id is
  * always well-formed -- never a malformed "file::::test". Truncation is
  * silent (snprintf), which only costs addressability of pathologically
- * long names, never correctness of the run. */
-static void
+ * long names, never correctness of the run.
+ *
+ * Returns the snprintf(3) length the id *would* have needed, so a caller
+ * that cares can detect truncation (result >= cap). The internal call
+ * sites deliberately ignore it. */
+static int
 _id_build(char *buf, size_t cap, const char *file, const char *suite, const char *test)
 {
     const char *base = _id_basename(file);
@@ -539,50 +566,63 @@ _id_build(char *buf, size_t cap, const char *file, const char *suite, const char
 
     if (NULL == buf || 0 == cap)
     {
-        return;
+        return 0;
     }
     if (NULL == test)
     {
-        snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s", base, mid);
-        return;
+        return snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s", base, mid);
     }
-    snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s" LFG_CT_ID_SEPARATOR "%s", base, mid, test);
+    return snprintf(buf, cap, "%s" LFG_CT_ID_SEPARATOR "%s" LFG_CT_ID_SEPARATOR "%s",
+                    base, mid, test);
 }
 
 size_t
 lfg_ct_format_id(char *buf, size_t cap, const char *file, const char *suite, const char *test)
 {
+    int needed;
+
     if (NULL == buf || 0 == cap)
     {
         return 0;
     }
     buf[0] = '\0';
-    _id_build(buf, cap, file, suite, test);
-    return strlen(buf);
+    needed = _id_build(buf, cap, file, suite, test);
+    /* snprintf semantics: the length the id would have needed. A result
+     * >= cap means the buffer held a truncated id. */
+    return (needed < 0) ? 0 : (size_t)needed;
 }
 
-/* Match @p id against the glob list, retrying at every trailing
- * "::"-delimited suffix. "file.c::suite::test", "suite::test" and "test"
- * are therefore all valid ways to name the same entry, and a caller can
- * qualify progressively until the selection is unique.
+/* Match @p id against the glob list. A glob addresses exactly as many
+ * trailing components as it spells out: it is fnmatch(3)'d against the
+ * suffix of @p id whose component count equals its own. So
+ * "file.c::suite::test", "suite::test" and "test" are all valid ways to
+ * name the same entry, and a caller can qualify progressively until the
+ * selection is unique.
  *
- * The bare name is the shortest suffix, so every glob that selected an
- * entry before ids existed still selects it. */
+ * Pinning the depth per-glob is what makes the rule backward compatible.
+ * Matching every suffix instead would let a bare-name glob reach the file
+ * component -- "test_*" would match the id "test_math.c::suite::helper"
+ * (fnmatch has no FNM_PATHNAME here and "*" would span "::"), silently
+ * over-selecting for the ubiquitous "test_*.c" file naming convention.
+ * A one-component glob now only ever sees a one-component suffix, so
+ * every pre-id glob selects exactly what it always did, and "*" cannot
+ * cross a "::". */
 static int
 _glob_list_matches_id(const char *id, const char *const *globs, int count)
 {
-    const char *suffix = id;
+    const char *suffix;
+    int i;
 
-    while (NULL != suffix)
+    if (NULL == id)
     {
-        if (_glob_list_matches(suffix, globs, count))
+        return 0;
+    }
+    for (i = 0; i < count; i++)
+    {
+        suffix = _id_suffix_at_depth(id, _id_component_count(globs[i]));
+        if (NULL != suffix && 0 == fnmatch(globs[i], suffix, 0))
         {
             return 1;
-        }
-        suffix = strstr(suffix, LFG_CT_ID_SEPARATOR);
-        if (NULL != suffix)
-        {
-            suffix += sizeof(LFG_CT_ID_SEPARATOR) - 1;
         }
     }
     return 0;
@@ -637,8 +677,9 @@ _filter_print_usage(const char *progname)
             "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
-            "An entry id is <file>::<suite>::<test>; a glob matches the full id or\r\n"
-            "any trailing ::-delimited suffix of it, so a bare test name still works.\r\n"
+            "An entry id is <file>::<suite>::<test>; a glob addresses as many\r\n"
+            "trailing ::-components as it spells out, so a bare test name still\r\n"
+            "works and * never crosses a ::.\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
             progname ? progname : "test");
 }
