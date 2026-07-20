@@ -43,6 +43,7 @@ The flags it recognises:
 | `--filter <glob>` | Run only entries whose name matches the `fnmatch(3)` glob (`*`, `?`, `[...]`). Repeat to OR-combine. |
 | `--filter-exclude <glob>` | Skip entries whose name matches. Repeat to OR-combine. **Exclude wins** if both match the same name. |
 | `--strict-xpass` | Make an otherwise-clean run exit non-zero if any test XPASSed (see [chapter 3](03-skip-xfail-xpass.md)). |
+| `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
 | `-v`, `--verbose` | Stream a per-test progress line. |
 
 ## Listing what a binary contains
@@ -137,6 +138,39 @@ the framework's first built-in *reporter*, so it coexists with a consumer
 reporter such as JUnit-XML — both fire in the same run without interfering
 (see [chapter 8](08-integration.md)). `lfg_ct_is_verbose()` exposes the bit if
 your own code wants to suppress redundant output when verbose mode is on.
+
+## Reproducing a randomized run
+
+`lfg_ct_start()` seeds `rand(3)` for you and prints the seed it picked:
+
+```
+*** random seed is 3314123391
+```
+
+If your tests draw scenarios from `rand()` — a random symbol, a random date —
+that variety is worth having, but a failure you cannot replay is not
+diagnosable. `--seed <n>` replays it: copy the seed off the failing run and
+hand it back.
+
+```bash
+$ ./test_indicators                    # *** random seed is 3314123391 -- one failure
+$ ./test_indicators --seed 3314123391  # same scenario every time
+```
+
+The banner always reports the seed actually in use, so the replay prints the
+same line as the run it reproduces. Without the flag the seed is generated
+fresh per run across the full `unsigned` range — two runs launched in the same
+second still differ. `0` is a legal seed, not "unset"; a missing, non-numeric,
+or too-large value is a fatal flag error.
+
+To drive your own RNG off the same flag, read it back after parsing:
+
+```c
+if (lfg_ct_is_seed_set())
+{
+    my_rng_seed(lfg_ct_get_seed());
+}
+```
 
 ## Where to go next
 

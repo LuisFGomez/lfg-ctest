@@ -63,8 +63,10 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering) and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
+| `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed, 0 otherwise. Separate from the value because `0` is a legal seed. |
+| `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). |
 | `lfg_ct_test(fn)` | Execute a single test (`void fn(void)`). Body-only: any setup/teardown are plain functions the body calls itself. See [Setup and teardown](#setup-and-teardown). |
 | `lfg_ct_suite(fn)` | Execute a test suite (`void fn(void)`). Body-only, same as `lfg_ct_test`; the suite body brackets its `lfg_ct_test` calls with any shared setup/teardown. |
@@ -140,6 +142,7 @@ Recognized flags:
 | `--filter <glob>` | Run only entries whose registered name matches the shell-style glob (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite name matches, every entry inside the suite inherits the match — useful with the `add_test` pattern above. |
 | `--filter-exclude <glob>` | Skip entries whose name matches the glob. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same name. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 
 An unmatched filter is not an error: zero tests run, the binary exits 0.
@@ -170,6 +173,39 @@ newline-separated list of names. `lfg_ct_is_verbose()` exposes the
 whether to suppress redundant output of their own. Each call to
 `lfg_ct_parse_args` replaces any previously parsed state, including
 the verbose toggle.
+
+### Reproducing a randomized run
+
+`lfg_ct_start()` seeds `rand(3)` and announces the seed it used:
+
+```
+*** random seed is 3314123391
+```
+
+Without `--seed` the value is generated per run from the wall clock, the
+process CPU clock, and a stack address, so it spans the full `unsigned`
+range and two runs started within the same second get different seeds.
+That makes a suite whose tests draw scenarios from `rand()` genuinely
+varied — and, on its own, irreproducible.
+
+`--seed <n>` closes the loop: read the seed off the failing run, pass it
+back, and the `rand()` sequence replays exactly.
+
+```bash
+$ ./test_indicators                    # *** random seed is 3314123391 -- one test fails
+$ ./test_indicators --seed 3314123391  # same scenario, as many times as you need
+```
+
+The banner prints the *effective* seed either way, so a replayed run and
+the run it reproduces emit an identical line. Under `--list` the banner
+stays suppressed (list output remains a clean newline-separated list of
+names) but the seed is still applied.
+
+`lfg_ct_is_seed_set()` reports whether `--seed` was parsed and
+`lfg_ct_get_seed()` returns the parsed value; the two are separate
+because `0` is a legal seed rather than an "unset" sentinel. A consumer
+that drives its own RNG can call `srand(lfg_ct_get_seed())` off the same
+flag.
 
 ### Verbose output
 

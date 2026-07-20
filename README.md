@@ -17,8 +17,10 @@ read/write actions, and a per-call callback hook.
 - Consumer-cleanup-hook on-ramp (`mock_register_cleanup`) so mocks that own
   heap state can share that same single-call teardown.
 - `lfg_ct_parse_args(argc, argv)` handles `--list` / `--filter <glob>` /
-  `--filter-exclude <glob>` / `--strict-xpass` so one binary can back many
-  `ctest` entries.
+  `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` so one binary can
+  back many `ctest` entries.
+- `--seed <n>` replays a prior run's `rand()` sequence; without it the runner
+  generates a full-range seed per run and prints it.
 - `lfg_ct_skip("reason")` and `lfg_ct_xfail("reason")` bucket tests as
   SKIP / XFAIL / XPASS without polluting the pass/fail tally.
 - CMake `add_subdirectory` integration, or single-header amalgamation
