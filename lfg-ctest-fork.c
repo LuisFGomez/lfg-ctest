@@ -532,7 +532,38 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
             }
             if (r < 0)
             {
-                /* Nothing readable yet -- back off before retrying. */
+                /* Nothing readable yet. EOF is not guaranteed to arrive
+                 * at all: a body that forks a grandchild leaves the
+                 * write end open in that grandchild, so the drain would
+                 * otherwise spin to the full deadline on a child that
+                 * has already exited. Reap opportunistically and leave
+                 * as soon as the child itself is gone. */
+                pid_t w = waitpid(pid, &status, WNOHANG);
+
+                if (w == pid)
+                {
+                    /* A write may have landed between the read and the
+                     * reap -- take what is there before leaving. */
+                    for (;;)
+                    {
+                        ssize_t d = read(pipefd[0], chunk, sizeof(chunk));
+
+                        if (d > 0)
+                        {
+                            _fork_parent_consume(&in, chunk, (size_t)d);
+                            continue;
+                        }
+                        if (d < 0 && EINTR == errno)
+                        {
+                            continue;
+                        }
+                        break;
+                    }
+                    reaped = 1;
+                    break;
+                }
+
+                /* Back off before retrying. */
                 nanosleep(&(struct timespec){0, step_ms * 1000000L}, NULL);
             }
         }
