@@ -108,6 +108,23 @@ _body_sleep_forever(void)
     sleep(10);
 }
 
+/* Write end of the framework's child->parent pipe, predicted by the
+ * probe in test_fork_timeout_survives_eof_before_exit. */
+static int _predicted_pipe_write_fd = -1;
+
+static void
+_body_eof_then_hang(void)
+{
+    /* Close the payload pipe from inside the body, so the parent sees
+     * EOF while the child is still very much alive, then outlive any
+     * reasonable timeout. Reproduces the shape of a child wedged in
+     * its pre-_exit fflush(NULL), which also closes the write end
+     * first. If the fd prediction misses, this degrades into a plain
+     * hung child -- still a timeout, just a weaker test. */
+    close(_predicted_pipe_write_fd);
+    sleep(10);
+}
+
 static void
 _body_skip(void)
 {
@@ -288,6 +305,45 @@ test_fork_exit_nonzero_reports_failed(void)
     ASSERT_INT_EQUAL(1, _log.count);
     ASSERT_INT_EQUAL((int)LFG_CT_FAILED, (int)_log.outcomes[0]);
     ASSERT_TRUE(NULL != strstr(_log.messages[0], "exited 42"));
+}
+
+static void
+test_fork_timeout_survives_eof_before_exit(void)
+{
+    /* Regression: the parent drains the pipe while it waits, and EOF
+     * on that pipe is not the same event as child exit -- the child
+     * closes the write end before its final fflush(NULL). A parent
+     * that treats EOF as "child is done" and falls back to a blocking
+     * waitpid hangs forever on a child that stalls after closing.
+     * Here the body closes the write end itself and then sleeps well
+     * past the timeout; the timeout must still fire.
+     *
+     * pipe(2) hands out the lowest free descriptors, so opening and
+     * closing a probe pair immediately before dispatch reserves the
+     * numbers the framework's own pipe() is about to receive. */
+    int probe[2];
+
+    ASSERT_INT_EQUAL(0, pipe(probe));
+    _predicted_pipe_write_fd = probe[1];
+    close(probe[0]);
+    close(probe[1]);
+
+    _fork_log_reset();
+    lfg_ct_set_reporter(&_capture);
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+    lfg_ct_set_fork_timeout_ms(50);
+
+    lfg_ct_expect_failures_begin();
+    lfg_ct_test_impl(_body_eof_then_hang, "fork_eof_then_hang_inner");
+    (void)lfg_ct_expect_failures_end();
+
+    lfg_ct_set_fork_timeout_ms(0);
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(1, _log.count);
+    ASSERT_INT_EQUAL((int)LFG_CT_FAILED, (int)_log.outcomes[0]);
+    ASSERT_TRUE(NULL != strstr(_log.messages[0], "timed out"));
 }
 
 static void
@@ -906,6 +962,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_fork_segfault_crash_survives_and_reports_failed);
     lfg_ct_test(test_fork_exit_nonzero_reports_failed);
     lfg_ct_test(test_fork_timeout_kills_hung_child);
+    lfg_ct_test(test_fork_timeout_survives_eof_before_exit);
     lfg_ct_test(test_fork_subsequent_test_still_runs_after_crash);
     lfg_ct_test(test_fork_parent_fd_inheritance);
     lfg_ct_test(test_fork_skip_round_trip);
