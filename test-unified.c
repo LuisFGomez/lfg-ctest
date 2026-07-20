@@ -1123,6 +1123,234 @@ static void test_seed_replays_rand_sequence(void)
     }
 }
 
+/* ============================================================================
+ * Addressable-id tests (#55)
+ *
+ * An entry's id is <file>::<suite>::<test>; a glob selects it by matching the
+ * full id or any trailing ::-delimited suffix. These use lfg_ct_id_runs()
+ * with explicit file/suite arguments rather than lfg_ct_name_runs(), so the
+ * asserted id never depends on where in this binary the test happens to sit.
+ *
+ * Each test restores default parse state before returning: registration in
+ * suite_filter_args_tests dispatches immediately, so a filter left in place
+ * would silently skip the next lfg_ct_test() in the body.
+ * ============================================================================ */
+
+static void _id_restore_default_args(void)
+{
+    char *argv[] = {(char *)"prog"};
+    (void)lfg_ct_parse_args(1, argv);
+}
+
+static void test_id_format_is_file_suite_test(void)
+{
+    char id[256];
+
+    ASSERT_UINT_EQUAL(22U, (unsigned)lfg_ct_format_id(id, sizeof(id), "foo.c", "suite_a", "test_b"));
+    ASSERT_STR_EQUAL("foo.c::suite_a::test_b", id);
+
+    /* NULL test component -> suite id, two components only. */
+    lfg_ct_format_id(id, sizeof(id), "foo.c", "suite_a", NULL);
+    ASSERT_STR_EQUAL("foo.c::suite_a", id);
+}
+
+static void test_id_format_uses_basename_only(void)
+{
+    char id[256];
+
+    /* Ids must be stable across build directories and out-of-tree builds, so
+     * whatever path the compiler put in __FILE__ is reduced to its leaf. */
+    lfg_ct_format_id(id, sizeof(id), "/abs/build/tests/foo.c", "s", "t");
+    ASSERT_STR_EQUAL("foo.c::s::t", id);
+
+    lfg_ct_format_id(id, sizeof(id), "../../tests/foo.c", "s", "t");
+    ASSERT_STR_EQUAL("foo.c::s::t", id);
+
+    lfg_ct_format_id(id, sizeof(id), "tests\\foo.c", "s", "t");
+    ASSERT_STR_EQUAL("foo.c::s::t", id);
+}
+
+static void test_id_missing_components_get_placeholder(void)
+{
+    char id[256];
+
+    /* Never a malformed "file.c::::test" -- the empty middle is spelled. */
+    lfg_ct_format_id(id, sizeof(id), "foo.c", NULL, "test_top_level");
+    ASSERT_STR_EQUAL("foo.c::" LFG_CT_ID_NO_SUITE "::test_top_level", id);
+
+    lfg_ct_format_id(id, sizeof(id), "", "", "test_top_level");
+    ASSERT_STR_EQUAL(LFG_CT_ID_NO_SUITE "::" LFG_CT_ID_NO_SUITE "::test_top_level", id);
+
+    /* A caller reaching the runner through the retained bare-name entry has
+     * no file, so that component is spelled the same way. */
+    lfg_ct_format_id(id, sizeof(id), NULL, "suite_a", "test_b");
+    ASSERT_STR_EQUAL(LFG_CT_ID_NO_SUITE "::suite_a::test_b", id);
+}
+
+static void test_id_bare_name_glob_still_selects(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"test_thing"};
+
+    /* The whole back-compat guarantee: a bare name is the shortest suffix of
+     * the id, so every pre-id consumer glob keeps its exact meaning. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_two", "test_thing"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_other"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_suite_qualified_glob_selects(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"suite_one::test_thing"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_one", "test_thing"));
+    /* Same test name, different suite -> not selected. */
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_two", "test_thing"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_fully_qualified_glob_selects_exactly_one(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"alpha.c::suite_one::test_thing"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    /* Every one-component perturbation falls out of the selection. */
+    ASSERT_FALSE(lfg_ct_id_runs("beta.c", "suite_one", "test_thing"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_two", "test_thing"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_other"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_duplicate_names_across_files_resolve_distinctly(void)
+{
+    /* The consumer shape this issue was filed against: one test name defined
+     * in many translation units, inside suites that also share a name. Only
+     * the file component separates them. */
+    char *argv_a[] = {(char *)"prog", (char *)"--filter", (char *)"test-ind-sma.c::suite_e2e::test_e2e_validation"};
+    char *argv_b[] = {(char *)"prog", (char *)"--filter", (char *)"test-ind-ema.c::suite_e2e::test_e2e_validation"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_a));
+    ASSERT_TRUE(lfg_ct_id_runs("test-ind-sma.c", "suite_e2e", "test_e2e_validation"));
+    ASSERT_FALSE(lfg_ct_id_runs("test-ind-ema.c", "suite_e2e", "test_e2e_validation"));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_b));
+    ASSERT_FALSE(lfg_ct_id_runs("test-ind-sma.c", "suite_e2e", "test_e2e_validation"));
+    ASSERT_TRUE(lfg_ct_id_runs("test-ind-ema.c", "suite_e2e", "test_e2e_validation"));
+
+    /* Unqualified, the same glob still pulls in both -- that ambiguity is
+     * exactly what qualification exists to resolve. */
+    _id_restore_default_args();
+}
+
+static void test_id_no_suite_entry_is_addressable(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"alpha.c::" LFG_CT_ID_NO_SUITE "::test_top"};
+
+    /* A test registered outside any suite is addressable through the spelled
+     * placeholder, not merely by its bare name.
+     *
+     * "" is how a caller says "no enclosing suite"; NULL means "whatever
+     * suite is on the registration stack", which here is the suite running
+     * this very test. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "", "test_top"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_top"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", NULL, "test_top"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_format_output_round_trips_into_filter(void)
+{
+    char id[256];
+    char *argv[3];
+
+    /* The --list/--filter contract in miniature: whatever lfg_ct_format_id
+     * renders is a glob that selects the entry it was rendered from. The
+     * byte-level half of this (stdout, line endings) is covered by
+     * tools/check-id-roundtrip.sh. */
+    lfg_ct_format_id(id, sizeof(id), "alpha.c", "suite_one", "test_thing");
+
+    argv[0] = (char *)"prog";
+    argv[1] = (char *)"--filter";
+    argv[2] = id;
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_other"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_exclude_accepts_qualified_ids(void)
+{
+    char *argv[] = {
+        (char *)"prog", (char *)"--filter-exclude", (char *)"alpha.c::suite_one::test_thing"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+    /* Same bare name elsewhere is untouched -- exclusion is as precise as
+     * selection. */
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_one", "test_thing"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_exclude_wins_over_qualified_filter(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--filter", (char *)"alpha.c::suite_one::*", (char *)"--filter-exclude",
+        (char *)"alpha.c::suite_one::test_thing"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing")); /* both match */
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_other"));
+    ASSERT_FALSE(lfg_ct_id_runs("beta.c", "suite_one", "test_other")); /* filter misses */
+
+    _id_restore_default_args();
+}
+
+static void test_id_runs_is_zero_in_list_mode(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--list"};
+
+    /* Same contract as lfg_ct_name_runs: list mode means nothing executes. */
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_thing"));
+
+    _id_restore_default_args();
+}
+
+static void test_id_runs_is_stable_across_repeated_calls(void)
+{
+    char first[256];
+    char again[256];
+
+    /* No run-ordering or address-derived component: a --list run and the
+     * filtered run that follows it must agree on the id. */
+    lfg_ct_format_id(first, sizeof(first), "alpha.c", "suite_one", "test_thing");
+    lfg_ct_format_id(again, sizeof(again), "alpha.c", "suite_one", "test_thing");
+    ASSERT_STR_EQUAL(first, again);
+}
+
+static void test_id_format_truncates_rather_than_overflows(void)
+{
+    char id[8];
+
+    /* Silent truncation costs addressability of a pathological name, never
+     * correctness of the run -- and never a write past the buffer. */
+    ASSERT_UINT_EQUAL(7U, (unsigned)lfg_ct_format_id(id, sizeof(id), "alpha.c", "suite_one", "test_thing"));
+    ASSERT_STR_EQUAL("alpha.c", id);
+
+    /* Zero capacity is a no-op, not a crash. */
+    ASSERT_UINT_EQUAL(0U, (unsigned)lfg_ct_format_id(id, 0, "alpha.c", "suite_one", "test_thing"));
+}
+
 static void test_filter_reset_state_for_remaining_tests(void)
 {
     /* The final test in this suite restores default state so subsequent
@@ -1167,6 +1395,21 @@ static void suite_filter_args_tests(void)
     lfg_ct_test(test_seed_parse_repeated_last_wins);
     lfg_ct_test(test_seed_resets_across_parse_calls);
     lfg_ct_test(test_seed_replays_rand_sequence);
+
+    lfg_ct_test(test_id_format_is_file_suite_test);
+    lfg_ct_test(test_id_format_uses_basename_only);
+    lfg_ct_test(test_id_missing_components_get_placeholder);
+    lfg_ct_test(test_id_bare_name_glob_still_selects);
+    lfg_ct_test(test_id_suite_qualified_glob_selects);
+    lfg_ct_test(test_id_fully_qualified_glob_selects_exactly_one);
+    lfg_ct_test(test_id_duplicate_names_across_files_resolve_distinctly);
+    lfg_ct_test(test_id_no_suite_entry_is_addressable);
+    lfg_ct_test(test_id_format_output_round_trips_into_filter);
+    lfg_ct_test(test_id_exclude_accepts_qualified_ids);
+    lfg_ct_test(test_id_exclude_wins_over_qualified_filter);
+    lfg_ct_test(test_id_runs_is_zero_in_list_mode);
+    lfg_ct_test(test_id_runs_is_stable_across_repeated_calls);
+    lfg_ct_test(test_id_format_truncates_rather_than_overflows);
     /* Last of the seed group: it leaves --list mode set, which the
      * unconditional reset below clears before the verifying test. */
     lfg_ct_test(test_seed_combines_with_list_mode);

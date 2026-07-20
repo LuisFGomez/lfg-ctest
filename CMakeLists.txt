@@ -343,6 +343,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_test(NAME test-fork-disabled COMMAND test-fork-disabled)
     add_test(NAME test-compat-3arg COMMAND test-compat-3arg)
 
+    # `--list | grep | xargs --filter` is a documented contract (#55) and can
+    # only be checked outside the runner, on the real stdout bytes. Needs a
+    # POSIX shell, so it is skipped where one is not assumed.
+    if(UNIX)
+        add_test(NAME test-id-roundtrip
+            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/check-id-roundtrip.sh $<TARGET_FILE:test-amalg>)
+    endif()
+
     # Custom target to run all tests
     add_custom_target(run_all_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
