@@ -42,7 +42,10 @@ entry point (see [Isolation modes](api.md#isolation-modes)).
 boundary and classifies the outcome afterwards:
 
 1. Snapshot per-test state (`_current_test_failures`, disposition,
-   failure-message slot) and the outer `_skip_env` + `_skip_env_active`
+   failure-message slot — an inline buffer plus an optional heap block
+   for over-long messages, *moved* rather than copied so a nested
+   lifecycle never frees the outer test's text) and the outer
+   `_skip_env` + `_skip_env_active`
    (so a nested `lfg_ct_test_impl` — the self-test pattern that drives mock
    tests through the real runner — can't strand the outer body with an
    overwritten `jmp_buf`).
@@ -195,14 +198,25 @@ The fork runner:
 2. **Child**: swaps the user's reporter for a capture reporter,
    snapshots the assertion counters, calls `_lfg_ct_test_impl_inproc`
    directly, diffs the counters back out, writes a fixed-layout
-   `_fork_payload_t` to the pipe, and `_exit`s. Counter deltas are
-   shipped because the child's increments live in its own address
-   space and don't survive `_exit`.
-3. **Parent**: optionally polls `waitpid(WNOHANG)` with a 5ms step
-   when a timeout is configured, escalating to `kill(SIGKILL)` on
-   expiry; otherwise blocks. Reads the payload, decodes `WIFSIGNALED`
-   / `WIFEXITED`, and projects the outcome via
+   `_fork_header_t` followed by `header.msg_len` message bytes to the
+   pipe, and `_exit`s. Counter deltas are shipped because the child's
+   increments live in its own address space and don't survive `_exit`.
+   Length-prefixing is what lets an assertion message of any size
+   cross; a *complete header* remains the "payload present" signal, so
+   the "no payload means the child crashed" test is unchanged.
+3. **Parent**: drains the pipe *while* waiting, never after — a message
+   larger than the pipe buffer blocks the child in `write(2)`, so
+   reaping first would deadlock the pair. With a timeout configured
+   the drain uses non-blocking reads interleaved with a 5ms
+   `waitpid(WNOHANG)` poll, escalating to `kill(SIGKILL)` on expiry;
+   without one it blocks on reads to EOF and then reaps. Decodes
+   `WIFSIGNALED` / `WIFEXITED` and projects the outcome via
    `_lfg_ct_record_external`.
+
+Both sides keep a stack fast path for short messages and allocate
+only past it. Every degraded path (allocation failure on either side,
+a child that died mid-write) appends an explicit
+`... [truncated N bytes]` marker rather than clipping silently.
 
 Stdout/stderr fd inheritance is the default `fork(2)` behavior, so
 the child's per-test banner reaches the user without any capture
@@ -331,8 +345,9 @@ Under `LFG_CT_ISOLATE_FORK`:
   internal bridge `_lfg_ct_set_active_reporter_direct`. This bypasses
   the verbose chain (no banner printed from the child, no chain into
   `_user_reporter`); the child's classification calls
-  `_child_capture` directly to fill the payload.
-- Child writes payload, `_exit`s.
+  `_child_capture` directly to fill the payload. `record->message` is
+  borrowed for the callback only, so the child copies it.
+- Child writes header + message, `_exit`s.
 - Parent decodes the payload and calls `_lfg_ct_record_external`,
   which fires `on_record` on `_reporter` -- still the verbose
   reporter, so the parent prints the outcome banner and chains
