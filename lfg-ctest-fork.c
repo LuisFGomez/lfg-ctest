@@ -55,28 +55,229 @@
 #if !defined(LFG_CT_DISABLE_FORK) && (defined(__unix__) || defined(__APPLE__))
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
+/* Inline message capacity on both sides of the pipe. Not a cap on
+ * what the transport can carry -- only the size below which neither
+ * side allocates. */
 #define LFG_CT_FORK_MSG_MAX 768
 
-/* Payload shipped child->parent on a clean child exit. Fixed-layout
- * struct serialised by raw write+read on a pipe; fork() guarantees
- * the child and parent share endianness/alignment, so no encoding. */
+/* Widest "... [truncated N bytes]" rendering, plus slack. */
+#define LFG_CT_FORK_TRUNC_MARKER_MAX 48
+
+/* Fixed-layout header shipped child->parent on a clean child exit,
+ * immediately followed by @c msg_len message bytes (no terminator --
+ * the length is authoritative). fork() guarantees the child and
+ * parent share endianness/alignment, so no encoding.
+ *
+ * Length-prefixing is what lets an assertion message of any size
+ * cross the pipe. The parent still demands a *complete* header
+ * before trusting anything, which preserves the "no payload means
+ * the child crashed" signal the dispatcher is built on. */
 typedef struct
 {
     int32_t outcome;             /* lfg_ct_outcome_t cast to int32 */
     int32_t assertions_executed; /* deltas vs. parent-snapshot baselines */
     int32_t assertions_passed;
     int32_t assertions_failed;
-    char message[LFG_CT_FORK_MSG_MAX]; /* '\0' when no message */
-} _fork_payload_t;
+    int32_t msg_len; /* message bytes following the header; 0 = none */
+} _fork_header_t;
+
+/* Child-side accumulator. The capture reporter owns a copy of the
+ * record's message because that string is borrowed for the callback
+ * only; short ones land in @c inline_msg, longer ones in an owned
+ * heap block. */
+typedef struct
+{
+    _fork_header_t hdr;
+    char inline_msg[LFG_CT_FORK_MSG_MAX];
+    char *heap_msg; /* owned; NULL when inline_msg carries the text */
+} _fork_child_out_t;
+
+/* Parent-side accumulator. Fills the header first, then sizes a
+ * message buffer from the announced length and streams into it. */
+typedef struct
+{
+    _fork_header_t hdr;
+    size_t hdr_got; /* header bytes received so far */
+    char inline_msg[LFG_CT_FORK_MSG_MAX];
+    char *heap_msg;  /* owned; NULL when inline_msg is the sink */
+    char *msg;      /* active sink; NULL when the child sent no message */
+    size_t msg_cap; /* message bytes the sink can hold, excluding NUL */
+    size_t msg_got; /* message bytes actually stored */
+} _fork_parent_in_t;
+
+/* Stamp an explicit, greppable truncation marker onto a message the
+ * transport could not carry in full (child- or parent-side allocation
+ * failure, or a child that died mid-write). Mirrors the core runner's
+ * helper; kept separate so the amalgamated single-TU build has no
+ * duplicate static definition. */
+static void
+_fork_mark_truncated(char *buf, size_t cap, size_t used, size_t lost)
+{
+    char marker[LFG_CT_FORK_TRUNC_MARKER_MAX];
+    int n;
+
+    n = snprintf(marker, sizeof(marker), "... [truncated %lu bytes]", (unsigned long)lost);
+    if (n < 0 || (size_t)n + 1 > cap)
+    {
+        return;
+    }
+    if (used + (size_t)n + 1 > cap)
+    {
+        used = cap - (size_t)n - 1;
+    }
+    memcpy(buf + used, marker, (size_t)n + 1);
+}
+
+/* write(2) until the whole buffer is out. Returns 0 on success, -1
+ * on a write error; a partial write left behind by a dying child is
+ * detected on the parent side, not here. */
+static int
+_fork_write_all(int fd, const void *data, size_t len)
+{
+    const char *p = (const char *)data;
+    size_t off = 0;
+
+    while (off < len)
+    {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w > 0)
+        {
+            off += (size_t)w;
+            continue;
+        }
+        if (w < 0 && EINTR == errno)
+        {
+            continue;
+        }
+        return -1;
+    }
+    return 0;
+}
+
+/* Pick the sink for the announced message length, once the header is
+ * complete. Falls back to the inline buffer (with the overflow
+ * marked at finish time) when the allocation fails, so an
+ * out-of-memory parent degrades to a marked message rather than
+ * losing the record. */
+static void
+_fork_parent_begin_message(_fork_parent_in_t *in)
+{
+    size_t need;
+
+    if (in->hdr.msg_len <= 0)
+    {
+        return;
+    }
+    need = (size_t)in->hdr.msg_len;
+
+    if (need < sizeof(in->inline_msg))
+    {
+        in->msg = in->inline_msg;
+        in->msg_cap = need;
+        return;
+    }
+
+    in->heap_msg = (char *)malloc(need + 1);
+    if (in->heap_msg)
+    {
+        in->msg = in->heap_msg;
+        in->msg_cap = need;
+        return;
+    }
+
+    in->msg = in->inline_msg;
+    in->msg_cap = sizeof(in->inline_msg) - 1;
+}
+
+/* Feed one read(2) chunk into the accumulator: header bytes first,
+ * message bytes after. Bytes past the sink's capacity are counted
+ * and dropped -- only reachable when the sink allocation failed. */
+static void
+_fork_parent_consume(_fork_parent_in_t *in, const char *data, size_t len)
+{
+    if (in->hdr_got < sizeof(in->hdr))
+    {
+        size_t take = sizeof(in->hdr) - in->hdr_got;
+
+        if (take > len)
+        {
+            take = len;
+        }
+        memcpy((char *)&in->hdr + in->hdr_got, data, take);
+        in->hdr_got += take;
+        data += take;
+        len -= take;
+
+        if (in->hdr_got == sizeof(in->hdr))
+        {
+            _fork_parent_begin_message(in);
+        }
+    }
+
+    if (0 == len || NULL == in->msg)
+    {
+        return;
+    }
+
+    if (in->msg_got < in->msg_cap)
+    {
+        size_t room = in->msg_cap - in->msg_got;
+        size_t take = len < room ? len : room;
+
+        memcpy(in->msg + in->msg_got, data, take);
+        in->msg_got += take;
+    }
+}
+
+/* Terminate the accumulated message and return it, or NULL when the
+ * child sent none. Anything the announced length promised but the
+ * sink did not receive (short write from a dying child, or a sink
+ * capped by allocation failure) is named in a truncation marker --
+ * the transport never drops bytes silently. */
+static const char *
+_fork_parent_finish_message(_fork_parent_in_t *in)
+{
+    size_t lost;
+
+    if (NULL == in->msg)
+    {
+        return NULL;
+    }
+    in->msg[in->msg_got] = '\0';
+
+    lost = (size_t)in->hdr.msg_len - in->msg_got;
+    if (lost > 0)
+    {
+        size_t cap = (in->msg == in->heap_msg) ? (size_t)in->hdr.msg_len + 1 : sizeof(in->inline_msg);
+
+        _fork_mark_truncated(in->msg, cap, in->msg_got, lost);
+    }
+    return in->msg;
+}
+
+/* Put the read end in non-blocking mode so the timeout path can
+ * interleave draining with its waitpid poll. */
+static void
+_fork_set_nonblocking(int fd)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+
+    if (flags >= 0)
+    {
+        (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+}
 
 /* Bridges provided by lfg-ctest.c. Declared local to this TU so the
  * core header stays focused on the public surface. */
@@ -94,20 +295,53 @@ extern void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_ou
 
 /* Capture reporter installed in the child. Records the in-process
  * classification's outcome+message into the payload that will be
- * written back to the parent. */
+ * written back to the parent.
+ *
+ * Allocation here is off the signal-handling path (this runs on the
+ * child's normal return from the test body) and a failure degrades
+ * to a marked, inline-sized message -- the parent's read loop is
+ * driven by the announced length either way, so it cannot hang. */
 static void
 _child_capture(const lfg_ct_record_t *record, void *userdata)
 {
-    _fork_payload_t *p = (_fork_payload_t *)userdata;
-    p->outcome = (int32_t)record->outcome;
-    if (record->message)
+    _fork_child_out_t *out = (_fork_child_out_t *)userdata;
+    size_t len;
+
+    out->hdr.outcome = (int32_t)record->outcome;
+
+    /* record->message is borrowed for the callback only, so the text
+     * is copied whichever tier ends up holding it. */
+    free(out->heap_msg);
+    out->heap_msg = NULL;
+    out->inline_msg[0] = '\0';
+    out->hdr.msg_len = 0;
+
+    if (NULL == record->message)
     {
-        snprintf(p->message, sizeof(p->message), "%s", record->message);
+        return;
     }
-    else
+
+    len = strlen(record->message);
+    if (len < sizeof(out->inline_msg))
     {
-        p->message[0] = '\0';
+        memcpy(out->inline_msg, record->message, len + 1);
+        out->hdr.msg_len = (int32_t)len;
+        return;
     }
+
+    out->heap_msg = (char *)malloc(len + 1);
+    if (out->heap_msg)
+    {
+        memcpy(out->heap_msg, record->message, len + 1);
+        out->hdr.msg_len = (int32_t)len;
+        return;
+    }
+
+    memcpy(out->inline_msg, record->message, sizeof(out->inline_msg) - 1);
+    out->inline_msg[sizeof(out->inline_msg) - 1] = '\0';
+    _fork_mark_truncated(out->inline_msg, sizeof(out->inline_msg), sizeof(out->inline_msg) - 1,
+            len - (sizeof(out->inline_msg) - 1));
+    out->hdr.msg_len = (int32_t)strlen(out->inline_msg);
 }
 
 int
@@ -130,8 +364,7 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
     struct timespec t_end;
     int status = 0;
     int timed_out = 0;
-    _fork_payload_t payload;
-    ssize_t total = 0;
+    _fork_parent_in_t in;
     double elapsed;
 
     if (0 != pipe(pipefd))
@@ -159,7 +392,7 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
     if (0 == pid)
     {
         /* CHILD. */
-        _fork_payload_t out;
+        _fork_child_out_t out;
         int exec0;
         int pass0;
         int fail0;
@@ -168,12 +401,11 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         int fail1;
         lfg_ct_reporter_t capture;
         const lfg_ct_reporter_t *saved;
-        ssize_t w;
 
         close(pipefd[0]);
 
         memset(&out, 0, sizeof(out));
-        out.outcome = (int32_t)LFG_CT_PASSED;
+        out.hdr.outcome = (int32_t)LFG_CT_PASSED;
 
         memset(&capture, 0, sizeof(capture));
         capture.on_record = _child_capture;
@@ -199,12 +431,22 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
 
         _lfg_ct_set_active_reporter_direct(saved);
 
-        out.assertions_executed = (int32_t)(exec1 - exec0);
-        out.assertions_passed = (int32_t)(pass1 - pass0);
-        out.assertions_failed = (int32_t)(fail1 - fail0);
+        out.hdr.assertions_executed = (int32_t)(exec1 - exec0);
+        out.hdr.assertions_passed = (int32_t)(pass1 - pass0);
+        out.hdr.assertions_failed = (int32_t)(fail1 - fail0);
 
-        w = write(pipefd[1], &out, sizeof(out));
-        (void)w; /* short writes accepted; parent treats missing payload as crash */
+        /* Header then message. A message larger than the pipe buffer
+         * blocks here until the parent drains -- which it does
+         * concurrently with its wait, so the pair cannot deadlock.
+         * Write errors are accepted silently: the parent reconciles
+         * what arrived against the announced length. */
+        if (0 == _fork_write_all(pipefd[1], &out.hdr, sizeof(out.hdr)) && out.hdr.msg_len > 0)
+        {
+            const char *msg = out.heap_msg ? out.heap_msg : out.inline_msg;
+
+            (void)_fork_write_all(pipefd[1], msg, (size_t)out.hdr.msg_len);
+        }
+        free(out.heap_msg);
         close(pipefd[1]);
 
         /* _exit() skips stdio cleanup, so push the test's own output
@@ -213,26 +455,68 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
          * covers every path through the branch. */
         fflush(NULL);
 
-        _exit(LFG_CT_FAILED == (lfg_ct_outcome_t)out.outcome ? 1 : 0);
+        _exit(LFG_CT_FAILED == (lfg_ct_outcome_t)out.hdr.outcome ? 1 : 0);
     }
 
     /* PARENT. */
     close(pipefd[1]);
 
+    /* Drain before (or alongside) the reap. The child blocks in
+     * write(2) once a long message fills the pipe buffer, so waiting
+     * for it to exit first would deadlock the pair on exactly the
+     * multi-kilobyte messages this transport exists to carry. */
+    memset(&in, 0, sizeof(in));
+
     if (timeout_ms > 0)
     {
+        /* Timed path: non-blocking reads interleaved with the WNOHANG
+         * poll, so a hung child is still killed on expiry. */
+        char chunk[4096];
         unsigned elapsed_ms = 0;
         const unsigned step_ms = 5;
+        int reaped = 0;
+
+        _fork_set_nonblocking(pipefd[0]);
         for (;;)
         {
-            pid_t r = waitpid(pid, &status, WNOHANG);
-            if (r == pid)
+            ssize_t r = read(pipefd[0], chunk, sizeof(chunk));
+
+            if (r > 0)
+            {
+                _fork_parent_consume(&in, chunk, (size_t)r);
+                continue;
+            }
+            if (0 == r)
+            {
+                break; /* EOF: child closed the write end */
+            }
+            if (EINTR == errno)
+            {
+                continue;
+            }
+            if (EAGAIN != errno && EWOULDBLOCK != errno)
             {
                 break;
             }
-            if (r < 0 && EINTR != errno)
+            /* Nothing readable yet. A reaped child cannot produce
+             * more, so any further EAGAIN means the descriptor is
+             * done with us -- stop rather than spin. */
+            if (reaped)
             {
                 break;
+            }
+            {
+                pid_t w = waitpid(pid, &status, WNOHANG);
+
+                if (w == pid)
+                {
+                    reaped = 1;
+                    continue; /* drain the remainder, then hit EOF */
+                }
+                if (w < 0 && EINTR != errno)
+                {
+                    break;
+                }
             }
             if (elapsed_ms >= timeout_ms)
             {
@@ -241,37 +525,44 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
                 {
                 }
                 timed_out = 1;
+                reaped = 1;
                 break;
             }
             nanosleep(&(struct timespec){0, step_ms * 1000000L}, NULL);
             elapsed_ms += step_ms;
         }
+        if (!reaped)
+        {
+            while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
+            {
+            }
+        }
     }
     else
     {
+        /* Untimed path: blocking reads to EOF, then the reap. No
+         * polling, so the per-test latency of the common case is
+         * unchanged. */
+        char chunk[4096];
+
+        for (;;)
+        {
+            ssize_t r = read(pipefd[0], chunk, sizeof(chunk));
+
+            if (r > 0)
+            {
+                _fork_parent_consume(&in, chunk, (size_t)r);
+                continue;
+            }
+            if (r < 0 && EINTR == errno)
+            {
+                continue;
+            }
+            break;
+        }
         while (waitpid(pid, &status, 0) < 0 && EINTR == errno)
         {
         }
-    }
-
-    memset(&payload, 0, sizeof(payload));
-    for (;;)
-    {
-        ssize_t r = read(pipefd[0], ((char *)&payload) + total, sizeof(payload) - (size_t)total);
-        if (r > 0)
-        {
-            total += r;
-            if ((size_t)total >= sizeof(payload))
-            {
-                break;
-            }
-            continue;
-        }
-        if (r < 0 && EINTR == errno)
-        {
-            continue;
-        }
-        break;
     }
     close(pipefd[0]);
 
@@ -287,6 +578,7 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         char msg[128];
         snprintf(msg, sizeof(msg), "fork-mode: test timed out after %ums", timeout_ms);
         _lfg_ct_record_external(name, elapsed, LFG_CT_FAILED, msg, 0, 0, 1, 1);
+        free(in.heap_msg);
         return 0;
     }
     if (WIFSIGNALED(status))
@@ -294,13 +586,17 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         char msg[128];
         snprintf(msg, sizeof(msg), "fork-mode: killed by signal %d", WTERMSIG(status));
         _lfg_ct_record_external(name, elapsed, LFG_CT_FAILED, msg, 0, 0, 1, 1);
+        free(in.heap_msg);
         return 0;
     }
-    if ((size_t)total == sizeof(payload))
+    /* A complete header is the payload-present signal; the message
+     * that follows may be short (child died mid-write), which
+     * degrades to a marked message rather than a lost record. */
+    if (sizeof(in.hdr) == in.hdr_got)
     {
-        _lfg_ct_record_external(name, elapsed, (lfg_ct_outcome_t)payload.outcome,
-                payload.message[0] ? payload.message : NULL, payload.assertions_executed, payload.assertions_passed,
-                payload.assertions_failed, 0);
+        _lfg_ct_record_external(name, elapsed, (lfg_ct_outcome_t)in.hdr.outcome, _fork_parent_finish_message(&in),
+                in.hdr.assertions_executed, in.hdr.assertions_passed, in.hdr.assertions_failed, 0);
+        free(in.heap_msg);
         return 0;
     }
     /* WIFEXITED-but-no-payload or other unexpected shape: surface as a failure
@@ -317,6 +613,7 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
         }
         _lfg_ct_record_external(name, elapsed, LFG_CT_FAILED, msg, 0, 0, 1, 1);
     }
+    free(in.heap_msg);
     return 0;
 }
 
