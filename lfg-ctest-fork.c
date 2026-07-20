@@ -71,9 +71,6 @@
  * side allocates. */
 #define LFG_CT_FORK_MSG_MAX 768
 
-/* Widest "... [truncated N bytes]" rendering, plus slack. */
-#define LFG_CT_FORK_TRUNC_MARKER_MAX 48
-
 /* Fixed-layout header shipped child->parent on a clean child exit,
  * immediately followed by @c msg_len message bytes (no terminator --
  * the length is authoritative). fork() guarantees the child and
@@ -116,28 +113,11 @@ typedef struct
     size_t msg_got; /* message bytes actually stored */
 } _fork_parent_in_t;
 
-/* Stamp an explicit, greppable truncation marker onto a message the
+/* Stamps an explicit, greppable truncation marker onto a message the
  * transport could not carry in full (child- or parent-side allocation
- * failure, or a child that died mid-write). Mirrors the core runner's
- * helper; kept separate so the amalgamated single-TU build has no
- * duplicate static definition. */
-static void
-_fork_mark_truncated(char *buf, size_t cap, size_t used, size_t lost)
-{
-    char marker[LFG_CT_FORK_TRUNC_MARKER_MAX];
-    int n;
-
-    n = snprintf(marker, sizeof(marker), "... [truncated %lu bytes]", (unsigned long)lost);
-    if (n < 0 || (size_t)n + 1 > cap)
-    {
-        return;
-    }
-    if (used + (size_t)n + 1 > cap)
-    {
-        used = cap - (size_t)n - 1;
-    }
-    memcpy(buf + used, marker, (size_t)n + 1);
-}
+ * failure, or a child that died mid-write). Shared with the core
+ * runner so the marker format cannot drift between the two. */
+extern void _lfg_ct_mark_truncated(char *buf, size_t cap, size_t used, size_t lost);
 
 /* write(2) until the whole buffer is out. Returns 0 on success, -1
  * on a write error; a partial write left behind by a dying child is
@@ -261,7 +241,7 @@ _fork_parent_finish_message(_fork_parent_in_t *in)
     {
         size_t cap = (in->msg == in->heap_msg) ? (size_t)in->hdr.msg_len + 1 : sizeof(in->inline_msg);
 
-        _fork_mark_truncated(in->msg, cap, in->msg_got, lost);
+        _lfg_ct_mark_truncated(in->msg, cap, in->msg_got, lost);
     }
     return in->msg;
 }
@@ -326,6 +306,8 @@ _child_capture(const lfg_ct_record_t *record, void *userdata)
 {
     _fork_child_out_t *out = (_fork_child_out_t *)userdata;
     size_t len;
+    size_t full_len;
+    size_t lost = 0;
 
     out->hdr.outcome = (int32_t)record->outcome;
 
@@ -341,7 +323,8 @@ _child_capture(const lfg_ct_record_t *record, void *userdata)
         return;
     }
 
-    len = strlen(record->message);
+    full_len = strlen(record->message);
+    len = full_len;
     if (len < sizeof(out->inline_msg))
     {
         memcpy(out->inline_msg, record->message, len + 1);
@@ -349,18 +332,33 @@ _child_capture(const lfg_ct_record_t *record, void *userdata)
         return;
     }
 
+    /* msg_len is int32 on the wire, and the parent reads a negative or
+     * zero length as "no message" -- so a >=2GiB message must be
+     * clamped rather than allowed to wrap into silent loss. Absurd in
+     * practice; cheap to rule out. */
+    if (len > (size_t)INT32_MAX)
+    {
+        lost = len - (size_t)INT32_MAX;
+        len = (size_t)INT32_MAX;
+    }
+
     out->heap_msg = (char *)malloc(len + 1);
     if (out->heap_msg)
     {
-        memcpy(out->heap_msg, record->message, len + 1);
-        out->hdr.msg_len = (int32_t)len;
+        memcpy(out->heap_msg, record->message, len);
+        out->heap_msg[len] = '\0';
+        if (lost > 0)
+        {
+            _lfg_ct_mark_truncated(out->heap_msg, len + 1, len, lost);
+        }
+        out->hdr.msg_len = (int32_t)strlen(out->heap_msg);
         return;
     }
 
     memcpy(out->inline_msg, record->message, sizeof(out->inline_msg) - 1);
     out->inline_msg[sizeof(out->inline_msg) - 1] = '\0';
-    _fork_mark_truncated(out->inline_msg, sizeof(out->inline_msg), sizeof(out->inline_msg) - 1,
-            len - (sizeof(out->inline_msg) - 1));
+    _lfg_ct_mark_truncated(out->inline_msg, sizeof(out->inline_msg), sizeof(out->inline_msg) - 1,
+            full_len - (sizeof(out->inline_msg) - 1));
     out->hdr.msg_len = (int32_t)strlen(out->inline_msg);
 }
 

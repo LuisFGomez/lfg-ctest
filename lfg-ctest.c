@@ -240,8 +240,11 @@ static int _expected_failures_count = 0;
  * the loss instead of ending mid-token.
  *
  * Only reachable on the degraded paths (allocation failure, short
- * pipe write); the length-correct paths never call it. */
-static void
+ * pipe write); the length-correct paths never call it.
+ *
+ * Deliberately not static: the fork transport declares it extern and
+ * calls it too, so both sides emit one marker format. */
+void
 _lfg_ct_mark_truncated(char *buf, size_t cap, size_t used, size_t lost)
 {
     char marker[LFG_CT_TRUNC_MARKER_MAX];
@@ -313,9 +316,10 @@ _lfg_ct_failure_msg_set(const char *file, int line, const char *function, const 
  * scratch buffer, prints the standard "*** <file>: <line>:
  * FAILURE in <fn>(): <buf>" line to stdout (unchanged behavior),
  * bumps the per-test + global failure counters, and snapshots the
- * first failure per test into @c _current_failure_msg so the
- * reporter callback can surface the assertion text on the record
- * it hands downstream.
+ * first failure per test into the failure-message slot (@c
+ * _failure_msg_inline / @c _failure_msg_heap) so the reporter
+ * callback can surface the assertion text on the record it hands
+ * downstream.
  *
  * Expect-failures self-test mode bypasses both the counter bumps
  * and the message capture -- those failures are intentional and
