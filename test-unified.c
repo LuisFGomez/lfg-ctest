@@ -11,10 +11,26 @@
  * Use cmake -DLFG_CTEST_ENABLE_FLOAT=OFF to build without float support.
  */
 
+/* The --durations wall-clock test needs a body that blocks without
+ * burning CPU, which is the whole distinction it asserts. nanosleep is
+ * POSIX-only, so the suite keeps building (minus that one test) on a
+ * target without it. __unix__ / __APPLE__ are compiler-predefined, so
+ * the probe is legal ahead of every include -- which is where the
+ * feature-test macro has to be set. */
+#if defined(__unix__) || defined(__APPLE__)
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#define _DUR_HAVE_NANOSLEEP 1
+#endif
+
 #include "lfg-ctest.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _DUR_HAVE_NANOSLEEP
+#include <time.h>
+#endif
 
 /* ============================================================================
  * PASSING TESTS - All assertions should succeed
@@ -3856,6 +3872,397 @@ static void suite_fail_fast_tests(void)
 }
 
 /* ============================================================================
+ * --durations <n> tests
+ *
+ * Two halves, deliberately kept apart:
+ *
+ *   - Flag parsing, which follows the --seed / --timeout scalar shape and
+ *     is asserted through lfg_ct_parse_args exactly as those are.
+ *   - The ranking itself, which is fed with lfg_ct_self_durations_note
+ *     rather than by driving real tests. Real dispatches produce times
+ *     the test cannot predict, so ordering and tie-breaking would not be
+ *     assertable; and the cap test would otherwise need
+ *     LFG_CT_DURATIONS_MAX + 1 registrations.
+ *
+ * What the block prints is its display order, so the assertions walk the
+ * rank-indexed accessors -- that is the ordering contract, not the
+ * table's build order.
+ *
+ * Every test that touches the accumulator resets it first: this binary's
+ * own tests keep classifying (and therefore keep appending) around them.
+ * ============================================================================ */
+
+/* Elapsed times are compared as whole milliseconds so the assertions do
+ * not depend on the optional float/double assertion macros. */
+#define _DUR_MS(sec) ((int)((sec) * 1000.0 + 0.5))
+
+static int _dur_body_ran;
+
+static void
+_dur_body_probe(void)
+{
+    _dur_body_ran++;
+}
+
+/* Return the parser to its default state after a test drove it. */
+static void
+_dur_reset(void)
+{
+    char *argv[] = {(char *)"prog"};
+
+    (void)lfg_ct_parse_args(1, argv);
+    lfg_ct_self_durations_reset();
+}
+
+static void
+test_durations_default_off(void)
+{
+    char *argv[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_limit());
+}
+
+static void
+test_durations_parses_count(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--durations", (char *)"5"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(5, lfg_ct_self_durations_limit());
+
+    _dur_reset();
+}
+
+static void
+test_durations_zero_is_a_legal_value(void)
+{
+    /* 0 means "every retained test", not "the flag was absent" -- which
+     * is why the enabled predicate is separate from the value. */
+    char *argv[] = {(char *)"prog", (char *)"--durations", (char *)"0"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_limit());
+
+    _dur_reset();
+}
+
+static void
+test_durations_last_flag_wins(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--durations", (char *)"3", (char *)"--durations", (char *)"9"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_INT_EQUAL(9, lfg_ct_self_durations_limit());
+
+    _dur_reset();
+}
+
+static void
+test_durations_rejects_bad_arguments(void)
+{
+    /* Same four shapes --seed rejects, and for the same reason: the bare
+     * digit-run rule is what stops strtoul coercing " 1" or wrapping
+     * "-1" into a value that would then read as a legal count. */
+    char *argv_missing[] = {(char *)"prog", (char *)"--durations"};
+    char *argv_alpha[] = {(char *)"prog", (char *)"--durations", (char *)"five"};
+    char *argv_trailing[] = {(char *)"prog", (char *)"--durations", (char *)"5x"};
+    char *argv_negative[] = {(char *)"prog", (char *)"--durations", (char *)"-1"};
+    char *argv_empty[] = {(char *)"prog", (char *)"--durations", (char *)""};
+
+    lfg_ct_expect_failures_begin();
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv_missing));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_alpha));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_trailing));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_negative));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_empty));
+    lfg_ct_expect_failures_end();
+
+    /* A failed parse resets parser state, so nothing latches. */
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_limit());
+}
+
+static void
+test_durations_reset_by_a_later_parse(void)
+{
+    char *argv_on[] = {(char *)"prog", (char *)"--durations", (char *)"4"};
+    char *argv_off[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_on));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_enabled());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_off));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_limit());
+}
+
+static void
+test_durations_orders_by_time_descending(void)
+{
+    lfg_ct_self_durations_reset();
+
+    lfg_ct_self_durations_note("suite_a", "test_quick", 0.001);
+    lfg_ct_self_durations_note(NULL, "test_slow", 0.500);
+    lfg_ct_self_durations_note("suite_a", "test_middling", 0.050);
+
+    ASSERT_INT_EQUAL(3, lfg_ct_self_durations_count());
+
+    ASSERT_STR_EQUAL("test_slow", lfg_ct_self_durations_name_at(0));
+    ASSERT_INT_EQUAL(500, _DUR_MS(lfg_ct_self_durations_time_at(0)));
+    ASSERT_STR_EQUAL("test_middling", lfg_ct_self_durations_name_at(1));
+    ASSERT_INT_EQUAL(50, _DUR_MS(lfg_ct_self_durations_time_at(1)));
+    ASSERT_STR_EQUAL("test_quick", lfg_ct_self_durations_name_at(2));
+    ASSERT_INT_EQUAL(1, _DUR_MS(lfg_ct_self_durations_time_at(2)));
+
+    /* The suite name rides along for the qualified <suite>::<test>
+     * rendering, and is legitimately absent for a top-level test. */
+    ASSERT_STR_EQUAL("suite_a", lfg_ct_self_durations_suite_at(2));
+    ASSERT_NULL(lfg_ct_self_durations_suite_at(0));
+
+    /* Out-of-range ranks report so rather than reading past the table. */
+    ASSERT_NULL(lfg_ct_self_durations_name_at(3));
+    ASSERT_NULL(lfg_ct_self_durations_name_at(-1));
+
+    lfg_ct_self_durations_reset();
+}
+
+static void
+test_durations_ties_break_by_record_order(void)
+{
+    /* Equal times are the common case at millisecond granularity, so the
+     * order they resolve to has to be repeatable or the block stops being
+     * diffable across runs of the same binary. First recorded ranks
+     * first. */
+    lfg_ct_self_durations_reset();
+
+    lfg_ct_self_durations_note(NULL, "test_first", 0.010);
+    lfg_ct_self_durations_note(NULL, "test_second", 0.010);
+    lfg_ct_self_durations_note(NULL, "test_third", 0.010);
+
+    ASSERT_STR_EQUAL("test_first", lfg_ct_self_durations_name_at(0));
+    ASSERT_STR_EQUAL("test_second", lfg_ct_self_durations_name_at(1));
+    ASSERT_STR_EQUAL("test_third", lfg_ct_self_durations_name_at(2));
+
+    lfg_ct_self_durations_reset();
+}
+
+static void
+test_durations_limit_beyond_test_count_lists_all(void)
+{
+    /* No padding, no error: the block simply lists what there is. */
+    lfg_ct_self_durations_reset();
+    lfg_ct_self_durations_set(1, 10);
+
+    lfg_ct_self_durations_note(NULL, "test_one", 0.002);
+    lfg_ct_self_durations_note(NULL, "test_two", 0.001);
+
+    ASSERT_INT_EQUAL(2, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_limit_narrows_the_block(void)
+{
+    lfg_ct_self_durations_reset();
+    lfg_ct_self_durations_set(1, 2);
+
+    lfg_ct_self_durations_note(NULL, "test_one", 0.003);
+    lfg_ct_self_durations_note(NULL, "test_two", 0.002);
+    lfg_ct_self_durations_note(NULL, "test_three", 0.001);
+
+    ASSERT_INT_EQUAL(3, lfg_ct_self_durations_count());
+    ASSERT_INT_EQUAL(2, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_zero_lists_every_retained_test(void)
+{
+    lfg_ct_self_durations_reset();
+    lfg_ct_self_durations_set(1, 0);
+
+    lfg_ct_self_durations_note(NULL, "test_one", 0.003);
+    lfg_ct_self_durations_note(NULL, "test_two", 0.002);
+    lfg_ct_self_durations_note(NULL, "test_three", 0.001);
+
+    ASSERT_INT_EQUAL(3, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_zero_executed_tests_prints_nothing(void)
+{
+    /* A filter that admitted nothing, or a run with no registrations:
+     * the block is omitted entirely rather than printing a bare header. */
+    lfg_ct_self_durations_reset();
+    lfg_ct_self_durations_set(1, 5);
+
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_count());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_absent_flag_prints_nothing(void)
+{
+    /* Collection is unconditional -- the flag only gates the report --
+     * so a populated table with the flag off must still show nothing. */
+    lfg_ct_self_durations_reset();
+    lfg_ct_self_durations_set(0, 0);
+
+    lfg_ct_self_durations_note(NULL, "test_one", 0.003);
+
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_count());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_list_mode_retains_nothing(void)
+{
+    /* --list returns before dispatch, so no test classifies and no record
+     * is retained -- which is what leaves lfg_ct_print_summary's own
+     * early return with nothing to suppress. */
+    char *argv[] = {(char *)"prog", (char *)"--list", (char *)"--durations", (char *)"3"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_list_mode());
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_enabled());
+
+    lfg_ct_self_durations_reset();
+    _dur_body_ran = 0;
+    lfg_ct_test_impl(_dur_body_probe, "mock_dur_listed_test");
+
+    ASSERT_INT_EQUAL(0, _dur_body_ran);
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_count());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_shown());
+
+    _dur_reset();
+}
+
+static void
+test_durations_cap_overflow_is_reported(void)
+{
+    /* Past the cap the tests still run and still classify; only their
+     * ranking is lost, and the block says how many it dropped rather
+     * than silently truncating. */
+    int cap = lfg_ct_self_durations_cap();
+    int i;
+
+    lfg_ct_self_durations_reset();
+    for (i = 0; i < cap + 3; i++)
+    {
+        lfg_ct_self_durations_note(NULL, "test_capped", 0.001);
+    }
+
+    ASSERT_INT_EQUAL(cap, lfg_ct_self_durations_count());
+    ASSERT_INT_EQUAL(3, lfg_ct_self_durations_dropped());
+
+    lfg_ct_self_durations_reset();
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_dropped());
+}
+
+static void
+test_durations_records_every_outcome(void)
+{
+    /* A slow SKIP or XFAIL answers "why is this suite slow?" exactly as
+     * a slow PASS does, so the accumulator takes every classification,
+     * not just the passing ones. */
+    lfg_ct_self_durations_reset();
+
+    lfg_ct_test_impl(_dur_body_probe, "mock_dur_passing");
+    lfg_ct_test_impl(_disp_body_skip_simple, "mock_dur_skipping");
+    lfg_ct_test_impl(_disp_body_xfail_without_failure, "mock_dur_xpassing");
+
+    ASSERT_INT_EQUAL(3, lfg_ct_self_durations_count());
+
+    lfg_ct_self_durations_reset();
+}
+
+#ifdef _DUR_HAVE_NANOSLEEP
+static void
+_dur_body_sleeps(void)
+{
+    struct timespec req;
+
+    req.tv_sec = 0;
+    req.tv_nsec = 50L * 1000L * 1000L; /* 50 ms */
+    (void)nanosleep(&req, NULL);
+}
+
+static void
+test_durations_measures_wall_clock_not_cpu_time(void)
+{
+    /* The reason the clock change rides with this feature: under the
+     * clock() / CPU-time measurement the in-process path used before
+     * #62, a body that sleeps reported ~0 and sorted to the *bottom* of
+     * the ranking -- inverting exactly the case the report exists to
+     * surface. Wall time is also what lfg-ctest.h has always documented
+     * lfg_ct_record_t.time_sec to be, and what the fork path measures. */
+    lfg_ct_self_durations_reset();
+
+    lfg_ct_test_impl(_dur_body_sleeps, "mock_dur_sleeper");
+
+    ASSERT_INT_EQUAL(1, lfg_ct_self_durations_count());
+
+    /* Generous lower bound: nanosleep may oversleep, and a loaded
+     * machine may add a lot on top, but neither can take it below the
+     * requested interval. A CPU clock would report single-digit
+     * microseconds here. */
+    ASSERT_GREATER_OR_EQUAL(_DUR_MS(lfg_ct_self_durations_time_at(0)), 40);
+
+    lfg_ct_self_durations_reset();
+}
+#endif /* _DUR_HAVE_NANOSLEEP */
+
+static void
+test_durations_reset_state_for_remaining_tests(void)
+{
+    /* Verifying tail, mirroring suite_fail_fast_tests: whatever the tests
+     * above staged, the binary continues with the report off. */
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_enabled());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_limit());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_durations_dropped());
+}
+
+static void suite_durations_tests(void)
+{
+    lfg_ct_test(test_durations_default_off);
+    lfg_ct_test(test_durations_parses_count);
+    lfg_ct_test(test_durations_zero_is_a_legal_value);
+    lfg_ct_test(test_durations_last_flag_wins);
+    lfg_ct_test(test_durations_rejects_bad_arguments);
+    lfg_ct_test(test_durations_reset_by_a_later_parse);
+    lfg_ct_test(test_durations_orders_by_time_descending);
+    lfg_ct_test(test_durations_ties_break_by_record_order);
+    lfg_ct_test(test_durations_limit_beyond_test_count_lists_all);
+    lfg_ct_test(test_durations_limit_narrows_the_block);
+    lfg_ct_test(test_durations_zero_lists_every_retained_test);
+    lfg_ct_test(test_durations_zero_executed_tests_prints_nothing);
+    lfg_ct_test(test_durations_absent_flag_prints_nothing);
+    lfg_ct_test(test_durations_list_mode_retains_nothing);
+    lfg_ct_test(test_durations_cap_overflow_is_reported);
+    lfg_ct_test(test_durations_records_every_outcome);
+#ifdef _DUR_HAVE_NANOSLEEP
+    lfg_ct_test(test_durations_measures_wall_clock_not_cpu_time);
+#endif
+
+    /* The notes above are synthetic; leaving them retained would print a
+     * fabricated ranking at this binary's own summary. */
+    _dur_reset();
+    lfg_ct_test(test_durations_reset_state_for_remaining_tests);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
@@ -3980,6 +4387,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 7d: -x / --fail-fast TESTS ---\n");
     printf("(Verifies flag parsing, the test + suite suppression gates, and --list)\n");
     lfg_ct_suite(suite_fail_fast_tests);
+
+    printf("\n--- SUITE 7e: --durations <n> TESTS ---\n");
+    printf("(Verifies flag parsing, ranking order, the cap, and wall-clock timing)\n");
+    lfg_ct_suite(suite_durations_tests);
 
     /* The arg-parsing self-tests above drive lfg_ct_parse_args with
      * synthetic argv and reset it afterwards, which leaves --state-file

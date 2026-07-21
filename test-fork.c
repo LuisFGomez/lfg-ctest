@@ -14,6 +14,14 @@
  *  paths.
  */
 
+/* nanosleep / struct timespec, for the durations test's non-CPU-burning
+ * body. Same #ifndef guard, and same reason, as lfg-ctest-fork.c: this
+ * TU is Unix-only by construction, but it must still build when the
+ * consumer's toolchain is strict -std=c99. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "lfg-ctest.h"
 
 #include <errno.h>
@@ -23,6 +31,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ============================================================================
@@ -1156,6 +1165,49 @@ test_long_message_nested_preserves_outer_capture(void)
     _run_long_message_case(LFG_CT_ISOLATE_NONE, 1);
 }
 
+/* Blocks for a measurable interval without burning CPU. 50 ms is long
+ * enough to clear scheduling noise and short enough not to matter to the
+ * suite's runtime. */
+static void
+_body_sleeps_briefly(void)
+{
+    struct timespec req;
+
+    req.tv_sec = 0;
+    req.tv_nsec = 50L * 1000L * 1000L;
+    (void)nanosleep(&req, NULL);
+}
+
+static void
+test_fork_durations_collected_like_in_process(void)
+{
+    /* The durations accumulator is fed from two sites -- the in-process
+     * classification and the fork parent's _lfg_ct_record_external. Only
+     * the second one runs for a forked test, so missing it would leave a
+     * fork-isolated run reporting an empty block while the run itself
+     * looked entirely normal. Drive one test each way and require both
+     * to land, with the sleep visible in both measurements. */
+    lfg_ct_self_durations_reset();
+
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+    lfg_ct_test_impl(_body_sleeps_briefly, "fork_durations_forked");
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+
+    lfg_ct_test_impl(_body_sleeps_briefly, "fork_durations_inproc");
+
+    ASSERT_INT_EQUAL(2, lfg_ct_self_durations_count());
+
+    /* Both paths measure wall time off CLOCK_MONOTONIC, so both see the
+     * sleep. Under the clock() the in-process path used before #62 the
+     * second of these reported ~0 while the first reported ~50 ms --
+     * the two paths reporting different quantities is what made a naive
+     * ranking untrustworthy. */
+    ASSERT_GE((int)(lfg_ct_self_durations_time_at(0) * 1000.0 + 0.5), 40);
+    ASSERT_GE((int)(lfg_ct_self_durations_time_at(1) * 1000.0 + 0.5), 40);
+
+    lfg_ct_self_durations_reset();
+}
+
 /* ============================================================================
  *  Suite + main
  * ========================================================================== */
@@ -1182,6 +1234,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_long_message_survives_in_process_path);
     lfg_ct_test(test_long_message_survives_fork_transport);
     lfg_ct_test(test_long_message_nested_preserves_outer_capture);
+    lfg_ct_test(test_fork_durations_collected_like_in_process);
 }
 
 int
