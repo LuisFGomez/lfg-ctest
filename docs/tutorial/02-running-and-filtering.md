@@ -47,6 +47,8 @@ The flags it recognises:
 | `-v`, `--verbose` | Stream a per-test progress line. |
 | `-q`, `--quiet` | Reduce output to failures plus the final summary (see [Quiet progress](#quiet-progress) below). |
 | `--verbosity <n>` | The level that `-q` / `-v` alias: `0` quiet, `1` default, `2` verbose. |
+| `--isolation <mode>` | Run tests in-process (`none`) or one fork per test (`fork`), without rebuilding (see [chapter 7](07-fork-isolation.md)). |
+| `--timeout <ms>` | Per-test timeout under fork isolation; `0` disables it. Inert under `--isolation none`. |
 
 ## Entry ids
 

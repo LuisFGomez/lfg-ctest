@@ -63,7 +63,7 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), [Isolation modes](#isolation-modes), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_verbosity()` | Returns the `lfg_ct_verbosity_t` level in effect — `LFG_CT_VERBOSITY_QUIET` (0), `_DEFAULT` (1), or `_VERBOSE` (2). See [Quiet output](#quiet-output). |
 | `lfg_ct_is_verbose()` | Returns 1 if the level is at least `LFG_CT_VERBOSITY_VERBOSE`, 0 otherwise. Derived from `lfg_ct_verbosity()`; semantics unchanged from when verbosity was a single boolean. |
@@ -186,6 +186,15 @@ Recognized flags:
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 | `-q`, `--quiet` | Reduce output to failures plus the final summary. Alias for `--verbosity 0`. See [Quiet output](#quiet-output). |
 | `--verbosity <n>` | Set the level that `-q` and `-v` alias, as an integer: `0` quiet, `1` default, `2` verbose. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. |
+| `--isolation <mode>` | Select the dispatch mode: `none` (in-process) or `fork` (fork-per-test). The CLI face of `lfg_ct_set_isolation`. Requesting `fork` on a build without fork support is an error with a stderr diagnostic — never a silent fallback to in-process. Any other mode name, and a missing value, are errors. Repeating the flag keeps the last value. See [Isolation modes](#isolation-modes). |
+| `--timeout <ms>` | Per-test timeout applied under `LFG_CT_ISOLATE_FORK`. The CLI face of `lfg_ct_set_fork_timeout_ms`. `0` disables the timeout and is a legal value, so a missing, non-numeric, negative, or out-of-range value is an error rather than a silent coercion to `0`. Accepted on any build; inert while isolation is `none`. Repeating the flag keeps the last value. See [Isolation modes](#isolation-modes). |
+
+`--isolation` and `--timeout` are the two flags that drive **API-owned**
+state rather than parse-owned state. Consequences, spelled out under
+[Isolation modes](#isolation-modes): a `lfg_ct_parse_args` call that omits
+them leaves the current configuration standing instead of resetting it, a
+failed parse applies neither, and a setter called afterwards overrides the
+command line.
 
 A glob addresses **exactly as many trailing components as it spells out**: a
 glob with no `::` is matched against the test name alone, one with a single
@@ -605,6 +614,40 @@ subsequent `lfg_ct_test` invocation:
 |------|--------|
 | `LFG_CT_ISOLATE_NONE` (default) | In-process dispatch. Fast; no isolation between tests. |
 | `LFG_CT_ISOLATE_FORK` | Per-test `fork(2)`. Crash survival, true state reset, per-test sanitizer attribution. |
+
+Both modes are also reachable from the command line via
+`--isolation none|fork`, and the fork timeout via `--timeout <ms>`, so a
+run can be reshaped without editing and rebuilding a test `main` —
+attaching a debugger to one failing test, or dropping isolation when fork
+mode is itself what you suspect.
+
+The two surfaces share one piece of state, and the contract is
+**last-writer-wins**:
+
+```c
+int main(int argc, char *argv[])
+{
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);   /* the program's default */
+
+    if (0 != lfg_ct_parse_args(argc, argv))      /* parse LAST, so the */
+    {                                            /* CLI can override it */
+        return 1;
+    }
+    ...
+}
+```
+
+Call `lfg_ct_parse_args` **after** any `lfg_ct_set_isolation` /
+`lfg_ct_set_fork_timeout_ms` call for the command line to win; call a setter
+after it to pin a value the CLI cannot change. Unlike the filter and
+verbosity state, these two are not reset by `lfg_ct_parse_args`: a parse that
+does not mention the flags leaves them alone, and a parse that fails applies
+neither.
+
+On a build configured with `-DLFG_CTEST_ENABLE_FORK=OFF`, `--isolation fork`
+fails the parse with a diagnostic naming the unavailability, mirroring
+`lfg_ct_set_isolation`'s non-zero return. The mode is left at `none`; there
+is no silent downgrade in either surface.
 
 Fork mode mechanics:
 

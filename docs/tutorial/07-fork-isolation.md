@@ -42,6 +42,37 @@ recognised but unavailable — **with no silent fallback**; the previously
 configured mode is left in place. The default is `LFG_CT_ISOLATE_NONE`
 (in-process, the historical, fastest path).
 
+### From the command line
+
+`--isolation none|fork` reaches the same setting without a rebuild:
+
+```sh
+$ ./test_indicators --isolation fork          # enable it for this run
+$ ./test_indicators --isolation none          # drop back in-process
+```
+
+That second form is the one you'll want when attaching a debugger to a single
+failing test — stepping into a forked child is awkward, and `--isolation none`
+is the escape hatch that doesn't require editing `main`.
+
+There is a catch in the example above: it calls `lfg_ct_set_isolation`
+**after** `lfg_ct_parse_args`, so the setter wins and `--isolation` is
+ignored. The two surfaces share one piece of state and the rule is
+last-writer-wins. Flip the order when you want the CLI to override:
+
+```c
+lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);   /* the program's default */
+
+if (0 != lfg_ct_parse_args(argc, argv))      /* parse LAST, so --isolation */
+{                                            /* and --timeout can override */
+    return 1;
+}
+```
+
+Unlike `--filter` and the verbosity flags, `--isolation` and `--timeout` are
+not reset by `lfg_ct_parse_args`: a parse that doesn't mention them leaves
+your configuration alone, and a parse that *fails* applies neither.
+
 ## What it buys you
 
 | Property | In-process (default) | Fork-per-test |
@@ -86,6 +117,19 @@ lfg_ct_set_fork_timeout_ms(5000);   /* 5s per test; 0 disables (default) */
 The setting only takes effect under `LFG_CT_ISOLATE_FORK`, but it persists
 across mode changes, so you can set it once up front.
 
+`--timeout <ms>` is the CLI equivalent, useful for tightening the budget on
+one suspect run without a rebuild:
+
+```sh
+$ ./test_indicators --isolation fork --timeout 5000
+$ ./test_indicators --isolation fork --timeout 0     # disable the timeout
+```
+
+`0` is a real value (timeout disabled), not a parse failure — which is why a
+non-numeric, negative, or out-of-range value is rejected outright rather than
+quietly becoming `0`. The flag is accepted on any build; it simply sits inert
+until isolation is `fork`.
+
 ## Platform gating and opt-out
 
 Fork mode is **Unix-family only** (`__unix__` / `__APPLE__`). Two ways it can
@@ -98,6 +142,11 @@ returns non-zero, mode unchanged:
    surface can build with `-DLFG_CTEST_ENABLE_FORK=OFF` (equivalently
    `LFG_CT_DISABLE_FORK=1` on the `lfg-ctest-fork.c` TU). The resulting binary
    has no fork/waitpid/signal code linked in at all.
+
+On such a build `--isolation fork` fails the parse with a diagnostic naming
+the unavailability, and the runner exits non-zero. That mirrors the setter:
+asking for fork and getting in-process without being told would misreport
+what actually ran.
 
 Crucially, the `LFG_CT_ISOLATE_FORK` enum value is part of the public ABI
 **unconditionally** — code that references it still compiles in both builds.
