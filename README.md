@@ -28,7 +28,7 @@ read/write actions, and a per-call callback hook.
 - `--seed <n>` replays a prior run's `rand()` sequence; without it the runner
   generates a full-range seed per run and prints it.
 - `--rerun-failed` replays only the previous run's failures, under the seed
-  they failed with. Every run persists both to `.lfg-ctest-last`
+  they failed with. Every non-listing run persists both to `.lfg-ctest-last`
   (`--state-file` moves it); repeating the flag narrows toward what still
   fails.
 - `-x` / `--fail-fast` stops the **whole run** at the first failing test —

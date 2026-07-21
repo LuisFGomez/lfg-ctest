@@ -73,7 +73,7 @@ POSIX shell.
 
 `test-rerun-failed` is the same shape: `tools/check-rerun-failed.sh`, also
 `if(UNIX)`. It covers the parts of `--rerun-failed` that only exist at process
-scope — that a normal exit persists `.lfg-ctest-last` even with stdout
+scope — that a normal exit persists the state file even with stdout
 redirected to a file, that the persisted seed matches the announced one, that
 `--list` leaves the file untouched, and that each error path (missing,
 malformed, wholly stale state file) exits non-zero instead of running the whole

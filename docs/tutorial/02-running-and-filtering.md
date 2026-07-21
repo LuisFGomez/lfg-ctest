@@ -173,12 +173,18 @@ independent units:
 ```cmake
 foreach(ind sma ema wma)
   add_test(NAME test_ind_${ind}
-           COMMAND test_indicators --filter "suite_${ind}_*")
+           COMMAND test_indicators --filter "suite_${ind}_*"
+                   --state-file "${CMAKE_CURRENT_BINARY_DIR}/.lfg-ctest-last-${ind}")
 endforeach()
 ```
 
 Each shard reports independently, fails independently, and runs concurrently —
 without compiling a separate binary per indicator.
+
+Give each shard its own `--state-file`. The shards share a working directory,
+so without it they all persist to the same default `.lfg-ctest-last`: they race
+on the file, and whichever finishes last wins, leaving a record of one shard's
+failures that `--rerun-failed` would replay as if it were the whole run's.
 
 For a consumer that wants to short-circuit expensive work *outside* the
 framework (opening a database, spinning up a fixture) when the current filter
@@ -388,7 +394,8 @@ previous run was green, the rerun says so and exits 0.
 Two housekeeping notes: `--list` deliberately leaves the state file alone, so
 listing between reruns is safe, and `--state-file <path>` moves the file when
 the working directory is not where you want build artifacts. Add
-`.lfg-ctest-last` to your `.gitignore`.
+`.lfg-ctest-last*` to your `.gitignore` — the glob also covers the `.tmp`
+staging sibling an interrupted write leaves behind.
 
 ## Where to go next
 
