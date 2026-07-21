@@ -1128,6 +1128,58 @@ int lfg_ct_self_rerun_unresolved_count(void);
  */
 int lfg_ct_self_state_write(const char *path, unsigned seed);
 
+/** Self-test hook: fold one FAILED outcome into the grouped failure
+ *  summary exactly as the classifier does, without a genuine failure
+ *  (which expect-failures mode would suppress before it arrived).
+ *  @param test    Grouping key -- the registered test name.
+ *  @param message Record message, in the classifier's
+ *                 "<file>:<line>: in <fn>(): <text>" form. Supplies the
+ *                 group's first-occurrence location when the group is
+ *                 created; anything without that shape reports
+ *                 "(unknown)".
+ */
+void lfg_ct_self_failgroup_note(const char *test, const char *message);
+
+/** Self-test hook: drop the accumulated failure groups. */
+void lfg_ct_self_failgroup_reset(void);
+
+/** Self-test accessor: number of distinct groups the block would list. */
+int lfg_ct_self_failgroup_count(void);
+
+/** Self-test accessor: every failure fed to the accumulator, grouped or
+ *  not -- the total the block's header line reports.
+ */
+int lfg_ct_self_failgroup_total(void);
+
+/** Self-test accessor: failures that arrived after the group table
+ *  filled. Non-zero is what makes the block report its cap rather than
+ *  silently truncate.
+ */
+int lfg_ct_self_failgroup_dropped(void);
+
+/** Self-test accessor: the compile-time distinct-group ceiling
+ *  (@c LFG_CT_FAILGROUP_MAX), so a cap test need not hardcode it.
+ */
+int lfg_ct_self_failgroup_cap(void);
+
+/** Self-test accessor: name of the group at @p rank in the block's
+ *  display order (count descending, ties in first-occurrence order).
+ *  @return Borrowed pointer, or NULL when @p rank is out of range.
+ */
+const char *lfg_ct_self_failgroup_name_at(int rank);
+
+/** Self-test accessor: first-occurrence location of the group at
+ *  @p rank in display order.
+ *  @return Borrowed pointer, or NULL when @p rank is out of range.
+ */
+const char *lfg_ct_self_failgroup_origin_at(int rank);
+
+/** Self-test accessor: failure count of the group at @p rank in display
+ *  order.
+ *  @return The count, or -1 when @p rank is out of range.
+ */
+int lfg_ct_self_failgroup_count_at(int rank);
+
 #endif /* LFG_CTEST_SELF_TEST */
 
 #endif /* LFG_CTEST_H_ */

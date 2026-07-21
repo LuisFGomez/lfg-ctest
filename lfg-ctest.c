@@ -32,6 +32,7 @@
  * but needed by lfg_ct_end, which sits above them. */
 static void _fail_keys_clear(void);
 static void _replay_clear(void);
+static void _failgroup_clear(void);
 
 /*============================================================================
  *  Variables
@@ -554,6 +555,7 @@ void lfg_ct_end(void)
      * latched, so lfg_ct_return keeps answering correctly after this. */
     _fail_keys_clear();
     _replay_clear();
+    _failgroup_clear();
 }
 
 /* Number of "::"-delimited components in @p s (a glob or an id). */
@@ -756,6 +758,182 @@ _replay_clear(void)
     _replay_resolved = NULL;
     _replay_key_count = 0;
     _replay_key_cap = 0;
+}
+
+/*============================================================================
+ *  Grouped failure summary
+ *
+ *  Collapses a run's FAILED outcomes into one line per distinct test
+ *  name, so a large failure set reports how many *distinct* problems it
+ *  represents instead of leaving that collapse to be hand-rolled over
+ *  the captured log.
+ *
+ *  Fixed-cap static storage, matching the no-allocation style the rest
+ *  of this TU's run-scoped tables use (see LFG_CT_FILTER_MAX): the
+ *  accumulator runs during a failing run, which is the worst possible
+ *  moment to introduce an allocation-failure path. The ceiling is
+ *  documented rather than silent -- an overrun is reported in the block
+ *  itself. Footprint is LFG_CT_FAILGROUP_MAX * ~200 bytes of BSS; lower
+ *  the cap if a target cannot spend it.
+ *==========================================================================*/
+
+/* Distinct failing test names the block can report. Beyond this the
+ * failures are still counted, just not grouped -- and the block says so. */
+#define LFG_CT_FAILGROUP_MAX 256
+
+/* Per-group copies. Borrowing would be cheaper, but the test name is a
+ * caller-supplied pointer with no lifetime guarantee and the origin is
+ * carved out of the per-test message slot, which is cleared on the way
+ * out of every dispatch level. */
+#define LFG_CT_FAILGROUP_NAME_MAX 64
+#define LFG_CT_FAILGROUP_ORIGIN_MAX 128
+
+typedef struct
+{
+    char name[LFG_CT_FAILGROUP_NAME_MAX];
+    char origin[LFG_CT_FAILGROUP_ORIGIN_MAX];
+    int count;
+} _failgroup_t;
+
+static _failgroup_t _failgroups[LFG_CT_FAILGROUP_MAX];
+static int _failgroup_count = 0;
+
+/* Every failure fed to the accumulator, grouped or not. The block's
+ * header reports this rather than _tests_failed so the two stay
+ * independent -- the self-test hooks feed the accumulator without
+ * driving a real classification. */
+static int _failgroup_total = 0;
+
+/* Failures that arrived after the table filled. Non-zero is what turns
+ * the cap from a silent truncation into a reported one. */
+static int _failgroup_dropped = 0;
+
+/* Copy the location prefix of a captured failure message into @p out.
+ *
+ * The message is composed once, by _lfg_ct_failure_msg_set, as
+ * "<file>:<line>: in <fn>(): <text>", and that is the only form that
+ * reaches here carrying a location. Slicing it back apart looks
+ * roundabout next to capturing file/line into their own slots at the
+ * assertion site -- but fork mode's parent never runs the assertion and
+ * has nothing *but* this string, so a parser is needed regardless.
+ * Deriving both paths from it keeps the two feed sites reporting
+ * identical text instead of two mechanisms that can drift.
+ *
+ * A message with no location (fork-mode's own diagnostics: a signal, a
+ * timeout, a pipe failure) yields "(unknown)" rather than a guess. */
+static void
+_failgroup_origin(char *out, size_t cap, const char *message)
+{
+    const char *end;
+    size_t n;
+
+    end = (NULL != message) ? strstr(message, "(): ") : NULL;
+    if (NULL == end)
+    {
+        snprintf(out, cap, "%s", "(unknown)");
+        return;
+    }
+
+    /* Keep the "()" that closes the function name, drop the ": " that
+     * begins the assertion text. */
+    n = (size_t)(end - message) + 2;
+    snprintf(out, cap, "%.*s", (int)n, message);
+}
+
+/* Fold one FAILED outcome into the accumulator. @p message is the
+ * record's message -- the same string both feed sites already hand the
+ * reporter -- and supplies the group's first-occurrence location when
+ * the group is created. */
+static void
+_failgroup_record(const char *name, const char *message)
+{
+    const char *key = (NULL != name) ? name : "(unknown)";
+    int i;
+
+    _failgroup_total++;
+
+    for (i = 0; i < _failgroup_count; i++)
+    {
+        if (0 == strcmp(_failgroups[i].name, key))
+        {
+            _failgroups[i].count++;
+            return;
+        }
+    }
+
+    if (_failgroup_count == LFG_CT_FAILGROUP_MAX)
+    {
+        _failgroup_dropped++;
+        return;
+    }
+
+    snprintf(_failgroups[_failgroup_count].name, sizeof(_failgroups[_failgroup_count].name), "%s", key);
+    _failgroup_origin(_failgroups[_failgroup_count].origin, sizeof(_failgroups[_failgroup_count].origin), message);
+    _failgroups[_failgroup_count].count = 1;
+    _failgroup_count++;
+}
+
+static void
+_failgroup_clear(void)
+{
+    _failgroup_count = 0;
+    _failgroup_total = 0;
+    _failgroup_dropped = 0;
+}
+
+/* Fill @p order with group indices in display order: count descending,
+ * ties broken by first-occurrence order.
+ *
+ * Descending count is the whole point of the block rather than a
+ * presentation choice -- the largest group is usually one systemic
+ * cause, and putting it first is what makes the output actionable. The
+ * tie-break keeps the block byte-identical across runs of the same set.
+ * Insertion sort over a bounded table, and stable, which is exactly what
+ * makes the tie-break fall out of the table's own build order. */
+static void
+_failgroup_order(int *order)
+{
+    int i;
+    int j;
+
+    for (i = 0; i < _failgroup_count; i++)
+    {
+        for (j = i; j > 0 && _failgroups[order[j - 1]].count < _failgroups[i].count; j--)
+        {
+            order[j] = order[j - 1];
+        }
+        order[j] = i;
+    }
+}
+
+/* Emit the block. Silent on a run with no failures: no header, no empty
+ * body, so a green run's output is byte-identical to what it was before
+ * this existed. */
+static void
+_failgroup_print(void)
+{
+    int order[LFG_CT_FAILGROUP_MAX];
+    int i;
+
+    if (0 == _failgroup_total)
+    {
+        return;
+    }
+
+    _failgroup_order(order);
+
+    printf("*** Failure summary: %d failure%s in %d distinct test%s\r\n", _failgroup_total,
+            (1 == _failgroup_total) ? "" : "s", _failgroup_count, (1 == _failgroup_count) ? "" : "s");
+    for (i = 0; i < _failgroup_count; i++)
+    {
+        printf("*** %5d  %-32s (first: %s)\r\n", _failgroups[order[i]].count, _failgroups[order[i]].name,
+                _failgroups[order[i]].origin);
+    }
+    if (_failgroup_dropped > 0)
+    {
+        printf("*** %d further failure%s ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = %d) was reached\r\n",
+                _failgroup_dropped, (1 == _failgroup_dropped) ? "" : "s", LFG_CT_FAILGROUP_MAX);
+    }
 }
 
 /* Append @p id to this run's failure set, ignoring a repeat (a nested
@@ -1928,6 +2106,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
             outcome = LFG_CT_FAILED;
             message = _lfg_ct_failure_msg();
             _fail_record_current(name);
+            _failgroup_record(name, message);
         }
         else
         {
@@ -1980,11 +2159,15 @@ void lfg_ct_print_summary(void)
     strict_xpass_fail = (_strict_xpass && _tests_xpassed > 0);
     verdict = (_tests_failed > 0 || strict_xpass_fail) ? "FAIL" : "PASS";
 
+    /* Split into two calls so the grouped failure block can land
+     * between them. Both lines' text is unchanged: downstream tooling
+     * and the framework's own tests match them exactly, and the verdict
+     * stays last so tailing or grepping the end of a log still works. */
     printf("*** Executed %d assertions in %d tests. "
-           "Failures: %d, Skipped: %d, XFail: %d, XPass: %d\r\n"
-           "*** Testing complete. Result: %s\r\n",
-            _assertions_executed, _tests_executed, _tests_failed, _tests_skipped, _tests_xfailed, _tests_xpassed,
-            verdict);
+           "Failures: %d, Skipped: %d, XFail: %d, XPass: %d\r\n",
+            _assertions_executed, _tests_executed, _tests_failed, _tests_skipped, _tests_xfailed, _tests_xpassed);
+    _failgroup_print();
+    printf("*** Testing complete. Result: %s\r\n", verdict);
 
     /* Reporter's run-complete hook. A buffering reporter (e.g. the
      * contrib JUnit emitter) flushes its accumulated state here. A
@@ -2249,6 +2432,10 @@ void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t
             }
             _tests_failed++;
             _current_suite_failures++;
+            /* Second of the two accumulator feed sites. Reached only on
+             * the non-suppressed path, so an expect-failures self-test
+             * run leaves the block as empty as it leaves the tallies. */
+            _failgroup_record(name, message);
             if (print_outcome_line)
             {
                 printf("*** test FAILURE: %s\r\n", name);
@@ -2437,6 +2624,79 @@ void lfg_ct_self_rerun_note_failure(const char *file, const char *suite, const c
 void lfg_ct_self_rerun_reset(void)
 {
     _fail_keys_clear();
+}
+
+/* Failure-summary hooks. Same shape, and same reason, as the rerun set's
+ * above: expect-failures mode suppresses a genuine failure before it
+ * ever reaches the accumulator, so the framework's own tests need a way
+ * to feed it directly. Reaching the cap through real tests would
+ * otherwise take LFG_CT_FAILGROUP_MAX + 1 distinct registrations. */
+void lfg_ct_self_failgroup_note(const char *test, const char *message)
+{
+    _failgroup_record(test, message);
+}
+
+void lfg_ct_self_failgroup_reset(void)
+{
+    _failgroup_clear();
+}
+
+int lfg_ct_self_failgroup_count(void)
+{
+    return _failgroup_count;
+}
+
+int lfg_ct_self_failgroup_total(void)
+{
+    return _failgroup_total;
+}
+
+int lfg_ct_self_failgroup_dropped(void)
+{
+    return _failgroup_dropped;
+}
+
+int lfg_ct_self_failgroup_cap(void)
+{
+    return LFG_CT_FAILGROUP_MAX;
+}
+
+/* Rank-indexed accessors: @p rank walks the block's display order
+ * (count descending, ties in first-occurrence order), not the table's
+ * build order, so the ordering contract itself is what the self-tests
+ * observe. */
+static int
+_failgroup_at(int rank)
+{
+    int order[LFG_CT_FAILGROUP_MAX];
+
+    if (rank < 0 || rank >= _failgroup_count)
+    {
+        return -1;
+    }
+    _failgroup_order(order);
+    return order[rank];
+}
+
+const char *lfg_ct_self_failgroup_name_at(int rank)
+{
+    int i = _failgroup_at(rank);
+
+    return (i < 0) ? NULL : _failgroups[i].name;
+}
+
+const char *lfg_ct_self_failgroup_origin_at(int rank)
+{
+    int i = _failgroup_at(rank);
+
+    return (i < 0) ? NULL : _failgroups[i].origin;
+}
+
+int lfg_ct_self_failgroup_count_at(int rank)
+{
+    int i = _failgroup_at(rank);
+
+    return (i < 0) ? -1 : _failgroups[i].count;
 }
 
 int lfg_ct_self_rerun_recorded_count(void)
