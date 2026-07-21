@@ -334,14 +334,26 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     # Add tests to CTest
     # Note: test-unified includes intentional failures to verify framework behavior
-    add_test(NAME test-unified COMMAND test-unified)
-    add_test(NAME test-mock COMMAND test-mock)
-    add_test(NAME test-amalg COMMAND test-amalg)
+    #
+    # Every self-test binary persists a rerun state file on exit, so each one
+    # gets its own --state-file: on the shared default they clobber one
+    # another under `ctest -j`. No test outcome reads the file, but a shared
+    # one is a dishonest artifact -- and this dogfoods the flag the docs
+    # recommend for out-of-tree builds.
+    add_test(NAME test-unified
+        COMMAND test-unified --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-unified.lfg-ctest-last)
+    add_test(NAME test-mock
+        COMMAND test-mock --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-mock.lfg-ctest-last)
+    add_test(NAME test-amalg
+        COMMAND test-amalg --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-amalg.lfg-ctest-last)
     if(LFG_CTEST_ENABLE_FORK)
-        add_test(NAME test-fork COMMAND test-fork)
+        add_test(NAME test-fork
+            COMMAND test-fork --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-fork.lfg-ctest-last)
     endif()
-    add_test(NAME test-fork-disabled COMMAND test-fork-disabled)
-    add_test(NAME test-compat-3arg COMMAND test-compat-3arg)
+    add_test(NAME test-fork-disabled
+        COMMAND test-fork-disabled --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-fork-disabled.lfg-ctest-last)
+    add_test(NAME test-compat-3arg
+        COMMAND test-compat-3arg --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-compat-3arg.lfg-ctest-last)
 
     # `--list | grep | xargs --filter` is a documented contract (#55) and can
     # only be checked outside the runner, on the real stdout bytes. The script

@@ -30,14 +30,19 @@ then
 fi
 
 LIST=$(mktemp) || exit 1
-trap 'rm -f "$LIST"' EXIT INT TERM
+
+# Every run below persists a rerun state file. Point it at a temporary so the
+# check does not drop a stray `.lfg-ctest-last` in whatever directory CTest
+# happened to invoke it from. `.tmp` is the sibling _state_write renames from.
+STATE=$(mktemp) || exit 1
+trap 'rm -f "$LIST" "$STATE" "$STATE.tmp"' EXIT INT TERM
 
 CR=$(printf '\r')
 
 # --list writes ids to stdout; the banner the runner prints around them goes
 # there too, so select the id lines by their two-separator shape rather than
 # assuming the listing is the whole stream.
-"$BIN" --list | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$' > "$LIST" || true
+"$BIN" --list --state-file "$STATE" | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$' > "$LIST" || true
 
 TOTAL=$(wc -l < "$LIST" | tr -d ' ')
 
@@ -63,7 +68,7 @@ do
 
     # A self-test binary may exit non-zero by design (it verifies failure
     # detection); the summary line is the signal, not the exit code.
-    count=$("$BIN" --filter "$id" 2>/dev/null | sed -n 's/.*Executed [0-9]* assertions in \([0-9]*\) tests.*/\1/p' || true)
+    count=$("$BIN" --filter "$id" --state-file "$STATE" 2>/dev/null | sed -n 's/.*Executed [0-9]* assertions in \([0-9]*\) tests.*/\1/p' || true)
 
     if [ "$count" != "1" ]
     then

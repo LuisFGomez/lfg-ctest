@@ -1095,6 +1095,16 @@ main(int argc, char *argv[])
      * the set so the state file written below describes a green run,
      * which is what this binary actually is. */
     lfg_ct_self_rerun_reset();
+
+    /* A self-test above re-parses a synthetic argv and resets it, which
+     * drops --state-file back to the default. Re-establish the real
+     * command line so the summary writes the per-binary path
+     * CMakeLists passes. */
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
+
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

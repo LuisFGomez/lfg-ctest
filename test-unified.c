@@ -1721,6 +1721,39 @@ static void test_rerun_malformed_state_file_fails(void)
     _rerun_reset_args();
 }
 
+/* Longest line the loader accepts is an internal constant; 4096 is
+ * comfortably past it either way. */
+#define _RERUN_LONG_LINE 4096
+
+static void test_rerun_over_long_line_fails(void)
+{
+    char content[_RERUN_LONG_LINE + 128];
+    size_t n;
+
+    /* Over-long *first* line: rejected as its own diagnostic rather than
+     * folded into "not a v1 state file", since a truncated read says
+     * nothing about the marker. */
+    memset(content, 'x', _RERUN_LONG_LINE);
+    content[_RERUN_LONG_LINE] = '\n';
+    content[_RERUN_LONG_LINE + 1] = '\0';
+    _rerun_write_state(content);
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_key_count());
+
+    /* Over-long *record* line: same verdict, and nothing before it is
+     * kept -- a partial load would narrow the replay. */
+    strcpy(content, "lfg-ctest-state 1\nseed 3\nfail alpha.c::s::t\nfail ");
+    n = strlen(content);
+    memset(content + n, 'y', _RERUN_LONG_LINE);
+    content[n + _RERUN_LONG_LINE] = '\n';
+    content[n + _RERUN_LONG_LINE + 1] = '\0';
+    _rerun_write_state(content);
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_key_count());
+
+    _rerun_reset_args();
+}
+
 static void test_rerun_malformed_file_applies_nothing(void)
 {
     /* A half-parsed file must not narrow the run: the good record ahead
@@ -1871,6 +1904,101 @@ static void test_rerun_runner_skips_unpersisted_test_body(void)
     ASSERT_INT_EQUAL(0, _rerun_ran_other);
 }
 
+static void test_rerun_failed_write_leaves_the_previous_file_intact(void)
+{
+    char buf[512];
+    FILE *staged;
+
+    /* Establish a good state file. */
+    lfg_ct_self_rerun_reset();
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_x");
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 11U));
+
+    /* A write that cannot land must not consume the previous record. The
+     * file is staged in a sibling temporary and renamed, so a failure --
+     * here an unwritable directory, in the field a crash or ENOSPC --
+     * leaves the old file whole rather than truncated to a well-formed
+     * prefix the loader would silently replay as a narrowed set. */
+    lfg_ct_self_rerun_reset();
+    lfg_ct_self_rerun_note_failure("beta.c", "suite_two", "test_y");
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_self_state_write("no-such-dir/state", 22U));
+
+    _rerun_read_state(buf, sizeof(buf));
+    ASSERT_STR_EQUAL("lfg-ctest-state 1\n"
+                     "seed 11\n"
+                     "fail alpha.c::suite_one::test_x\n",
+            buf);
+
+    /* And a write that does land leaves no staging file behind. */
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 22U));
+    staged = fopen(_RERUN_TMP ".tmp", "r");
+    ASSERT_TRUE(NULL == staged);
+    if (NULL != staged)
+    {
+        fclose(staged);
+    }
+
+    _rerun_reset_args();
+}
+
+static int _rerun_ran_in_excluded_suite = 0;
+
+static void
+_rerun_body_in_excluded_suite(void)
+{
+    _rerun_ran_in_excluded_suite++;
+}
+
+static void
+_rerun_excluded_suite_body(void)
+{
+    lfg_ct_test_impl(_rerun_body_in_excluded_suite, "rerun_inner_excluded");
+}
+
+static void test_rerun_suite_level_exclude_resolves_its_keys(void)
+{
+    /* A suite-level --filter-exclude is decisive and skips the body
+     * outright, so the contained test never registers and never claims
+     * its persisted key by admission. The key is still accounted for --
+     * the user excluded it -- and must not be reported as renamed or
+     * removed, which for a replay set wholly inside the excluded suite
+     * would also latch the run fatal. */
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 7\n"
+                       "fail " LFG_CT_ID_NO_SUITE "::rerun_excluded_suite::rerun_inner_excluded\n");
+
+    _rerun_ran_in_excluded_suite = 0;
+    ASSERT_INT_EQUAL(0, _rerun_parse("--filter-exclude", "rerun_excluded_suite"));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_rerun_unresolved_count());
+
+    lfg_ct_suite_impl(_rerun_excluded_suite_body, "rerun_excluded_suite");
+
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_unresolved_count());
+    ASSERT_INT_EQUAL(0, _rerun_ran_in_excluded_suite);
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_suite_without_exclude_resolves_by_registration(void)
+{
+    /* Control for the case above: with no exclusion the suite descends,
+     * the test registers, admission claims the key, and the body runs.
+     * Same zero-unresolved verdict by the ordinary path. */
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 7\n"
+                       "fail " LFG_CT_ID_NO_SUITE "::rerun_excluded_suite::rerun_inner_excluded\n");
+
+    _rerun_ran_in_excluded_suite = 0;
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    lfg_ct_suite_impl(_rerun_excluded_suite_body, "rerun_excluded_suite");
+
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_unresolved_count());
+    ASSERT_INT_EQUAL(1, _rerun_ran_in_excluded_suite);
+
+    _rerun_reset_args();
+}
+
 static void suite_rerun_failed_tests(void)
 {
     lfg_ct_test(test_rerun_state_path_defaults_and_overrides);
@@ -1881,12 +2009,16 @@ static void suite_rerun_failed_tests(void)
     lfg_ct_test(test_rerun_empty_failure_set_selects_nothing);
     lfg_ct_test(test_rerun_missing_state_file_fails);
     lfg_ct_test(test_rerun_malformed_state_file_fails);
+    lfg_ct_test(test_rerun_over_long_line_fails);
     lfg_ct_test(test_rerun_malformed_file_applies_nothing);
     lfg_ct_test(test_rerun_unknown_key_leaves_the_rest_runnable);
     lfg_ct_test(test_rerun_state_write_carries_marker_seed_and_keys);
     lfg_ct_test(test_rerun_write_then_replay_round_trip);
     lfg_ct_test(test_rerun_successive_cycles_narrow);
     lfg_ct_test(test_rerun_runner_skips_unpersisted_test_body);
+    lfg_ct_test(test_rerun_failed_write_leaves_the_previous_file_intact);
+    lfg_ct_test(test_rerun_suite_level_exclude_resolves_its_keys);
+    lfg_ct_test(test_rerun_suite_without_exclude_resolves_by_registration);
 
     /* Nothing above may leak a --rerun-failed into the remaining suites;
      * each test resets, and this backstop covers an early return. */
@@ -2295,7 +2427,13 @@ static void test_reporter_run_complete_fires_from_print_summary(void)
 {
     lfg_ct_reporter_t reporter = {NULL, _reporter_on_run_complete, &_rep_log, NULL};
 
+    /* print_summary also persists a state file, so aim it at the
+     * throwaway path rather than dropping a stray default in the
+     * caller's working directory. */
+    char *argv[] = {(char *)"prog", (char *)"--state-file", (char *)_RERUN_TMP};
+
     memset(&_rep_log, 0, sizeof(_rep_log));
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
     lfg_ct_set_reporter(&reporter);
 
     /* Drive a print_summary; on_run_complete should fire exactly
@@ -2303,6 +2441,7 @@ static void test_reporter_run_complete_fires_from_print_summary(void)
     lfg_ct_print_summary();
 
     lfg_ct_set_reporter(NULL);
+    remove(_RERUN_TMP);
 
     ASSERT_INT_EQUAL(0, _rep_log.count);
     ASSERT_INT_EQUAL(1, _rep_log.run_complete_fired);
@@ -2526,8 +2665,13 @@ test_verbose_chain_propagates_run_complete(void)
 {
     /* on_run_complete chains through too: a downstream reporter
      * installed under verbose mode must still receive the run-end
-     * fire from lfg_ct_print_summary. */
-    char *argv[] = {(char *)"prog", (char *)"-v"};
+     * fire from lfg_ct_print_summary.
+     *
+     * The nested print_summary also persists a state file, so point it
+     * at the throwaway path the rerun tests use (already cleaned up)
+     * rather than letting it drop a stray default in the caller's
+     * working directory. */
+    char *argv[] = {(char *)"prog", (char *)"-v", (char *)"--state-file", (char *)_RERUN_TMP};
     lfg_ct_reporter_t r;
 
     memset(&r, 0, sizeof(r));
@@ -2536,12 +2680,13 @@ test_verbose_chain_propagates_run_complete(void)
 
     memset(&_vlog, 0, sizeof(_vlog));
 
-    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
     lfg_ct_set_reporter(&r);
 
     lfg_ct_print_summary();
 
     lfg_ct_set_reporter(NULL);
+    remove(_RERUN_TMP);
 
     ASSERT_INT_EQUAL(1, _vlog.run_complete_fired);
 }
@@ -2721,6 +2866,17 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
     printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
     lfg_ct_suite(suite_verbose_mode_tests);
+
+    /* The arg-parsing self-tests above drive lfg_ct_parse_args with
+     * synthetic argv and reset it afterwards, which leaves --state-file
+     * back at its default. Re-establish this binary's real command line
+     * so the state file the summary writes lands where the caller asked
+     * (CMakeLists passes a per-binary path so `ctest -j` runs do not
+     * clobber a shared one). */
+    if (0 != lfg_ct_parse_args(argc, argv))
+    {
+        return 1;
+    }
 
     printf("\n");
     printf("================================================================================\n");
