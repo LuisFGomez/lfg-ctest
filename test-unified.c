@@ -3530,6 +3530,279 @@ static void suite_isolation_args_tests(void)
 }
 
 /* ============================================================================
+ * -x / --fail-fast TESTS
+ *
+ * The gate is the conjunction "flag set AND a test has failed", so the
+ * suppression tests arm the two halves separately: lfg_ct_set_fail_fast
+ * for the flag, lfg_ct_self_fail_fast_arm for the tally. The tally needs
+ * a hook because expect-failures mode suppresses a genuine failure before
+ * it ever bumps _tests_failed -- the framework cannot trip its own gate
+ * by failing a nested test on purpose.
+ *
+ * Every armed test disarms before returning. A leaked arm would suppress
+ * every remaining test in this binary, which reads as a mass vanishing
+ * rather than a failure.
+ * ============================================================================ */
+
+static int _ff_body_ran;
+static int _ff_suite_body_ran;
+
+static void _ff_body_probe(void)
+{
+    _ff_body_ran = 1;
+}
+
+static void _ff_suite_probe(void)
+{
+    _ff_suite_body_ran = 1;
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_test_in_suite");
+}
+
+/* Restore the runner to the state the rest of the binary expects. */
+static void
+_ff_reset(void)
+{
+    char *argv[] = {(char *)"prog"};
+
+    lfg_ct_self_fail_fast_disarm();
+    (void)lfg_ct_parse_args(1, argv);
+}
+
+static void
+test_fail_fast_parse_short_and_long(void)
+{
+    char *short_argv[] = {(char *)"prog", (char *)"-x"};
+    char *long_argv[] = {(char *)"prog", (char *)"--fail-fast"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, short_argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    _ff_reset();
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, long_argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_not_clustered(void)
+{
+    /* -x is matched whole, following the -v precedent: no getopt, no
+     * clustering. -xv is an unknown flag, not two flags. */
+    char *argv[] = {(char *)"prog", (char *)"-xv"};
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_get_fail_fast());
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_default_off_and_reset(void)
+{
+    /* Parse-derived like every other filter-state flag, so a later parse
+     * that omits it clears it. Contrast --isolation / --timeout, which are
+     * API-owned and deliberately survive. */
+    char *set_argv[] = {(char *)"prog", (char *)"-x"};
+    char *bare_argv[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, set_argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, bare_argv));
+    ASSERT_INT_EQUAL(0, lfg_ct_get_fail_fast());
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_setter_round_trips(void)
+{
+    /* The public setter exists so a consumer can enable fail-fast without
+     * going through argv. Any non-zero normalises to 1. */
+    lfg_ct_set_fail_fast(1);
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    lfg_ct_set_fail_fast(42);
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    lfg_ct_set_fail_fast(0);
+    ASSERT_INT_EQUAL(0, lfg_ct_get_fail_fast());
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_suppresses_later_test_body(void)
+{
+    /* The core criterion: after the first failure, no later test body
+     * executes. */
+    _ff_body_ran = 0;
+    lfg_ct_set_fail_fast(1);
+    lfg_ct_self_fail_fast_arm();
+
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_suppressed_test");
+
+    ASSERT_INT_EQUAL(0, _ff_body_ran);
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_suppresses_later_suite_body(void)
+{
+    /* The suite gate is what keeps the walk cheap -- a suppressed suite
+     * body is never entered at all, so its contained tests never even
+     * reach their own gate. */
+    _ff_suite_body_ran = 0;
+    _ff_body_ran = 0;
+    lfg_ct_set_fail_fast(1);
+    lfg_ct_self_fail_fast_arm();
+
+    lfg_ct_suite_impl(_ff_suite_probe, "mock_ff_suppressed_suite");
+
+    ASSERT_INT_EQUAL(0, _ff_suite_body_ran);
+    ASSERT_INT_EQUAL(0, _ff_body_ran);
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_clean_run_is_a_noop(void)
+{
+    /* Flag on, nothing failed: the run is untouched. This is the half of
+     * the conjunction that keeps a clean -x run byte-identical to the same
+     * run without -x. */
+    _ff_body_ran = 0;
+    _ff_suite_body_ran = 0;
+    lfg_ct_set_fail_fast(1);
+
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_clean_test");
+    ASSERT_INT_EQUAL(1, _ff_body_ran);
+
+    _ff_body_ran = 0;
+    lfg_ct_suite_impl(_ff_suite_probe, "mock_ff_clean_suite");
+    ASSERT_INT_EQUAL(1, _ff_suite_body_ran);
+    ASSERT_INT_EQUAL(1, _ff_body_ran);
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_disabled_ignores_prior_failure(void)
+{
+    /* The other half: a failed tally with the flag off suppresses
+     * nothing. Guards against the gate collapsing to "has anything
+     * failed", which would change default behaviour for every consumer. */
+    _ff_body_ran = 0;
+    lfg_ct_set_fail_fast(0);
+    lfg_ct_self_fail_fast_arm();
+
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_flagless_test");
+
+    ASSERT_INT_EQUAL(1, _ff_body_ran);
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_does_not_shadow_list_mode(void)
+{
+    /* --list wins: its gate returns first at both sites. The observable
+     * is the suite gate, where list mode descends into the body to let
+     * contained tests print their own ids before returning. If fail-fast
+     * were checked first that descent would not happen and --list output
+     * would silently lose every entry after the first failure -- except a
+     * listing executes no test, so it can never trip the gate in the first
+     * place. Both halves are asserted here. */
+    char *argv[] = {(char *)"prog", (char *)"--list", (char *)"-x"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_list_mode());
+    ASSERT_INT_EQUAL(1, lfg_ct_get_fail_fast());
+
+    _ff_suite_body_ran = 0;
+    lfg_ct_self_fail_fast_arm();
+
+    lfg_ct_suite_impl(_ff_suite_probe, "mock_ff_listed_suite");
+
+    ASSERT_INT_EQUAL(1, _ff_suite_body_ran);
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_strict_xpass_does_not_trip_it(void)
+{
+    /* An xpass is a verdict modifier, not a test failure. A --strict-xpass
+     * run with -x and no true failure still executes to completion; it
+     * fails only at the end, through lfg_ct_return. */
+    int before_xpassed;
+
+    lfg_ct_set_fail_fast(1);
+    lfg_ct_self_set_strict_xpass(1);
+
+    before_xpassed = lfg_ct_self_xpassed_count();
+    lfg_ct_test_impl(_disp_body_xfail_without_failure, "mock_ff_xpass_test");
+    ASSERT_INT_EQUAL(before_xpassed + 1, lfg_ct_self_xpassed_count());
+
+    /* The xpass is on the books; the next body must still run. */
+    _ff_body_ran = 0;
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_after_xpass");
+    ASSERT_INT_EQUAL(1, _ff_body_ran);
+
+    /* ...and the run is nonetheless destined to exit non-zero. */
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_self_return_code());
+
+    lfg_ct_self_set_strict_xpass(0);
+    _ff_reset();
+}
+
+static void
+test_fail_fast_exit_code_rides_the_existing_path(void)
+{
+    /* No second exit mechanism: a tripped run exits non-zero purely
+     * because lfg_ct_return already returns -_tests_failed. */
+    lfg_ct_set_fail_fast(1);
+    lfg_ct_self_fail_fast_arm();
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_self_return_code());
+
+    _ff_reset();
+}
+
+static void
+test_fail_fast_reset_state_for_remaining_tests(void)
+{
+    /* Verifying tail, mirroring suite_isolation_args_tests: whatever the
+     * tests above armed, the binary continues unsuppressed. */
+    ASSERT_INT_EQUAL(0, lfg_ct_get_fail_fast());
+
+    _ff_body_ran = 0;
+    lfg_ct_test_impl(_ff_body_probe, "mock_ff_reset_probe");
+    ASSERT_INT_EQUAL(1, _ff_body_ran);
+}
+
+static void suite_fail_fast_tests(void)
+{
+    lfg_ct_test(test_fail_fast_parse_short_and_long);
+    lfg_ct_test(test_fail_fast_not_clustered);
+    lfg_ct_test(test_fail_fast_default_off_and_reset);
+    lfg_ct_test(test_fail_fast_setter_round_trips);
+    lfg_ct_test(test_fail_fast_suppresses_later_test_body);
+    lfg_ct_test(test_fail_fast_suppresses_later_suite_body);
+    lfg_ct_test(test_fail_fast_clean_run_is_a_noop);
+    lfg_ct_test(test_fail_fast_disabled_ignores_prior_failure);
+    lfg_ct_test(test_fail_fast_does_not_shadow_list_mode);
+    lfg_ct_test(test_fail_fast_strict_xpass_does_not_trip_it);
+    lfg_ct_test(test_fail_fast_exit_code_rides_the_existing_path);
+
+    _ff_reset();
+    lfg_ct_test(test_fail_fast_reset_state_for_remaining_tests);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
@@ -3650,6 +3923,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 7c: --isolation / --timeout FLAG TESTS ---\n");
     printf("(Verifies CLI access to the isolation + fork-timeout API state)\n");
     lfg_ct_suite(suite_isolation_args_tests);
+
+    printf("\n--- SUITE 7d: -x / --fail-fast TESTS ---\n");
+    printf("(Verifies flag parsing, the test + suite suppression gates, and --list)\n");
+    lfg_ct_suite(suite_fail_fast_tests);
 
     /* The arg-parsing self-tests above drive lfg_ct_parse_args with
      * synthetic argv and reset it afterwards, which leaves --state-file
