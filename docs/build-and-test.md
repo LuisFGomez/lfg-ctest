@@ -57,7 +57,10 @@ the parse-level tests in `test-unified` cannot see. Each case runs a scenario in
 a forked child whose stdout is a regular file, then greps the captured bytes,
 and every "quiet suppresses X" assertion is paired with a default-verbosity
 control so a case cannot pass by capturing nothing. Registered under `if(UNIX)`:
-the capture needs `fork` / `waitpid` / `mkstemp`. The children drive genuinely
+the capture needs `fork` / `waitpid` / `mkstemp`. It is deliberately *not* gated
+on `LFG_CTEST_ENABLE_FORK` — the non-fork cases run fine without it, and the
+four fork-mode cases probe `lfg_ct_set_isolation` at runtime and skip
+themselves when fork isolation was compiled out. The children drive genuinely
 unsuppressed failures and `_exit()` with a verdict code, so the outer binary
 stays green without expect-failures mode.
 

@@ -241,6 +241,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # The quiet output contract can only be checked on real stdout bytes,
     # which needs fork/waitpid/mkstemp to capture. Same honest guard as the
     # shell-driven tests below: skipped only where no POSIX is assumed.
+    # Not gated on LFG_CTEST_ENABLE_FORK -- the twelve non-fork cases run
+    # fine without it, and the four fork-mode cases probe availability at
+    # runtime and skip themselves.
     if(UNIX)
         list(APPEND TEST_TARGETS test-quiet)
     endif()

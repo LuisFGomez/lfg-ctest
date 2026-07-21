@@ -45,7 +45,19 @@
 
 typedef void (*_scenario_fn)(void);
 
-static void
+/**
+ * @brief   Read @p path into @p buf, reporting overflow rather than
+ *          truncating silently.
+ *
+ *  Truncation would make the suppression assertions fail open: an
+ *  @c ASSERT_NULL(strstr(out, "*** test SKIP:")) on a clipped capture
+ *  passes for the wrong reason. Caller turns a 0 here into a harness
+ *  fault, which the existing @c ASSERT_INT_EQUAL(1, _capture(...))
+ *  already catches.
+ *
+ *  @return 1 on a complete read, 0 if unreadable or larger than @p cap.
+ */
+static int
 _slurp(const char *path, char *buf, size_t cap)
 {
     FILE *f;
@@ -55,11 +67,19 @@ _slurp(const char *path, char *buf, size_t cap)
     f = fopen(path, "r");
     if (NULL == f)
     {
-        return;
+        return 0;
     }
-    n = fread(buf, 1, cap - 1, f);
-    buf[n] = '\0';
+    /* Read the full cap, not cap - 1: a read that fills the buffer leaves
+     * no room for the terminator, which is exactly the overflow case. */
+    n = fread(buf, 1, cap, f);
     fclose(f);
+    if (n >= cap)
+    {
+        buf[cap - 1] = '\0';
+        return 0;
+    }
+    buf[n] = '\0';
+    return 1;
 }
 
 /**
@@ -155,7 +175,12 @@ _capture(int argc, char **argv, _scenario_fn scenario, char *out, size_t cap, in
     {
     }
 
-    _slurp(tmpl, out, cap);
+    if (!_slurp(tmpl, out, cap))
+    {
+        remove(tmpl);
+        remove(state_tmpl);
+        return 0;
+    }
     remove(tmpl);
     remove(state_tmpl);
 
@@ -242,6 +267,29 @@ static void
 _scn_non_failures(void)
 {
     lfg_ct_suite(_suite_non_failures);
+}
+
+/**
+ * @brief   True when this build links fork isolation in.
+ *
+ *  The quiet contract itself is POSIX-only (the capture harness needs
+ *  fork/waitpid/mkstemp), but fork *isolation* is a separate compile-time
+ *  opt-out: a -DLFG_CTEST_ENABLE_FORK=OFF Unix build still runs the
+ *  twelve non-fork cases fine. Probed rather than #ifdef'd because
+ *  LFG_CT_DISABLE_FORK is confined to the implementation TU -- test
+ *  sources cannot see it. lfg_ct_set_isolation reports an unavailable
+ *  mode instead of falling back, and leaves the mode unchanged on error,
+ *  so the failed probe is side-effect free.
+ */
+static int
+_fork_available(void)
+{
+    if (0 != lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK))
+    {
+        return 0;
+    }
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    return 1;
 }
 
 static void
@@ -432,6 +480,11 @@ test_fork_quiet_keeps_failure_and_detail(void)
     char out[_CAP_MAX];
     int code = 0;
 
+    if (!_fork_available())
+    {
+        lfg_ct_skip("built without fork isolation");
+    }
+
     ASSERT_INT_EQUAL(1, _capture(_ARGC(_argv_quiet), _argv_quiet, _scn_failure_forked, out, sizeof(out), &code));
 
     ASSERT_NOT_NULL(strstr(out, "*** test FAILURE: quiet_fail_inner"));
@@ -443,6 +496,11 @@ test_fork_quiet_suppresses_skip_xfail_xpass_lines(void)
 {
     char out[_CAP_MAX];
     int code = 0;
+
+    if (!_fork_available())
+    {
+        lfg_ct_skip("built without fork isolation");
+    }
 
     ASSERT_INT_EQUAL(
             1, _capture(_ARGC(_argv_quiet), _argv_quiet, _scn_non_failures_forked, out, sizeof(out), &code));
@@ -458,6 +516,11 @@ test_fork_quiet_keeps_synthesized_crash_failure(void)
     char out[_CAP_MAX];
     int code = 0;
 
+    if (!_fork_available())
+    {
+        lfg_ct_skip("built without fork isolation");
+    }
+
     ASSERT_INT_EQUAL(1, _capture(_ARGC(_argv_quiet), _argv_quiet, _scn_crash_forked, out, sizeof(out), &code));
 
     ASSERT_NOT_NULL(strstr(out, "*** test FAILURE: quiet_crash_inner"));
@@ -469,6 +532,11 @@ test_fork_default_prints_skip_xfail_xpass_lines(void)
 {
     char out[_CAP_MAX];
     int code = 0;
+
+    if (!_fork_available())
+    {
+        lfg_ct_skip("built without fork isolation");
+    }
 
     ASSERT_INT_EQUAL(
             1, _capture(_ARGC(_argv_default), _argv_default, _scn_non_failures_forked, out, sizeof(out), &code));
@@ -588,14 +656,6 @@ main(int argc, char *argv[])
     lfg_ct_start();
     printf("\n--- QUIET OUTPUT CONTRACT SELF-TESTS ---\n");
     lfg_ct_suite(suite_quiet_output_contract);
-
-    /* The capture children re-parse a synthetic argv; that runs in the
-     * child, but restate the real command line anyway so the summary
-     * writes the per-binary state path CMakeLists passes. */
-    if (0 != lfg_ct_parse_args(argc, argv))
-    {
-        return 1;
-    }
 
     lfg_ct_print_summary();
     return lfg_ct_return();
