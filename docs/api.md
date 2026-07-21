@@ -346,9 +346,7 @@ Consequences worth knowing:
   replay set to a single test per iteration: fix it, rerun, discover the
   next one, and so on, rather than working through a known list. If you
   want the full failure set preserved across iterations, run
-  `--rerun-failed` **without** `-x`, or point `-x` at a separate
-  `--state-file` so it cannot overwrite the list you are working from.
-  Relatedly, the unresolved-key warnings are suppressed when the gate
+  `--rerun-failed` **without** `-x`. Relatedly, the unresolved-key warnings are suppressed when the gate
   trips: a key the run never reached is not a key that stopped naming a
   registered test, so every such warning would be a false alarm.
 
