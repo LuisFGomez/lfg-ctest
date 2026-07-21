@@ -1391,7 +1391,7 @@ int lfg_ct_self_durations_shown(void);
 const char *lfg_ct_self_durations_name_at(int rank);
 
 /** Self-test accessor: suite name of the entry at @p rank in display
- *  order. May itself be NULL for a top-level test.
+ *  order. Empty for a top-level test, which is legitimately suite-less.
  *  @return Borrowed pointer, or NULL when @p rank is out of range.
  */
 const char *lfg_ct_self_durations_suite_at(int rank);

@@ -1107,23 +1107,36 @@ _failgroup_print(void)
 
 /* Tests the report can rank. Sized past the ~650-test suite that motivated
  * the feature so a real run does not routinely trip the cap; footprint is
- * LFG_CT_DURATIONS_MAX * sizeof(_duration_t) of BSS (~24 KB at the default
+ * LFG_CT_DURATIONS_MAX * sizeof(_duration_t) of BSS (~200 KB at the default
  * cap on a 64-bit target). Beyond the cap tests still run and still
  * classify -- only their ranking is lost, and the block says so. */
 #define LFG_CT_DURATIONS_MAX 1024
 
-/* Borrowed pointers, unlike the failure summary's copies. Both names
- * originate in the test-registration macros as string literals with
- * program lifetime, and neither is a key here -- the entries are ranked by
- * time and printed, never compared -- so the width bound that forces the
- * failure summary to copy its grouping key does not apply. The message is
- * deliberately not retained: lfg-ctest.h documents it as valid only for
- * the duration of the reporter callback, and a durations line has no use
- * for it. */
+/* Per-entry copies, for the same reason the failure summary copies: the
+ * names arrive as caller-supplied pointers with no lifetime guarantee.
+ * lfg_ct_test_impl / lfg_ct_test_impl_at are public entry points and
+ * neither imposes a lifetime requirement on @p name, so table-driven
+ * registration out of a reused stack buffer is a legal use that would
+ * leave this table pointing at dead memory -- the entries are read at
+ * _durations_print(), long after registration returns.
+ *
+ * Unlike the failure summary's grouping key, these widths are cosmetic
+ * rather than a correctness bound: nothing here is compared, only ranked
+ * by time and printed, so a truncated name costs display fidelity and
+ * nothing else. The test width still matches LFG_CT_FAILGROUP_NAME_MAX so
+ * a name renders identically in both blocks; the suite is narrower
+ * because it carries one component rather than a whole name.
+ *
+ * The message is deliberately not retained: lfg-ctest.h documents it as
+ * valid only for the duration of the reporter callback, and a durations
+ * line has no use for it. */
+#define LFG_CT_DURATIONS_NAME_MAX 128
+#define LFG_CT_DURATIONS_SUITE_MAX 64
+
 typedef struct
 {
-    const char *suite_name;
-    const char *test_name;
+    char suite_name[LFG_CT_DURATIONS_SUITE_MAX];
+    char test_name[LFG_CT_DURATIONS_NAME_MAX];
     double time_sec;
 } _duration_t;
 
@@ -1157,8 +1170,14 @@ _durations_record(const char *suite_name, const char *test_name, double time_sec
         return;
     }
 
-    _durations[_duration_count].suite_name = suite_name;
-    _durations[_duration_count].test_name = test_name;
+    /* Normalised on the way in so the print path reads plain strings: an
+     * absent suite becomes empty (which is already what it keys "bare name"
+     * off) and an absent test name takes the placeholder here rather than
+     * at every read site. */
+    snprintf(_durations[_duration_count].suite_name, sizeof(_durations[_duration_count].suite_name), "%s",
+            (NULL != suite_name) ? suite_name : "");
+    snprintf(_durations[_duration_count].test_name, sizeof(_durations[_duration_count].test_name), "%s",
+            (NULL != test_name) ? test_name : "(unnamed)");
     _durations[_duration_count].time_sec = time_sec;
     _duration_count++;
     _duration_ordered = 0;
@@ -1250,13 +1269,13 @@ _durations_print(void)
         /* Milliseconds at the same %.3f precision as the verbose
          * per-test banner, so the two renderings of one number agree. */
         printf("*** %10.3f ms  ", d->time_sec * 1000.0);
-        if (d->suite_name && d->suite_name[0])
+        if (d->suite_name[0])
         {
-            printf("%s::%s\r\n", d->suite_name, d->test_name ? d->test_name : "(unnamed)");
+            printf("%s::%s\r\n", d->suite_name, d->test_name);
         }
         else
         {
-            printf("%s\r\n", d->test_name ? d->test_name : "(unnamed)");
+            printf("%s\r\n", d->test_name);
         }
     }
     if (_duration_dropped > 0)
