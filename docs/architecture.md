@@ -265,7 +265,15 @@ Exit status needs no new mechanism — `lfg_ct_return` already returns
   body; the gate sits above it and never interacts with the unwind.
 - **`--rerun-failed`** skips its unresolved-key report when the gate
   trips. A key the run never reached is not a key that stopped naming a
-  registered test, so every warning would be a false alarm.
+  registered test, so every warning would be a false alarm. The state
+  write itself is *not* gated, and that costs the replay set: `_state_write`
+  serialises `_fail_keys`, which holds this run's classified failures
+  only, so persisted keys the gate never reached are dropped. Combining
+  the flags narrows the replay set to one test per iteration. Preserving
+  unreached keys would mean merging the loaded set into `_fail_keys`
+  before the write, which changes `--rerun-failed`'s own narrowing
+  contract; out of scope here, and documented as a caveat in
+  [docs/api.md](api.md#stopping-at-the-first-failure) instead.
 
 `_fail_fast` is parse-owned state and is cleared by
 `_filter_state_reset()` like every other parse-derived global — unlike
@@ -284,6 +292,24 @@ shape, and the same reason, as the rerun-set and failgroup self-hooks.
 The pair saves and restores rather than resetting to zero so a real
 failure recorded beforehand is not swallowed; nothing can be lost inside
 the window, since with the gate tripped no test classifies.
+
+Both entry points are idempotent, guarded by an `_fail_fast_armed` flag.
+That is what lets the group's shared `_ff_reset()` teardown call disarm
+unconditionally: most tests in the group never arm, and without the guard
+their disarm would write the save slot back over a live `_tests_failed`,
+swallowing the very failure the save/restore exists to protect.
+Symmetrically, a second arm inside an open window must not overwrite the
+slot with the forced value.
+
+The two halves differ in how they are held. The arm-side guard is covered
+by `test_fail_fast_disarm_without_arm_is_a_noop`, which fails if it is
+removed. The disarm-side guard is **not** reachable by a test: with arm
+refusing to re-save, the slot only ever holds the pre-window tally, and
+nothing but arm writes `_tests_failed` in a passing self-test binary, so
+the slot is always 0 and the stray write-back is 0-over-0. It bites only
+once a genuine failure lands before this group — precisely the regression
+the binary exists to surface, which the write-back would then report as a
+clean run. Latent, so held by the guard rather than by a test.
 
 ## Fork-per-test isolation (`lfg-ctest-fork.c`)
 

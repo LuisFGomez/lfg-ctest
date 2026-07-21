@@ -337,11 +337,20 @@ Consequences worth knowing:
   which path dispatched. Under `fork`, the child that produced the
   failure has already been reaped before the gate can observe it — there
   is no window in which an orphan can exist.
-- **With [`--rerun-failed`](#rerunning-just-the-failures)**, the state
-  file records only what this run actually classified, so the next replay
-  starts from the failure you stopped at. The unresolved-key warnings are
-  suppressed when the gate trips: a key the run never reached is not a
-  key that stopped naming a registered test.
+- **With [`--rerun-failed`](#rerunning-just-the-failures) the replay set
+  shrinks, and it shrinks *lossily*.** The state file is rewritten from
+  what this run actually classified, so a tripped run persists exactly one
+  key — the test you stopped at. Every other key the previous run had
+  recorded is dropped, including ones that are still failing and that this
+  run simply never reached. Combining the two flags therefore narrows the
+  replay set to a single test per iteration: fix it, rerun, discover the
+  next one, and so on, rather than working through a known list. If you
+  want the full failure set preserved across iterations, run
+  `--rerun-failed` **without** `-x`, or point `-x` at a separate
+  `--state-file` so it cannot overwrite the list you are working from.
+  Relatedly, the unresolved-key warnings are suppressed when the gate
+  trips: a key the run never reached is not a key that stopped naming a
+  registered test, so every such warning would be a false alarm.
 
 Note that `lfg_ct_failure_count()` covers a different granularity — see
 [Failure count](#failure-count) — cutting a loop short *within* one test
