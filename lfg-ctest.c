@@ -1763,6 +1763,11 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     int saved_active;
     char saved_failure_inline[LFG_CT_FAILURE_MSG_MAX];
     char *saved_failure_heap;
+    int saved_failures;
+    _disposition_t saved_disposition;
+    const char *saved_skip_reason;
+    int saved_xfail_set;
+    const char *saved_xfail_reason;
     clock_t time_start;
     double elapsed;
 
@@ -1781,6 +1786,19 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     }
 
     _tests_executed++;
+
+    /* Save/restore the per-test state block for the same reason the
+     * failure-message slot below is saved: a nested test_impl call (the
+     * self-test pattern) must neither inherit nor erase the enclosing
+     * test's classification inputs. Zeroing without saving loses an
+     * outer failure recorded before the nested dispatch, and the outer
+     * is then silently bucketed PASSED. _last_classified_xfail_reason is
+     * deliberately *not* nested -- it is last-call-wins by design. */
+    saved_failures = _current_test_failures;
+    saved_disposition = _current_disposition;
+    saved_skip_reason = _current_skip_reason;
+    saved_xfail_set = _current_xfail_set;
+    saved_xfail_reason = _current_xfail_reason;
     _current_test_failures = 0;
     _current_disposition = LFG_CT_DISP_NORMAL;
     _current_skip_reason = NULL;
@@ -1930,14 +1948,15 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
         }
     }
 
-    /* Reset per-test state so a nested test_impl call doesn't leave its
-     * disposition/xfail flags around for the calling test's own
-     * classification at the end of the outer lifecycle. */
-    _current_test_failures = 0;
-    _current_disposition = LFG_CT_DISP_NORMAL;
-    _current_skip_reason = NULL;
-    _current_xfail_set = 0;
-    _current_xfail_reason = NULL;
+    /* Restore the enclosing level's per-test state. This level's own
+     * values are discarded here, so a nested test_impl call leaks none of
+     * its disposition/xfail flags or failure count into the calling
+     * test's classification. */
+    _current_test_failures = saved_failures;
+    _current_disposition = saved_disposition;
+    _current_skip_reason = saved_skip_reason;
+    _current_xfail_set = saved_xfail_set;
+    _current_xfail_reason = saved_xfail_reason;
 
     /* Release this level's own message (the reporter callback above
      * has already returned, so the borrowed-for-the-callback contract
