@@ -753,16 +753,14 @@ _body_long_message_failure(void)
 /* Outer body captures its message BEFORE driving a nested lifecycle,
  * so the nested call has to move the outer's message out of the slot
  * and hand it back intact -- the ownership path a heap-backed capture
- * slot introduces. The trailing failure is what re-arms the outer's
- * FAILED classification (a nested lifecycle resets the enclosing
- * test's failure count); its text must lose to the first one under
- * the "first failure per test wins" rule. */
+ * slot introduces. Nothing follows the nested call: the outer's own
+ * failure count survives the nested lifecycle, so it still classifies
+ * FAILED on the strength of the first failure alone. */
 static void
 _body_outer_long_then_nested(void)
 {
     ASSERT_FAIL(_long_msg_outer);
     lfg_ct_test_impl(_body_long_message_failure, "long_msg_nested_inner");
-    ASSERT_FAIL("SECOND-FAILURE-MUST-NOT-WIN");
 }
 
 static void
@@ -838,8 +836,7 @@ _long_message_child(const char *out_path, lfg_ct_isolation_t isolation, int nest
     {
         verdict = _check_message(_long_log[1], _OUTER_MSG_HEAD, _OUTER_MSG_TAIL);
     }
-    if (_LONG_OK == verdict
-            && (NULL != strstr(_long_log[1], _LONG_MSG_TAIL) || NULL != strstr(_long_log[1], "MUST-NOT-WIN")))
+    if (_LONG_OK == verdict && NULL != strstr(_long_log[1], _LONG_MSG_TAIL))
     {
         verdict = _LONG_ERR_ORDER;
     }

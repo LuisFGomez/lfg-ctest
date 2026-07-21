@@ -2125,6 +2125,31 @@ static void _disp_body_after_nested_then_skip(void)
     _disp_post_skip_marker = 1; /* must NOT execute -- outer must unwind */
 }
 
+static void _disp_body_trivial_pass(void)
+{
+    ASSERT_TRUE(1);
+}
+
+/* Outer marks itself xfail, fails, then dispatches a nested test and does
+ * nothing afterwards. The nested lifecycle must leave the outer's failure
+ * count alone: with the count intact the outer classifies XFAIL, with it
+ * reset by the nested level it reads XPASS. The xfail probe stands in for
+ * a plain FAILED outer, which would dirty the binary's tallies --
+ * lfg_ct_expect_failures is unusable here (see the section header). */
+static void _disp_body_outer_xfail_then_nested(void)
+{
+    lfg_ct_xfail("outer failure must survive the nested dispatch");
+    ASSERT_FAIL("intentional outer failure");
+    lfg_ct_test_impl(_disp_body_trivial_pass, "mock_nested_after_outer_fail");
+}
+
+/* The mirror case: the outer never fails and the nested test does. The
+ * nested level's failure count and xfail mark must not leak outward. */
+static void _disp_body_outer_clean_with_failing_nested(void)
+{
+    lfg_ct_test_impl(_disp_body_xfail_with_failure, "mock_nested_fails_alone");
+}
+
 /* Suite-level skip is intentionally out of scope: lfg_ct_skip is a
  * per-test gesture. A skip call from inside a suite body must warn to
  * stderr and be a benign no-op so the suite continues normally. */
@@ -2261,6 +2286,42 @@ static void test_disposition_skip_after_nested_test_impl_still_unwinds(void)
     ASSERT_INT_EQUAL(0, _disp_post_skip_marker);
 }
 
+static void test_disposition_outer_failure_survives_nested_dispatch(void)
+{
+    int before_xfail = lfg_ct_self_xfailed_count();
+    int before_xpass = lfg_ct_self_xpassed_count();
+    int before_failed = lfg_ct_self_failed_count();
+    int before_asserts_failed = lfg_ct_self_assertions_failed();
+
+    lfg_ct_test_impl(_disp_body_outer_xfail_then_nested, "mock_outer_fail_then_nested");
+
+    /* XFAIL, not XPASS: the outer's own failure was still on the books at
+     * its classification. This is the regression guard for the save/restore
+     * of the per-test state block around nested lifecycles. */
+    ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
+    ASSERT_INT_EQUAL(before_xpass, lfg_ct_self_xpassed_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+    /* The XFAIL path absorbed the deliberate failure back out. */
+    ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
+}
+
+static void test_disposition_nested_failure_does_not_bleed_into_outer(void)
+{
+    int before_xfail = lfg_ct_self_xfailed_count();
+    int before_xpass = lfg_ct_self_xpassed_count();
+    int before_failed = lfg_ct_self_failed_count();
+    int before_asserts_failed = lfg_ct_self_assertions_failed();
+
+    lfg_ct_test_impl(_disp_body_outer_clean_with_failing_nested, "mock_outer_clean_nested_fails");
+
+    /* Exactly one xfail -- the nested test's. The outer neither failed nor
+     * inherited the nested level's xfail mark, so it bucketed PASSED. */
+    ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
+    ASSERT_INT_EQUAL(before_xpass, lfg_ct_self_xpassed_count());
+    ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
+    ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
+}
+
 static void test_disposition_suite_context_skip_is_benign_no_op(void)
 {
     int before_skipped = lfg_ct_self_skipped_count();
@@ -2330,6 +2391,8 @@ static void suite_disposition_tests(void)
     lfg_ct_test(test_disposition_xfail_without_failure_buckets_as_xpass);
     lfg_ct_test(test_disposition_xfail_repeated_calls_keep_last_reason);
     lfg_ct_test(test_disposition_skip_after_nested_test_impl_still_unwinds);
+    lfg_ct_test(test_disposition_outer_failure_survives_nested_dispatch);
+    lfg_ct_test(test_disposition_nested_failure_does_not_bleed_into_outer);
     lfg_ct_test(test_disposition_suite_context_skip_is_benign_no_op);
     lfg_ct_test(test_disposition_xpass_strict_flag_toggles_return_code);
     lfg_ct_test(test_disposition_parse_strict_xpass_flag);
