@@ -63,13 +63,15 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), [Isolation modes](#isolation-modes), and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `-x` / `--fail-fast` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), [Isolation modes](#isolation-modes), [Stopping at the first failure](#stopping-at-the-first-failure), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_verbosity()` | Returns the `lfg_ct_verbosity_t` level in effect — `LFG_CT_VERBOSITY_QUIET` (0), `_DEFAULT` (1), or `_VERBOSE` (2). See [Quiet output](#quiet-output). |
 | `lfg_ct_is_verbose()` | Returns 1 if the level is at least `LFG_CT_VERBOSITY_VERBOSE`, 0 otherwise. Derived from `lfg_ct_verbosity()`; semantics unchanged from when verbosity was a single boolean. |
 | `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed **or** `--rerun-failed` restored a seed from the state file, 0 otherwise. Separate from the value because `0` is a legal seed. |
 | `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. Under `--rerun-failed` the persisted seed is loaded into this slot, so the predicate/value pair also reports a restored seed. An explicit `--seed` wins over the persisted one. |
 | `lfg_ct_is_rerun_failed()` | Returns 1 if `--rerun-failed` was parsed, 0 otherwise. |
+| `lfg_ct_set_fail_fast(enabled)` | Stop the run at the first failing test — the programmatic face of `-x` / `--fail-fast`. Whole-run scope. `void`, since a boolean mode cannot fail. Cleared by a later `lfg_ct_parse_args`. See [Stopping at the first failure](#stopping-at-the-first-failure). |
+| `lfg_ct_get_fail_fast()` | Returns 1 if fail-fast is enabled, 0 otherwise. Reports the configured mode, not whether it has tripped. |
 | `lfg_ct_state_path()` | Returns the rerun state file this run reads and writes — the `--state-file` value, or `".lfg-ctest-last"`. Never `NULL`. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. **Cannot answer a qualified filter:** it builds the id from whatever file/suite batons are ambient, so called from `main()` (the documented usage) both are absent and the id is `(none)::(none)::name`. Under `--filter 'alpha.c::suite_one::test_db_roundtrip'` it returns 0 even though the test does run. Use `lfg_ct_id_runs` where that matters. |
 | `lfg_ct_test_runs(name)` | Same query for the test named `name` **in this file and the enclosing suite**. Captures `__FILE__`, so it sees the same id `--list` prints. See [Entry ids](#entry-ids). |
@@ -81,15 +83,21 @@ int main(void)
 | `lfg_ct_xfail(reason)` | Mark current test as expected-to-fail; body runs to completion. Subsequent assertion failure -> XFAIL, no failure -> XPASS. Last reason wins on repeated calls. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_print_summary()` | Print pass/fail/skip/xfail/xpass summary |
 | `lfg_ct_return()` | Get overall return code (0=clean, non-zero=fail or xpass-with-`--strict-xpass`) |
-| `lfg_ct_failure_count()` | Running tally of failed assertions (`size_t`). Snapshot-and-compare inside a body for fail-fast / setup-failure detection. See [Failure count](#failure-count). |
+| `lfg_ct_failure_count()` | Running tally of failed assertions (`size_t`). Snapshot-and-compare inside a body to cut a loop short or detect a setup failure. For run-level fail-fast use `-x` instead. See [Failure count](#failure-count). |
 | `lfg_ct_version()` | Framework version string (`"M.m.p[+<sha>]"`) |
 
 ### Failure count
 
 Every `ASSERT_*` is non-fatal (record-and-continue) and there is no
 `REQUIRE`-style fatal variant, so `lfg_ct_failure_count()` is the supported
-way to fail-fast out of a region of assertions: snapshot it at the top of
-the region and compare.
+way to bail out of a region of assertions *inside one body*: snapshot it at
+the top of the region and compare.
+
+> For run-level fail-fast — stop the whole run at the first failing *test* —
+> use `-x` / `--fail-fast` or `lfg_ct_set_fail_fast` instead; see
+> [Stopping at the first failure](#stopping-at-the-first-failure). The two
+> work at different granularities, and the recipe below remains the only
+> tool for cutting a loop short within a single test body.
 
 ```c
 void test_foo(void)
@@ -180,6 +188,7 @@ Recognized flags:
 | `--filter <glob>` | Run only entries whose id matches the shell-style glob, which **addresses exactly as many trailing `::`-delimited components as it spells out** (`fnmatch(3)` syntax: `*`, `?`, `[...]`). Repeat the flag to OR-combine patterns. If a suite matches, every entry inside it inherits the match — useful with the `add_test` pattern above. |
 | `--filter-exclude <glob>` | Skip entries whose id matches the glob, same component-depth rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `-x`, `--fail-fast` | Stop the run at the first failing test. Scope is the **whole run**, not the enclosing suite. Off by default; the CLI face of `lfg_ct_set_fail_fast`. See [Stopping at the first failure](#stopping-at-the-first-failure). |
 | `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
 | `--rerun-failed` | Run only the entries the previous run recorded as failed, restoring that run's seed. Intersects with `--filter` — the replayed set is the candidate pool and the filter narrows it further. An explicit `--seed` outranks the persisted one. A missing, malformed, or wholly stale state file is an error, never a silent full-suite run. See [Rerunning just the failures](#rerunning-just-the-failures). |
 | `--state-file <path>` | Read and write the rerun state at `path` instead of `.lfg-ctest-last` in the current working directory. Repeating the flag keeps the last value. |
@@ -266,6 +275,77 @@ newline-separated list of ids. `lfg_ct_is_verbose()` exposes the
 whether to suppress redundant output of their own. Each call to
 `lfg_ct_parse_args` replaces any previously parsed state, including
 the verbose toggle.
+
+### Stopping at the first failure
+
+When you are iterating on one known-broken area, the first failure is
+enough to act on and the rest of the run is wasted time — and worse, the
+failure you care about scrolls away under output that no longer matters.
+`-x` / `--fail-fast` stops the run there:
+
+```bash
+./test_indicators -x
+```
+
+```
+*** test FAILURE: test_sma_window_boundary
+*** Executed 47 assertions in 12 tests. Failures: 1, Skipped: 0, XFail: 0, XPass: 0
+*** Stopped early: --fail-fast tripped at the first test failure; remaining tests were not run.
+*** Testing complete. Result: FAIL
+```
+
+The programmatic equivalent is `lfg_ct_set_fail_fast(1)`, with
+`lfg_ct_get_fail_fast()` reading it back. Like every other parse-derived
+setting, a later `lfg_ct_parse_args` call that omits the flag clears it.
+
+**Scope is the whole run, not the enclosing suite.** Once any test has
+failed, no later test body executes and no later suite body is entered,
+across every remaining suite — matching `pytest -x` and
+`go test -failfast`. The gate is never re-armed. The suite-scoped
+alternative (abort only the suite that failed, continue with the next)
+was considered and rejected: a `--filter`ed run is already narrowed to
+the suites you care about, so the composition benefit is largely
+delivered by the filter itself.
+
+Mechanically this is a **suppression gate, not an abort**. `lfg_ct_test`
+executes its body at the call site and a suite is an ordinary C function,
+so there is no run loop for the framework to break out of and nothing is
+unwound out of your `main()`. The process still walks every remaining
+call site and does nothing at each one — one boolean test per site, and
+the suite-level gate skips a whole suite body without entering it.
+
+Consequences worth knowing:
+
+- **The summary says the run stopped early**, because suppressed tests
+  execute no body and so land in no bucket — `tests executed` simply ends
+  up lower. Without that line a fail-fast run would be indistinguishable
+  from one where most tests silently vanished. Suppressed tests are *not*
+  reclassified as SKIP: that bucket is a per-test disposition set by
+  `lfg_ct_skip`, and borrowing it here would corrupt the tally semantics
+  skip/xfail maintain. The line prints at every verbosity, `-q` included.
+- **Exit status is non-zero through the normal path** — `lfg_ct_return()`
+  already returns `-tests_failed`. No second mechanism.
+- **A clean `-x` run is byte-identical** to the same run without `-x`.
+- **`--list` is unaffected.** A listing executes no test, so it can never
+  trip the gate.
+- **`--strict-xpass` does not trip it.** An XPASS is a verdict modifier,
+  not a test failure, so such a run still executes to completion and
+  fails only at the end. The two are independent.
+- **Identical under both [isolation modes](#isolation-modes).** The gate
+  reads the failed-*test* tally that the in-process classifier and the
+  fork parent's projection both converge on, so it needs no knowledge of
+  which path dispatched. Under `fork`, the child that produced the
+  failure has already been reaped before the gate can observe it — there
+  is no window in which an orphan can exist.
+- **With [`--rerun-failed`](#rerunning-just-the-failures)**, the state
+  file records only what this run actually classified, so the next replay
+  starts from the failure you stopped at. The unresolved-key warnings are
+  suppressed when the gate trips: a key the run never reached is not a
+  key that stopped naming a registered test.
+
+Note that `lfg_ct_failure_count()` covers a different granularity — see
+[Failure count](#failure-count) — cutting a loop short *within* one test
+body, not stopping the run.
 
 ### Reproducing a randomized run
 

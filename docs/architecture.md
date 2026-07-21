@@ -180,6 +180,111 @@ when set and `_tests_xpassed > 0` and no real failures occurred, return
 `-1` instead of `0`. The summary line shows `XPass: N` regardless of
 the flag; only the exit code changes.
 
+## Fail-fast (`-x` / `--fail-fast`)
+
+Whole-run scope, not suite-scoped: once any test has failed the run is
+over, and the gate is never re-armed. That choice is deliberate rather
+than emergent — it matches `pytest -x` and `go test -failfast`, and the
+suite-scoped alternative would need the gate armed and disarmed against
+suite depth, threaded through the existing `_current_suite_name` /
+`_current_suite_failures` save-and-restore.
+
+### Why it is a suppression gate, not an abort
+
+There is no run loop to break out of. `lfg_ct_test(fn)` expands to
+`lfg_ct_test_impl(fn, #fn)`, which *executes the test at the call site*,
+and a suite is an ordinary C function whose body calls `lfg_ct_test`
+several times. The whole nesting is plain C call nesting driven by the
+consumer's `main()` — there is no registry and no iteration the runner
+controls, so "stop the run" cannot be a `break` between iterations and
+nothing may be unwound out of `main()`.
+
+It is therefore two early returns, sitting alongside the existing
+`_list_mode` and filter gates:
+
+| Site | Placement | Effect |
+|------|-----------|--------|
+| `lfg_ct_test_impl_at` | after the `_list_mode` block, before the filter check, `on_test_start`, and the isolation branch | the test body never runs |
+| `lfg_ct_suite_impl_at` | after the `_list_mode` block, before the exclude-glob check | the suite body is never entered |
+
+The process still walks every remaining call site and does nothing at
+each one — one boolean test per site. The suite-level gate is what makes
+that cheap in practice: a suppressed suite is skipped whole, so its
+contained tests never even reach their own gate. A suppressed suite also
+cannot emit `*** suite FAILURE`, because the `_assertions_failed` delta
+that banner compares against is never taken.
+
+### The gate predicate
+
+`_fail_fast_tripped()` is `_fail_fast && _tests_failed > 0`, in one place
+so both call sites and the summary marker agree on what "tripped" means.
+
+Keyed on `_tests_failed` rather than `lfg_ct_failure_count()` — that
+accessor returns the *assertion* tally, not the test tally. Both dispatch
+paths converge on `_tests_failed`: the in-process classifier bumps it,
+and so does the fork parent's `_lfg_ct_record_external` projection.
+Reading that one global is what makes the gate isolation-agnostic, and it
+is why `lfg-ctest-fork.c` needs no changes for this feature at all.
+
+**No orphans are possible, by construction.** `_lfg_ct_fork_run_test` is
+strictly synchronous: it forks exactly one child, then `waitpid`s it to
+completion (escalating to `SIGKILL` on timeout) before returning. At most
+one child is ever alive, and the parent always reaps it before projecting
+the outcome onto `_tests_failed`. Since the gate sits *above* dispatch,
+by the time it can observe the trip that child is already reaped — there
+is no schedule to tear down and no window for an orphan.
+
+### Reporting
+
+Suppressed tests execute no body, so they land in no bucket:
+`_tests_executed` simply ends up lower. `lfg_ct_print_summary` therefore
+prints an explicit line after the counts saying the run stopped early —
+without it, a fail-fast run would be indistinguishable from one where
+most tests silently vanished. It prints at every verbosity, quiet
+included, because it qualifies the counts immediately above it.
+
+Suppressed tests are deliberately **not** reclassified as SKIP: that
+bucket is a per-test disposition set by the body via `lfg_ct_skip`, and
+borrowing it here would corrupt the tally semantics `lfg_ct_skip` /
+`lfg_ct_xfail` maintain.
+
+Exit status needs no new mechanism — `lfg_ct_return` already returns
+`-_tests_failed`.
+
+### Interactions held apart
+
+- **`--list` wins.** Its gate returns first at both sites. The suite site
+  is where that ordering is observable: list mode descends into the suite
+  body so contained tests can print their own ids. In any case a listing
+  executes no test and can never trip the gate.
+- **`--strict-xpass` does not feed the gate.** An XPASS is a verdict
+  modifier, not a test failure, so a strict-xpass run still executes to
+  completion and fails only at the end.
+- **`lfg_ct_skip`'s `longjmp` is untouched.** The `setjmp(_skip_env)`
+  boundary lives inside `_lfg_ct_test_impl_inproc` and wraps only the
+  body; the gate sits above it and never interacts with the unwind.
+- **`--rerun-failed`** skips its unresolved-key report when the gate
+  trips. A key the run never reached is not a key that stopped naming a
+  registered test, so every warning would be a false alarm.
+
+`_fail_fast` is parse-owned state and is cleared by
+`_filter_state_reset()` like every other parse-derived global — unlike
+`_isolation` / `_fork_timeout_ms`, which are API-owned and survive a
+parse. The public setter is `lfg_ct_set_fail_fast(int)`, returning `void`
+following `lfg_ct_set_fork_timeout_ms`: a boolean mode has no validity
+failure to report.
+
+### Self-test interaction
+
+Expect-failures mode suppresses a genuine failure before it ever bumps
+`_tests_failed`, so the framework cannot trip its own gate by failing a
+nested test on purpose. `lfg_ct_self_fail_fast_arm` / `_disarm` force and
+restore the tally around a test that needs the gate armed — the same
+shape, and the same reason, as the rerun-set and failgroup self-hooks.
+The pair saves and restores rather than resetting to zero so a real
+failure recorded beforehand is not swallowed; nothing can be lost inside
+the window, since with the gate tripped no test classifies.
+
 ## Fork-per-test isolation (`lfg-ctest-fork.c`)
 
 Optional runtime support for `LFG_CT_ISOLATE_FORK`, selected via

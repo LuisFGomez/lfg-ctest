@@ -17,8 +17,8 @@ read/write actions, and a per-call callback hook.
 - Consumer-cleanup-hook on-ramp (`mock_register_cleanup`) so mocks that own
   heap state can share that same single-call teardown.
 - `lfg_ct_parse_args(argc, argv)` handles `--list` / `--filter <glob>` /
-  `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` /
-  `--rerun-failed` / `--state-file <path>` / `-v` / `-q` /
+  `--filter-exclude <glob>` / `--strict-xpass` / `-x` / `--fail-fast` /
+  `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` /
   `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` so one binary
   can back many `ctest` entries.
 - Every entry has an id — `<file>::<suite>::<test>` — that `--list` emits and
@@ -31,6 +31,10 @@ read/write actions, and a per-call callback hook.
   they failed with. Every run persists both to `.lfg-ctest-last`
   (`--state-file` moves it); repeating the flag narrows toward what still
   fails.
+- `-x` / `--fail-fast` stops the **whole run** at the first failing test —
+  not just the enclosing suite — matching `pytest -x` and `go test -failfast`.
+  The summary says the run stopped early, so a short tally is never mistaken
+  for tests that vanished.
 - `lfg_ct_skip("reason")` and `lfg_ct_xfail("reason")` bucket tests as
   SKIP / XFAIL / XPASS without polluting the pass/fail tally.
 - CMake `add_subdirectory` integration, or single-header amalgamation
