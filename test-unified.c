@@ -3558,7 +3558,11 @@ static void _ff_suite_probe(void)
     lfg_ct_test_impl(_ff_body_probe, "mock_ff_test_in_suite");
 }
 
-/* Restore the runner to the state the rest of the binary expects. */
+/* Restore the runner to the state the rest of the binary expects. Called
+ * by every test in the group, armed or not: disarm is a no-op when no arm
+ * is outstanding, so an unarmed caller cannot restore a stale save slot
+ * over a live _tests_failed. test_fail_fast_disarm_without_arm_is_a_noop
+ * pins that. */
 static void
 _ff_reset(void)
 {
@@ -3566,6 +3570,54 @@ _ff_reset(void)
 
     lfg_ct_self_fail_fast_disarm();
     (void)lfg_ct_parse_args(1, argv);
+}
+
+static void
+test_fail_fast_disarm_without_arm_is_a_noop(void)
+{
+    /* The save/restore discipline seen from the caller's side. Most tests
+     * in this group reach _ff_reset without having armed, so an
+     * unconditional disarm must leave the tally alone. Asserted through
+     * the exit code, because a falsely-clean exit is what the clobber
+     * would produce.
+     *
+     * Only the arm-side half of that is observable from here, and the
+     * assertions are labelled accordingly. Once arm refuses to re-save
+     * inside an open window, the save slot can only ever hold the tally
+     * from before the window -- which is 0 for the whole of a passing
+     * self-test binary, since nothing but arm itself writes
+     * _tests_failed here. So an unarmed disarm writes 0 over 0 and no
+     * assertion can catch it. The guard on disarm is kept anyway: the
+     * moment a real failure lands before this group -- exactly the
+     * regression the binary exists to surface -- the write-back would
+     * zero it and report a clean run. It is a latent clobber, held shut
+     * by a guard rather than by a test.
+     *
+     * The double-arm case below IS load-bearing: drop the guard in
+     * lfg_ct_self_fail_fast_arm and this test fails. */
+    int before = lfg_ct_self_return_code();
+
+    /* Unarmed disarms, singly and repeated. Passes either way today; here
+     * to pin the contract, not to prove it. */
+    lfg_ct_self_fail_fast_disarm();
+    lfg_ct_self_fail_fast_disarm();
+    ASSERT_INT_EQUAL(before, lfg_ct_self_return_code());
+
+    /* A balanced pair arms the gate and then hands the tally back. */
+    lfg_ct_self_fail_fast_arm();
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_self_return_code());
+    lfg_ct_self_fail_fast_disarm();
+    ASSERT_INT_EQUAL(before, lfg_ct_self_return_code());
+
+    /* Load-bearing: a second arm inside an open window must not overwrite
+     * the save slot with the forced value, or the restore leaks a failure
+     * the run never had. */
+    lfg_ct_self_fail_fast_arm();
+    lfg_ct_self_fail_fast_arm();
+    lfg_ct_self_fail_fast_disarm();
+    ASSERT_INT_EQUAL(before, lfg_ct_self_return_code());
+
+    _ff_reset();
 }
 
 static void
@@ -3786,6 +3838,7 @@ test_fail_fast_reset_state_for_remaining_tests(void)
 
 static void suite_fail_fast_tests(void)
 {
+    lfg_ct_test(test_fail_fast_disarm_without_arm_is_a_noop);
     lfg_ct_test(test_fail_fast_parse_short_and_long);
     lfg_ct_test(test_fail_fast_not_clustered);
     lfg_ct_test(test_fail_fast_default_off_and_reset);
