@@ -63,10 +63,12 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag (usage printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed, 0 otherwise. Separate from the value because `0` is a legal seed. |
-| `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. |
+| `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. Under `--rerun-failed` the persisted seed is loaded into this slot, so the predicate/value pair also reports a restored seed. |
+| `lfg_ct_is_rerun_failed()` | Returns 1 if `--rerun-failed` was parsed, 0 otherwise. |
+| `lfg_ct_state_path()` | Returns the rerun state file this run reads and writes — the `--state-file` value, or `".lfg-ctest-last"`. Never `NULL`. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. **Cannot answer a qualified filter:** it builds the id from whatever file/suite batons are ambient, so called from `main()` (the documented usage) both are absent and the id is `(none)::(none)::name`. Under `--filter 'alpha.c::suite_one::test_db_roundtrip'` it returns 0 even though the test does run. Use `lfg_ct_id_runs` where that matters. |
 | `lfg_ct_test_runs(name)` | Same query for the test named `name` **in this file and the enclosing suite**. Captures `__FILE__`, so it sees the same id `--list` prints. See [Entry ids](#entry-ids). |
 | `lfg_ct_id_runs(file, suite, name)` | Explicit form behind `lfg_ct_test_runs`. `suite = NULL` means "the suite currently on the registration stack"; `""` means "no enclosing suite". |
@@ -177,6 +179,8 @@ Recognized flags:
 | `--filter-exclude <glob>` | Skip entries whose id matches the glob, same component-depth rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
+| `--rerun-failed` | Run only the entries the previous run recorded as failed, restoring that run's seed. Intersects with `--filter` — the replayed set is the candidate pool and the filter narrows it further. An explicit `--seed` outranks the persisted one. A missing, malformed, or wholly stale state file is an error, never a silent full-suite run. See [Rerunning just the failures](#rerunning-just-the-failures). |
+| `--state-file <path>` | Read and write the rerun state at `path` instead of `.lfg-ctest-last` in the current working directory. Repeating the flag keeps the last value. |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 
 A glob addresses **exactly as many trailing components as it spells out**: a
@@ -290,6 +294,76 @@ if (lfg_ct_is_seed_set())
     my_rng_seed(lfg_ct_get_seed());
 }
 ```
+
+### Rerunning just the failures
+
+Every non-listing run persists what it learned to a state file —
+`.lfg-ctest-last` in the current working directory by default:
+
+```
+lfg-ctest-state 1
+seed 3314123391
+fail test-ind-sma.c::suite_sma::test_roundtrip
+fail test-ind-ema.c::suite_ema::test_warmup
+```
+
+Three records, all of them load-bearing: a format marker, the seed the
+run used, and one [entry id](#entry-ids) per failed test. The ids are the
+same ones `--list` emits and `--filter` matches — there is no second
+addressing scheme.
+
+`--rerun-failed` reads it back, restores the seed, and runs exactly that
+set:
+
+```bash
+$ ./test_indicators                 # 169 failures across 655 tests, two minutes
+$ ./test_indicators --rerun-failed  # just those 169, under the same seed
+```
+
+The seed rides in the file because replaying the *selection* without the
+conditions the tests failed under is not a reproduction. An explicit
+`--seed` outranks the persisted one, for deliberately re-running the same
+selection under different conditions:
+
+```bash
+$ ./test_indicators --rerun-failed --seed 42
+```
+
+A `--rerun-failed` run rewrites the file with **its** failures, so
+repeating the flag converges on what still fails instead of replaying the
+original set forever. Combine it with `--filter` to narrow further — the
+two intersect, the replayed set being the candidate pool:
+
+```bash
+$ ./test_indicators --rerun-failed --filter 'suite_sma::*'
+```
+
+The failure records come from the runner's own classification, never from
+parsed output, so the file is identical under `LFG_CT_ISOLATE_FORK` (the
+parent records the child's disposition) and with stdout redirected to a
+file or a pipe.
+
+Failure modes are all loud, because the one outcome a user must never be
+handed is a full-suite run they believe was narrowed:
+
+| Situation | Behavior |
+|-----------|----------|
+| No state file | stderr diagnostic, non-zero exit. Never falls through to the whole suite. |
+| Unreadable or malformed state file | stderr diagnostic, non-zero exit. Nothing is partially applied — a half-parsed file would narrow the run to some prefix of the failures. |
+| Previous run was green (no `fail` records) | Runs nothing, says so on stdout, exits 0. |
+| A persisted key no longer resolves (test renamed, removed, binary rebuilt) | Warns naming the key, runs the ones that do resolve. |
+| *No* persisted key resolves | stderr diagnostic, non-zero exit — running nothing silently would read as "all fixed". |
+| `--list` | Neither writes nor truncates the file, so listing between two reruns is safe. |
+
+`--state-file <path>` moves the file, which is what an out-of-tree build
+wants when the working directory is not where the artifacts belong:
+
+```cmake
+add_test(NAME test_indicators COMMAND test_indicators
+    --state-file ${CMAKE_CURRENT_BINARY_DIR}/.lfg-ctest-last)
+```
+
+Add the default name to your `.gitignore`.
 
 ### Verbose output
 

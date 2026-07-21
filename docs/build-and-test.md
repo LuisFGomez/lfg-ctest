@@ -58,6 +58,20 @@ in-process by `test-unified`; only a subprocess can cover the stdout bytes the
 pipeline actually depends on. Registered under `if(UNIX)` since it needs a
 POSIX shell.
 
+`test-rerun-failed` is the same shape: `tools/check-rerun-failed.sh`, also
+`if(UNIX)`. It covers the parts of `--rerun-failed` that only exist at process
+scope — that a normal exit persists `.lfg-ctest-last` even with stdout
+redirected to a file, that the persisted seed matches the announced one, that
+`--list` leaves the file untouched, and that each error path (missing,
+malformed, wholly stale state file) exits non-zero instead of running the whole
+suite. Parsing, selection, seed precedence and the narrowing cycle are covered
+in-process by `test-unified`; fork-mode persistence by `test-fork`.
+
+Both `test-unified` and `test-fork` write a state file of their own on every
+run; `.lfg-ctest-last` is gitignored. `test-fork` clears its recorded set
+before the summary, because the intentional fork-mode failures it drives are
+real classified outcomes and would otherwise describe a red run.
+
 ### Run one specific test
 
 Every registered entry has an id — `<file>::<suite>::<test>` — and `--filter`

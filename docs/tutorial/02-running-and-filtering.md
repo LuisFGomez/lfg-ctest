@@ -258,6 +258,64 @@ if (lfg_ct_is_seed_set())
 }
 ```
 
+## Rerunning just the failures
+
+A big suite that comes back with a wall of failures leaves you with a bad
+choice: re-run all 655 tests to check one fix, or hand-assemble a `--filter`
+off the output. `--rerun-failed` is the third option.
+
+Every run — this one included — quietly writes what it learned to
+`.lfg-ctest-last` in the working directory:
+
+```
+lfg-ctest-state 1
+seed 3314123391
+fail test-ind-sma.c::suite_sma::test_roundtrip
+fail test-ind-ema.c::suite_ema::test_warmup
+```
+
+The seed the run used, and one [entry id](#entry-ids) per failure — the same
+ids `--list` prints. `--rerun-failed` reads it back and replays exactly that
+set:
+
+```bash
+$ ./test_indicators                 # 169 failures out of 655, two minutes
+$ ./test_indicators --rerun-failed  # just those 169, in seconds
+```
+
+Note that the seed comes back too. That is the point: if your tests draw
+scenarios from `rand()`, replaying *which* tests failed without replaying the
+conditions they failed under is not a reproduction at all. Pass `--seed`
+explicitly when you *do* want the same selection under fresh conditions — the
+flag you typed wins over the persisted one.
+
+Each rerun rewrites the file with its own failures, so the loop converges:
+
+```bash
+$ ./test_indicators --rerun-failed  # 169 -> 12 still failing
+$ ./test_indicators --rerun-failed  # 12 -> 3
+$ ./test_indicators --rerun-failed  # 3 -> 0, and you are done
+```
+
+Narrow further by combining it with `--filter`; the two intersect, so the
+filter picks from the replayed set rather than from the whole suite:
+
+```bash
+$ ./test_indicators --rerun-failed --filter 'suite_sma::*'
+```
+
+The flag never guesses. If there is no state file, or it is malformed, or none
+of its keys still name a test in the binary, you get a diagnostic on stderr
+and a non-zero exit — never a quiet full-suite run that you would read as a
+narrowed one. A key that no longer resolves on its own (you renamed the test,
+you rebuilt the binary) is just a warning; the rest still run. And if the
+previous run was green, the rerun says so and exits 0.
+
+Two housekeeping notes: `--list` deliberately leaves the state file alone, so
+listing between reruns is safe, and `--state-file <path>` moves the file when
+the working directory is not where you want build artifacts. Add
+`.lfg-ctest-last` to your `.gitignore`.
+
 ## Where to go next
 
 - [Chapter 3 — Skip, xfail, xpass](03-skip-xfail-xpass.md): outcomes beyond
