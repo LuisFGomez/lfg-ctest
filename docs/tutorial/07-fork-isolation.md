@@ -12,7 +12,10 @@ and the parent simply records the outcome and moves to the next test.
 
 ## Turning it on
 
-One call, after `lfg_ct_parse_args` and before `lfg_ct_start`:
+One call, after `lfg_ct_parse_args` and before `lfg_ct_start`. That ordering
+pins the mode in the program and makes `--isolation` a no-op — deliberate
+here, but see [From the command line](#from-the-command-line) if you want the
+flag to win instead:
 
 ```c
 int main(int argc, char *argv[])
