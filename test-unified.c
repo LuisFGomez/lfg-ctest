@@ -3382,6 +3382,25 @@ test_isolation_parse_round_trips_both_directions(void)
 }
 
 static void
+test_isolation_parse_last_flag_wins(void)
+{
+    /* Documented in lfg-ctest.h, docs/api.md and at the parse site, but
+     * the round-trip test above uses two separate parse calls -- this is
+     * the repeated-within-one-argv case. */
+    char *argv[] = {(char *)"prog", (char *)"--isolation", (char *)"fork", (char *)"--isolation", (char *)"none"};
+
+    if (!_isolation_fork_available())
+    {
+        /* Without fork the first flag is itself an error, so there is no
+         * last-wins question to ask. */
+        return;
+    }
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+}
+
+static void
 test_isolation_missing_arg_fails(void)
 {
     char *argv[] = {(char *)"prog", (char *)"--isolation"};
@@ -3423,6 +3442,27 @@ test_isolation_and_timeout_survive_later_parse(void)
         ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, bogus_argv));
         ASSERT_UINT_EQUAL(123u, lfg_ct_get_fork_timeout_ms());
     }
+
+    /* The isolation half of the same contract. */
+    if (_isolation_fork_available())
+    {
+        char *bogus_argv[] = {(char *)"prog", (char *)"--bogus"};
+
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+
+        ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, bare_argv));
+        ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+        ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, other_argv));
+        ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+        ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, bogus_argv));
+        ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+        /* Restore: _isolation is read at dispatch, so leaving FORK set
+         * would fork every remaining test in this binary. */
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    }
 }
 
 static void
@@ -3434,6 +3474,19 @@ test_isolation_setter_after_parse_wins(void)
     ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
     lfg_ct_set_fork_timeout_ms(7);
     ASSERT_UINT_EQUAL(7u, lfg_ct_get_fork_timeout_ms());
+
+    /* Same ordering for lfg_ct_set_isolation -- the setter the docs
+     * spend the most words on. */
+    if (_isolation_fork_available())
+    {
+        char *none_argv[] = {(char *)"prog", (char *)"--isolation", (char *)"none"};
+
+        ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, none_argv));
+        ASSERT_INT_EQUAL(0, lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK));
+        ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    }
 }
 
 static void
@@ -3458,6 +3511,7 @@ static void suite_isolation_args_tests(void)
     lfg_ct_test(test_isolation_parse_selects_none);
     lfg_ct_test(test_isolation_parse_selects_fork);
     lfg_ct_test(test_isolation_parse_round_trips_both_directions);
+    lfg_ct_test(test_isolation_parse_last_flag_wins);
     lfg_ct_test(test_isolation_missing_arg_fails);
     lfg_ct_test(test_isolation_unknown_mode_fails);
     lfg_ct_test(test_isolation_and_timeout_survive_later_parse);
