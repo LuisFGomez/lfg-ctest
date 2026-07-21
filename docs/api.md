@@ -456,6 +456,53 @@ three trailing counts are the new buckets):
 *** Testing complete. Result: PASS|FAIL
 ```
 
+### Grouped failure summary
+
+A run with at least one failure emits a block between those two lines,
+collapsing the failures to one line per distinct test name:
+
+```
+*** Executed 1111 assertions in 655 tests. Failures: 169, Skipped: 0, XFail: 21, XPass: 35
+*** Failure summary: 169 failures in 8 distinct tests
+***    34  test_e2e_validation              (first: tests/e2e.c:412: in validate_column())
+***    29  test_mtf_filter                  (first: tests/mtf.c:88: in test_mtf_filter())
+***    28  test_e2e_lagged                  (first: tests/e2e.c:377: in validate_column())
+...
+*** Testing complete. Result: FAIL
+```
+
+- **Grouping key is the registered test name** — the framework's own
+  identity for a failure. A helper shared across tests is still visible,
+  through the `in <fn>()` of the first-occurrence line rather than as its
+  own group.
+- **Order is count descending**, ties broken by first-occurrence order so
+  the block is byte-identical across runs of the same set. The largest
+  group is usually one systemic cause; surfacing it first is what makes
+  the block actionable.
+- **First occurrence** is the `file:line: in fn()` of the first failing
+  assertion recorded for that group, pinned when the group is created.
+  A failure with no assertion location — fork mode reporting a signal, a
+  timeout, or a `fork()`/`pipe()` failure — reads `(unknown)`.
+- Only `LFG_CT_FAILED` outcomes appear. Skipped, XFail and XPass tests
+  never do.
+- A fully passing run and `--list` emit nothing: no block, no header.
+- Fork mode (`LFG_CT_ISOLATE_FORK`) produces the identical block. The
+  summary is accumulated in the parent, fed by both the in-process
+  classification path and the fork projection path.
+
+Groups are held in a fixed-size table (`LFG_CT_FAILGROUP_MAX`, 256),
+matching the runner's allocation-free style — the accumulator runs during
+a failing run, which is the worst moment to add an allocation-failure
+path. Failures beyond that many *distinct* names still count toward the
+header total and are reported explicitly rather than silently dropped:
+
+```
+*** 44 further failures ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = 256) was reached
+```
+
+The two surrounding lines are unchanged in text, and the verdict stays
+last, so tooling that tails or greps the end of a log is unaffected.
+
 Exit-code rules (`lfg_ct_return()`):
 
 | Outcome | Exit |
