@@ -3236,6 +3236,246 @@ static void suite_verbosity_tests(void)
 }
 
 /* ============================================================================
+ * ISOLATION / TIMEOUT CLI FLAGS
+ *
+ * --isolation and --timeout expose lfg_ct_set_isolation and
+ * lfg_ct_set_fork_timeout_ms on the command line. Unlike every other
+ * flag these drive API-owned state, so the suite also pins the
+ * negative contract: parse_args must NOT reset them.
+ *
+ * Fork availability is probed rather than #ifdef'd, for the reason
+ * test-quiet.c spells out -- LFG_CT_DISABLE_FORK is confined to the
+ * implementation TU, so a -DLFG_CTEST_ENABLE_FORK=OFF build reaches
+ * here with the enum visible but the mode unavailable. The failed
+ * probe is side-effect free: the setter leaves the mode unchanged.
+ * ============================================================================ */
+
+static int
+_isolation_fork_available(void)
+{
+    if (0 != lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK))
+    {
+        return 0;
+    }
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+    return 1;
+}
+
+static void
+test_timeout_parse_sets_value(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--timeout", (char *)"250"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_UINT_EQUAL(250u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_timeout_parse_zero_is_accepted(void)
+{
+    /* 0 means "timeout disabled", a real value -- so it must be
+     * reachable and distinguishable from a parse failure. */
+    char *set_argv[] = {(char *)"prog", (char *)"--timeout", (char *)"75"};
+    char *zero_argv[] = {(char *)"prog", (char *)"--timeout", (char *)"0"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, set_argv));
+    ASSERT_UINT_EQUAL(75u, lfg_ct_get_fork_timeout_ms());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, zero_argv));
+    ASSERT_UINT_EQUAL(0u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_timeout_parse_last_flag_wins(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--timeout", (char *)"10", (char *)"--timeout", (char *)"20"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(5, argv));
+    ASSERT_UINT_EQUAL(20u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_timeout_missing_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--timeout"};
+    lfg_ct_set_fork_timeout_ms(33);
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    /* Staged, not applied: a failed parse leaves the prior value. */
+    ASSERT_UINT_EQUAL(33u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_timeout_malformed_value_fails(void)
+{
+    char *non_numeric[] = {(char *)"prog", (char *)"--timeout", (char *)"soon"};
+    char *negative[] = {(char *)"prog", (char *)"--timeout", (char *)"-1"};
+    char *trailing[] = {(char *)"prog", (char *)"--timeout", (char *)"10ms"};
+
+    lfg_ct_set_fork_timeout_ms(44);
+
+    /* No silent coercion to 0 on any of these -- 0 is meaningful. */
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, non_numeric));
+    ASSERT_UINT_EQUAL(44u, lfg_ct_get_fork_timeout_ms());
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, negative));
+    ASSERT_UINT_EQUAL(44u, lfg_ct_get_fork_timeout_ms());
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, trailing));
+    ASSERT_UINT_EQUAL(44u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_timeout_out_of_range_fails(void)
+{
+    /* Wide enough to trip ERANGE on every conforming platform, so the
+     * check holds regardless of the ULONG_MAX / UINT_MAX relationship. */
+    char *argv[] = {(char *)"prog", (char *)"--timeout", (char *)"99999999999999999999999999"};
+    lfg_ct_set_fork_timeout_ms(55);
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_UINT_EQUAL(55u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_isolation_parse_selects_none(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--isolation", (char *)"none"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+}
+
+static void
+test_isolation_parse_selects_fork(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--isolation", (char *)"fork"};
+
+    if (!_isolation_fork_available())
+    {
+        /* Fork-disabled build: the CLI refusal is the contract here,
+         * and test-fork-disabled.c owns that case in full. */
+        ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv));
+        ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+        return;
+    }
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+    /* Restore immediately: _isolation is read at dispatch, so leaving
+     * FORK set would fork every remaining test in this binary. */
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+}
+
+static void
+test_isolation_parse_round_trips_both_directions(void)
+{
+    char *fork_argv[] = {(char *)"prog", (char *)"--isolation", (char *)"fork"};
+    char *none_argv[] = {(char *)"prog", (char *)"--isolation", (char *)"none"};
+
+    if (!_isolation_fork_available())
+    {
+        return;
+    }
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, fork_argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_FORK, (int)lfg_ct_get_isolation());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, none_argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+}
+
+static void
+test_isolation_missing_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--isolation"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+}
+
+static void
+test_isolation_unknown_mode_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--isolation", (char *)"thread"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+}
+
+static void
+test_isolation_and_timeout_survive_later_parse(void)
+{
+    /* The load-bearing negative: these two are API-owned, so unlike
+     * the filter/verbosity state a parse that omits them must leave
+     * them standing. Regression guard against adding them to
+     * _filter_state_reset. */
+    char *set_argv[] = {(char *)"prog", (char *)"--timeout", (char *)"123"};
+    char *bare_argv[] = {(char *)"prog"};
+    char *other_argv[] = {(char *)"prog", (char *)"-v"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, set_argv));
+    ASSERT_UINT_EQUAL(123u, lfg_ct_get_fork_timeout_ms());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, bare_argv));
+    ASSERT_UINT_EQUAL(123u, lfg_ct_get_fork_timeout_ms());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, other_argv));
+    ASSERT_UINT_EQUAL(123u, lfg_ct_get_fork_timeout_ms());
+
+    /* And an unrelated parse *failure* leaves them alone too. */
+    {
+        char *bogus_argv[] = {(char *)"prog", (char *)"--bogus"};
+        ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, bogus_argv));
+        ASSERT_UINT_EQUAL(123u, lfg_ct_get_fork_timeout_ms());
+    }
+}
+
+static void
+test_isolation_setter_after_parse_wins(void)
+{
+    /* Documented last-writer-wins ordering: a setter call after
+     * parse_args overrides the command line. */
+    char *argv[] = {(char *)"prog", (char *)"--timeout", (char *)"500"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    lfg_ct_set_fork_timeout_ms(7);
+    ASSERT_UINT_EQUAL(7u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void
+test_isolation_reset_state_for_remaining_tests(void)
+{
+    /* parse_args does not own these, so the reset is explicit -- the
+     * bare-argv call alone would not clear them. */
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL((int)LFG_CT_ISOLATE_NONE, (int)lfg_ct_get_isolation());
+    ASSERT_UINT_EQUAL(0u, lfg_ct_get_fork_timeout_ms());
+}
+
+static void suite_isolation_args_tests(void)
+{
+    lfg_ct_test(test_timeout_parse_sets_value);
+    lfg_ct_test(test_timeout_parse_zero_is_accepted);
+    lfg_ct_test(test_timeout_parse_last_flag_wins);
+    lfg_ct_test(test_timeout_missing_arg_fails);
+    lfg_ct_test(test_timeout_malformed_value_fails);
+    lfg_ct_test(test_timeout_out_of_range_fails);
+    lfg_ct_test(test_isolation_parse_selects_none);
+    lfg_ct_test(test_isolation_parse_selects_fork);
+    lfg_ct_test(test_isolation_parse_round_trips_both_directions);
+    lfg_ct_test(test_isolation_missing_arg_fails);
+    lfg_ct_test(test_isolation_unknown_mode_fails);
+    lfg_ct_test(test_isolation_and_timeout_survive_later_parse);
+    lfg_ct_test(test_isolation_setter_after_parse_wins);
+
+    /* Unconditional reset before the verifying test runs -- mirrors
+     * the pattern at the tail of suite_verbosity_tests, plus the two
+     * setter calls parse_args deliberately does not make. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, reset_argv);
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+        lfg_ct_set_fork_timeout_ms(0);
+    }
+    lfg_ct_test(test_isolation_reset_state_for_remaining_tests);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
@@ -3352,6 +3592,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 7b: -q / --verbosity LEVEL TESTS ---\n");
     printf("(Verifies the verbosity axis, aliases, last-flag-wins, and reset)\n");
     lfg_ct_suite(suite_verbosity_tests);
+
+    printf("\n--- SUITE 7c: --isolation / --timeout FLAG TESTS ---\n");
+    printf("(Verifies CLI access to the isolation + fork-timeout API state)\n");
+    lfg_ct_suite(suite_isolation_args_tests);
 
     /* The arg-parsing self-tests above drive lfg_ct_parse_args with
      * synthetic argv and reset it afterwards, which leaves --state-file
