@@ -41,10 +41,13 @@ entry point (see [Isolation modes](api.md#isolation-modes)).
 `_lfg_ct_test_impl_inproc` runs the body inside a **single** skip-aware
 boundary and classifies the outcome afterwards:
 
-1. Snapshot per-test state (`_current_test_failures`, disposition,
+1. Snapshot per-test state (`_current_test_failures`,
+   `_current_disposition`, `_current_skip_reason`, `_current_xfail_set`,
+   `_current_xfail_reason`, and the
    failure-message slot — an inline buffer plus an optional heap block
    for over-long messages, *moved* rather than copied so a nested
-   lifecycle never frees the outer test's text) and the outer
+   lifecycle never frees the outer test's text), then zero this level's
+   copy; and the outer
    `_skip_env` + `_skip_env_active`
    (so a nested `lfg_ct_test_impl` — the self-test pattern that drives mock
    tests through the real runner — can't strand the outer body with an
@@ -54,8 +57,9 @@ boundary and classifies the outcome afterwards:
    body's dynamic extent (including a setup helper it called) `longjmp`s
    straight back to this one boundary — which is why "teardown before skip" is
    load-bearing: a trailing in-body `teardown()` is unwound past.
-3. Restore the saved `_skip_env` + active flag and classify (PASS / FAIL /
-   SKIP / XFAIL / XPASS).
+3. Restore the saved `_skip_env` + active flag, classify (PASS / FAIL /
+   SKIP / XFAIL / XPASS), then restore the rest of the snapshotted
+   per-test state.
 
 Assertion failures need no unwinding of their own: assertion impls return `0`
 on pass and non-zero (e.g. `-1`) on failure and bump a counter; they don't
@@ -162,11 +166,15 @@ For SKIP and XFAIL the classification also subtracts
 `_current_test_failures` from the global `_assertions_failed` -- the
 absorbed failures must not trip the surrounding suite-failure detector
 (which compares `_assertions_failed` snapshots around the suite body).
-After classification the per-test state is reset to `NORMAL` / 0 /
-`NULL` so a *nested* `lfg_ct_test_impl` call (the pattern the
-framework's own self-tests use to drive mock tests through the real
-runner) does not leak its disposition into the calling test's
-classification.
+After classification the per-test state is restored to the values
+snapshotted on entry (step 1 above), so a *nested* `lfg_ct_test_impl`
+call (the pattern the framework's own self-tests use to drive mock tests
+through the real runner) neither leaks its own disposition and failure
+count into the calling test's classification nor erases the caller's.
+Each level therefore absorbs only the failures it recorded itself.
+`_last_classified_xfail_reason` is deliberately excluded from the
+save/restore: it is last-call-wins across nesting so a self-test can
+observe the most recently classified test's reason.
 
 `--strict-xpass` flips the exit-code calculation in `lfg_ct_return`:
 when set and `_tests_xpassed > 0` and no real failures occurred, return
