@@ -1140,6 +1140,11 @@ static int _duration_dropped = 0;
  * cost instead of quietly becoming a stack-overflow one. */
 static int _duration_order[LFG_CT_DURATIONS_MAX];
 
+/* Whether _duration_order already reflects the current table. The rank-indexed
+ * self-test accessors query one field at a time, so a walk of name/suite/time
+ * across n ranks would otherwise re-sort 3n times. */
+static int _duration_ordered = 0;
+
 /* Retain one classified test's elapsed time. Called from both fan-out
  * sites for every outcome, not just PASS: a slow SKIP or XFAIL is exactly
  * as interesting to a "why is this suite slow" question. */
@@ -1156,6 +1161,7 @@ _durations_record(const char *suite_name, const char *test_name, double time_sec
     _durations[_duration_count].test_name = test_name;
     _durations[_duration_count].time_sec = time_sec;
     _duration_count++;
+    _duration_ordered = 0;
 }
 
 static void
@@ -1163,6 +1169,7 @@ _durations_clear(void)
 {
     _duration_count = 0;
     _duration_dropped = 0;
+    _duration_ordered = 0;
 }
 
 /* Fill _duration_order with entry indices in display order: elapsed time
@@ -1173,12 +1180,21 @@ _durations_clear(void)
  * granularity for a suite of fast tests) must not reshuffle between runs
  * of the same binary, or the block stops being diffable. Insertion sort,
  * and stable, which is what makes the tie-break fall out of the table's
- * own build order -- the same shape _failgroup_order uses. */
+ * own build order -- the same shape _failgroup_order uses.
+ *
+ * Idempotent while the table is unchanged: _durations_record and
+ * _durations_clear are the only writers, and both invalidate the cache. */
 static void
 _durations_order(void)
 {
     int i;
     int j;
+
+    if (_duration_ordered)
+    {
+        return;
+    }
+    _duration_ordered = 1;
 
     for (i = 0; i < _duration_count; i++)
     {
