@@ -2031,6 +2031,162 @@ static void suite_rerun_failed_tests(void)
 }
 
 /* ============================================================================
+ * grouped failure-summary tests
+ *
+ * The accumulator is fed with lfg_ct_self_failgroup_note rather than by
+ * driving real failures: expect-failures mode suppresses a genuine
+ * failure before it ever reaches the accumulator, and the cap test would
+ * otherwise need LFG_CT_FAILGROUP_MAX + 1 distinct registrations.
+ *
+ * What the block prints is its display order, so the assertions walk the
+ * rank-indexed accessors -- that is the ordering contract, not the
+ * table's build order.
+ * ==========================================================================*/
+
+/* A record message in the classifier's shape, which is what supplies a
+ * group's first-occurrence location. */
+#define _FG_MSG(file, line, fn) file ":" line ": in " fn "(): something should be true"
+
+static void test_failgroup_starts_empty(void)
+{
+    lfg_ct_self_failgroup_reset();
+
+    /* The zero-failure case: a green run has nothing to report, and the
+     * block is suppressed entirely rather than printing an empty body. */
+    ASSERT_INT_EQUAL(0, lfg_ct_self_failgroup_total());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_failgroup_count());
+    ASSERT_INT_EQUAL(0, lfg_ct_self_failgroup_dropped());
+    ASSERT_NULL(lfg_ct_self_failgroup_name_at(0));
+    ASSERT_INT_EQUAL(-1, lfg_ct_self_failgroup_count_at(0));
+}
+
+static void test_failgroup_single_group_folds_repeats(void)
+{
+    lfg_ct_self_failgroup_reset();
+
+    lfg_ct_self_failgroup_note("test_solo", _FG_MSG("tests/solo.c", "10", "test_solo"));
+    lfg_ct_self_failgroup_note("test_solo", _FG_MSG("tests/solo.c", "99", "helper"));
+
+    /* Two failures, one group: the collapse this whole block exists for. */
+    ASSERT_INT_EQUAL(2, lfg_ct_self_failgroup_total());
+    ASSERT_INT_EQUAL(1, lfg_ct_self_failgroup_count());
+    ASSERT_INT_EQUAL(2, lfg_ct_self_failgroup_count_at(0));
+    ASSERT_STR_EQUAL("test_solo", lfg_ct_self_failgroup_name_at(0));
+
+    /* First occurrence, not last: the location is pinned when the group
+     * is created and a later failure must not overwrite it. */
+    ASSERT_STR_EQUAL("tests/solo.c:10: in test_solo()", lfg_ct_self_failgroup_origin_at(0));
+}
+
+static void test_failgroup_orders_by_count_descending(void)
+{
+    lfg_ct_self_failgroup_reset();
+
+    /* Registered smallest-first so a table that merely preserved build
+     * order would fail this outright. */
+    lfg_ct_self_failgroup_note("test_small", _FG_MSG("a.c", "1", "test_small"));
+    lfg_ct_self_failgroup_note("test_big", _FG_MSG("b.c", "2", "test_big"));
+    lfg_ct_self_failgroup_note("test_big", _FG_MSG("b.c", "3", "test_big"));
+    lfg_ct_self_failgroup_note("test_big", _FG_MSG("b.c", "4", "test_big"));
+    lfg_ct_self_failgroup_note("test_mid", _FG_MSG("c.c", "5", "test_mid"));
+    lfg_ct_self_failgroup_note("test_mid", _FG_MSG("c.c", "6", "test_mid"));
+
+    ASSERT_INT_EQUAL(6, lfg_ct_self_failgroup_total());
+    ASSERT_INT_EQUAL(3, lfg_ct_self_failgroup_count());
+
+    /* Largest group first is what makes the block actionable rather than
+     * merely complete. */
+    ASSERT_STR_EQUAL("test_big", lfg_ct_self_failgroup_name_at(0));
+    ASSERT_INT_EQUAL(3, lfg_ct_self_failgroup_count_at(0));
+    ASSERT_STR_EQUAL("test_mid", lfg_ct_self_failgroup_name_at(1));
+    ASSERT_INT_EQUAL(2, lfg_ct_self_failgroup_count_at(1));
+    ASSERT_STR_EQUAL("test_small", lfg_ct_self_failgroup_name_at(2));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_failgroup_count_at(2));
+
+    /* Each group keeps its own first-occurrence line through the sort. */
+    ASSERT_STR_EQUAL("b.c:2: in test_big()", lfg_ct_self_failgroup_origin_at(0));
+    ASSERT_STR_EQUAL("a.c:1: in test_small()", lfg_ct_self_failgroup_origin_at(2));
+}
+
+static void test_failgroup_ties_break_by_first_occurrence(void)
+{
+    lfg_ct_self_failgroup_reset();
+
+    lfg_ct_self_failgroup_note("test_first", _FG_MSG("a.c", "1", "test_first"));
+    lfg_ct_self_failgroup_note("test_second", _FG_MSG("b.c", "2", "test_second"));
+    lfg_ct_self_failgroup_note("test_third", _FG_MSG("c.c", "3", "test_third"));
+
+    /* All equal counts: without a stable sort the block would reorder
+     * between runs of the same test set. */
+    ASSERT_STR_EQUAL("test_first", lfg_ct_self_failgroup_name_at(0));
+    ASSERT_STR_EQUAL("test_second", lfg_ct_self_failgroup_name_at(1));
+    ASSERT_STR_EQUAL("test_third", lfg_ct_self_failgroup_name_at(2));
+}
+
+static void test_failgroup_message_without_location_reports_unknown(void)
+{
+    lfg_ct_self_failgroup_reset();
+
+    /* Fork mode's own diagnostics (signal, timeout, pipe failure) carry
+     * no assertion location. Say so rather than guess one. */
+    lfg_ct_self_failgroup_note("test_crashed", "fork-mode: child died on signal 11 (SIGSEGV)");
+    ASSERT_STR_EQUAL("(unknown)", lfg_ct_self_failgroup_origin_at(0));
+
+    lfg_ct_self_failgroup_note("test_null_msg", NULL);
+    ASSERT_INT_EQUAL(2, lfg_ct_self_failgroup_count());
+    ASSERT_STR_EQUAL("(unknown)", lfg_ct_self_failgroup_origin_at(1));
+}
+
+static void test_failgroup_cap_overflow_is_reported(void)
+{
+    char name[32];
+    char msg[96];
+    int cap = lfg_ct_self_failgroup_cap();
+    int i;
+
+    lfg_ct_self_failgroup_reset();
+
+    /* Fill the table exactly, then overrun it by three. */
+    for (i = 0; i < cap + 3; i++)
+    {
+        snprintf(name, sizeof(name), "test_%04d", i);
+        snprintf(msg, sizeof(msg), "over.c:%d: in %s(): boom", i + 1, name);
+        lfg_ct_self_failgroup_note(name, msg);
+    }
+
+    /* Every failure still counts toward the header total -- the cap
+     * bounds the grouping, not the tally. */
+    ASSERT_INT_EQUAL(cap + 3, lfg_ct_self_failgroup_total());
+    ASSERT_INT_EQUAL(cap, lfg_ct_self_failgroup_count());
+
+    /* And the overrun is reported rather than silently dropped, which is
+     * the difference between a bounded table and a lying one. */
+    ASSERT_INT_EQUAL(3, lfg_ct_self_failgroup_dropped());
+
+    /* A repeat of an already-grouped name past the cap still folds --
+     * only genuinely new names are turned away. */
+    lfg_ct_self_failgroup_note("test_0000", "over.c:1: in test_0000(): boom");
+    ASSERT_INT_EQUAL(3, lfg_ct_self_failgroup_dropped());
+    ASSERT_INT_EQUAL(2, lfg_ct_self_failgroup_count_at(0));
+
+    lfg_ct_self_failgroup_reset();
+}
+
+static void suite_failure_summary_tests(void)
+{
+    lfg_ct_test(test_failgroup_starts_empty);
+    lfg_ct_test(test_failgroup_single_group_folds_repeats);
+    lfg_ct_test(test_failgroup_orders_by_count_descending);
+    lfg_ct_test(test_failgroup_ties_break_by_first_occurrence);
+    lfg_ct_test(test_failgroup_message_without_location_reports_unknown);
+    lfg_ct_test(test_failgroup_cap_overflow_is_reported);
+
+    /* The notes above are synthetic; leaving them in the accumulator
+     * would print a fabricated block at this binary's own summary. */
+    lfg_ct_self_failgroup_reset();
+}
+
+/* ============================================================================
  * skip / xfail / xpass disposition tests
  *
  * These exercise lfg_ct_skip and lfg_ct_xfail by running a *nested*
@@ -2930,6 +3086,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 4b: --rerun-failed / --state-file TESTS ---\n");
     printf("(Verifies failure persistence, replay selection, and seed restore)\n");
     lfg_ct_suite(suite_rerun_failed_tests);
+
+    printf("\n--- SUITE 4c: GROUPED FAILURE-SUMMARY TESTS ---\n");
+    printf("(Verifies grouping, count-descending order, and the cap report)\n");
+    lfg_ct_suite(suite_failure_summary_tests);
 
     printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
     printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
