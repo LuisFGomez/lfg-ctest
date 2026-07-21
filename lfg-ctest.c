@@ -144,12 +144,31 @@ static const lfg_ct_reporter_t _verbose_reporter = {
         _verbose_on_test_start,
 };
 
-/* --verbose: stream a START line before each test body and an outcome
- * line (PASS / FAIL / SKIP / XFAIL / XPASS) with elapsed milliseconds
- * after classification. Implemented via the built-in verbose reporter
- * above so the print path goes through the same single reporter
- * contract every other event observer uses. */
-static int _verbose_mode = 0;
+/* Output verbosity as one integer axis; -q and -v are aliases for its
+ * ends and --verbosity <n> addresses it directly. Kept as a level rather
+ * than a pair of booleans so "quiet" and "verbose" cannot both latch and
+ * a future level (summary-only) costs no mutual-exclusion check.
+ *
+ * At VERBOSE the built-in verbose reporter streams a START line before
+ * each test body and an outcome line (PASS / FAIL / SKIP / XFAIL /
+ * XPASS) with elapsed milliseconds after classification, so that print
+ * path goes through the same single reporter contract every other event
+ * observer uses.
+ *
+ * At QUIET the runner's own progress prints are gated off at their call
+ * sites -- see _quiet_mode(). That is deliberately not a reporter: the
+ * record stream a user-installed reporter sees is identical at every
+ * level. */
+static lfg_ct_verbosity_t _verbosity = LFG_CT_VERBOSITY_DEFAULT;
+
+/* Single predicate for the suppression sites so "what does quiet hide"
+ * is one grep, and a level added above QUIET later does not have to
+ * revisit each call site's comparison operator. */
+static int
+_quiet_mode(void)
+{
+    return _verbosity <= LFG_CT_VERBOSITY_QUIET ? 1 : 0;
+}
 
 /* Isolation mode + per-test timeout for fork mode. Both are runtime
  * settings; the platform gate and the LFG_CT_DISABLE_FORK opt-out are
@@ -536,7 +555,13 @@ void lfg_ct_start(void)
      * combines --list with other operations. */
     if (!_list_mode)
     {
-        printf("*** begin unit test\r\n");
+        /* The seed line survives quiet on purpose: a quiet failing run
+         * whose failures cannot be reproduced is a worse artifact than
+         * one extra line. Only the banner goes. */
+        if (!_quiet_mode())
+        {
+            printf("*** begin unit test\r\n");
+        }
         printf("*** random seed is %u\r\n", rand_seed);
         if (_rerun_failed && 0 == _replay_key_count)
         {
@@ -1398,7 +1423,7 @@ _rerun_report_unresolved(void)
 static void
 _reporter_activate(void)
 {
-    if (_verbose_mode)
+    if (_verbosity >= LFG_CT_VERBOSITY_VERBOSE)
     {
         _reporter = &_verbose_reporter;
     }
@@ -1416,7 +1441,7 @@ _filter_state_reset(void)
     _exclude_glob_count = 0;
     _filter_inherited_depth = 0;
     _strict_xpass = 0;
-    _verbose_mode = 0;
+    _verbosity = LFG_CT_VERBOSITY_DEFAULT;
     _seed_set = 0;
     _seed_value = 0;
     _rerun_failed = 0;
@@ -1440,6 +1465,11 @@ _filter_print_usage(const char *progname)
             "                           restoring that run's seed\r\n"
             "  --state-file <path>      Read/write the rerun state at <path> (default %s)\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
+            "  -q, --quiet              Print only failures, the seed, and the final summary\r\n"
+            "  --verbosity <n>          Set the level -q / -v alias: 0 quiet, 1 default, 2 verbose\r\n"
+            "-q and -v are one axis; the last of them on the command line wins.\r\n"
+            "Verbosity is presentation only -- exit codes, --list output, and the\r\n"
+            "records an installed reporter receives are identical at every level.\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "An entry id is <file>::<suite>::<test>; a glob addresses as many\r\n"
             "trailing ::-components as it spells out, so a bare test name still\r\n"
@@ -1475,9 +1505,63 @@ lfg_ct_parse_args(int argc, char *argv[])
             _strict_xpass = 1;
             continue;
         }
+        /* -v and -q are the two ends of one axis, so neither errors on
+         * the other and neither latches: whichever came last on the
+         * command line is simply the level left standing. */
         if (0 == strcmp(a, "-v") || 0 == strcmp(a, "--verbose"))
         {
-            _verbose_mode = 1;
+            _verbosity = LFG_CT_VERBOSITY_VERBOSE;
+            _reporter_activate();
+            continue;
+        }
+        if (0 == strcmp(a, "-q") || 0 == strcmp(a, "--quiet"))
+        {
+            _verbosity = LFG_CT_VERBOSITY_QUIET;
+            _reporter_activate();
+            continue;
+        }
+        if (0 == strcmp(a, "--verbosity"))
+        {
+            /* Scalar with a value, so it carries its own bounds check
+             * rather than riding the slot/count tail below -- same shape
+             * as --seed. Last flag wins, including against -q / -v. */
+            const char *val;
+            char *endptr;
+            unsigned long parsed;
+
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            val = argv[++i];
+
+            /* Bare digit run only, for the reason --seed spells out:
+             * strtoul would otherwise coerce " 1" and wrap "-1" into a
+             * huge unsigned that then passes an upper-bound check. */
+            errno = 0;
+            endptr = NULL;
+            parsed = strtoul(val, &endptr, 10);
+            if ('\0' == val[0] || val[0] < '0' || val[0] > '9' || NULL == endptr || '\0' != *endptr)
+            {
+                fprintf(stderr, "%s: %s requires an integer 0..%d, got: %s\r\n", progname, a,
+                        (int)LFG_CT_VERBOSITY_VERBOSE, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            if (ERANGE == errno || parsed > (unsigned long)LFG_CT_VERBOSITY_VERBOSE)
+            {
+                fprintf(stderr, "%s: %s value out of range (max %d): %s\r\n", progname, a,
+                        (int)LFG_CT_VERBOSITY_VERBOSE, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+
+            _verbosity = (lfg_ct_verbosity_t)parsed;
             _reporter_activate();
             continue;
         }
@@ -1608,10 +1692,16 @@ lfg_ct_is_list_mode(void)
     return _list_mode ? 1 : 0;
 }
 
+lfg_ct_verbosity_t
+lfg_ct_verbosity(void)
+{
+    return _verbosity;
+}
+
 int
 lfg_ct_is_verbose(void)
 {
-    return _verbose_mode ? 1 : 0;
+    return _verbosity >= LFG_CT_VERBOSITY_VERBOSE ? 1 : 0;
 }
 
 int
@@ -1855,7 +1945,12 @@ void lfg_ct_suite_impl_at(void (*fn)(void), const char *name, const char *file)
     _current_suite_name = saved_suite_name;
     _skip_env_active = saved_skip_active;
 
-    if (_current_suite_failures > 0 || _assertions_failed > suite_assertions_failed_before)
+    /* Suppressed at quiet despite naming a failure: it is an aggregate
+     * that adds no localization over the per-test FAILURE line plus the
+     * assertion detail, and a consumer registering many same-named
+     * suites gets one repetition per invocation. That repetition is the
+     * noise quiet exists to remove. */
+    if (!_quiet_mode() && (_current_suite_failures > 0 || _assertions_failed > suite_assertions_failed_before))
     {
         printf("*** suite FAILURE: %s\r\n", name);
     }
@@ -2096,7 +2191,11 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
                 _assertions_failed -= _current_test_failures;
             }
             _tests_skipped++;
-            printf("*** test SKIP: %s: %s\r\n", name, _current_skip_reason ? _current_skip_reason : "(no reason)");
+            if (!_quiet_mode())
+            {
+                printf("*** test SKIP: %s: %s\r\n", name,
+                        _current_skip_reason ? _current_skip_reason : "(no reason)");
+            }
             outcome = LFG_CT_SKIPPED;
             message = _current_skip_reason;
         }
@@ -2107,16 +2206,22 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
             {
                 _assertions_failed -= _current_test_failures;
                 _tests_xfailed++;
-                printf("*** test XFAIL: %s: %s\r\n", name,
-                        _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                if (!_quiet_mode())
+                {
+                    printf("*** test XFAIL: %s: %s\r\n", name,
+                            _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                }
                 outcome = LFG_CT_XFAIL;
                 message = _current_xfail_reason;
             }
             else
             {
                 _tests_xpassed++;
-                printf("*** test XPASS: %s: %s\r\n", name,
-                        _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                if (!_quiet_mode())
+                {
+                    printf("*** test XPASS: %s: %s\r\n", name,
+                            _current_xfail_reason ? _current_xfail_reason : "(no reason)");
+                }
                 outcome = LFG_CT_XPASS;
                 message = _current_xfail_reason;
             }
@@ -2365,7 +2470,7 @@ const lfg_ct_reporter_t *_lfg_ct_get_reporter(void)
 
 /* Direct-active-slot setter for the fork TU's child path. Bypasses
  * the verbose chain: assigns @p reporter to the active slot without
- * touching @c _user_reporter or @c _verbose_mode, so the child's
+ * touching @c _user_reporter or @c _verbosity, so the child's
  * capture reporter receives @c on_record directly even when the
  * parent had verbose mode active. The child uses this to install
  * capture, run the body, and (best-effort) restore the prior active
@@ -2468,23 +2573,28 @@ void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t
                 }
             }
             break;
+        /* Quiet gates the non-failure mirrors here rather than at the
+         * lfg-ctest-fork.c call sites, so all of them are covered
+         * without touching their literal print_outcome_line arguments.
+         * The FAILED arm above is deliberately not gated: the assertion
+         * detail and its test FAILURE line are exactly what quiet keeps. */
         case LFG_CT_SKIPPED:
             _tests_skipped++;
-            if (print_outcome_line)
+            if (print_outcome_line && !_quiet_mode())
             {
                 printf("*** test SKIP: %s: %s\r\n", name, message ? message : "(no reason)");
             }
             break;
         case LFG_CT_XFAIL:
             _tests_xfailed++;
-            if (print_outcome_line)
+            if (print_outcome_line && !_quiet_mode())
             {
                 printf("*** test XFAIL: %s: %s\r\n", name, message ? message : "(no reason)");
             }
             break;
         case LFG_CT_XPASS:
             _tests_xpassed++;
-            if (print_outcome_line)
+            if (print_outcome_line && !_quiet_mode())
             {
                 printf("*** test XPASS: %s: %s\r\n", name, message ? message : "(no reason)");
             }

@@ -465,6 +465,26 @@ void lfg_ct_end(void);
  *                                  parent serialises both the start and the
  *                                  outcome line, so no banner interleaves
  *                                  with another forked test's stdout.
+ *   - @c -q / @c --quiet          : reduce output to the assertion detail of
+ *                                  failing tests, their @c test @c FAILURE
+ *                                  lines, the random-seed announcement, and
+ *                                  the final summary. Suppresses the
+ *                                  @c begin @c unit @c test banner, the
+ *                                  per-suite @c suite @c FAILURE aggregate,
+ *                                  and the @c SKIP / @c XFAIL / @c XPASS
+ *                                  outcome lines.
+ *   - @c --verbosity @c \<n\>     : the level @c -q and @c -v alias, as an
+ *                                  integer 0..2 (see
+ *                                  @ref lfg_ct_verbosity_t). A missing,
+ *                                  non-numeric, or out-of-range value is an
+ *                                  error.
+ *
+ *  @c -q and @c -v are points on one axis, so mixing them is not an error:
+ *  the last one on the command line wins.
+ *
+ *  Verbosity is a presentation setting only. Exit codes, the records a
+ *  user-installed reporter receives, and @c --list output are identical at
+ *  every level.
  *
  *  An unmatched filter is not an error -- zero tests execute and the program
  *  exits 0. Unknown flags print a short usage message to stderr and produce
@@ -484,8 +504,31 @@ int lfg_ct_parse_args(int argc, char *argv[]);
  */
 int lfg_ct_is_list_mode(void);
 
+/** Output verbosity level.
+ *
+ *  One integer axis rather than a set of mutually-exclusive booleans:
+ *  @c -q and @c -v are aliases for the two ends, and a future mode
+ *  (e.g. summary-only for CI) is a new level rather than a fourth flag
+ *  that has to be range-checked against the others.
+ */
+typedef enum
+{
+    LFG_CT_VERBOSITY_QUIET = 0,   /**< Failures, the seed, and the summary only. */
+    LFG_CT_VERBOSITY_DEFAULT = 1, /**< Historical output (default). */
+    LFG_CT_VERBOSITY_VERBOSE = 2  /**< Adds per-test START / outcome streaming. */
+} lfg_ct_verbosity_t;
+
+/** Query the verbosity level currently in effect.
+ *  @return The level parsed from @c --verbosity / @c -q / @c -v, or
+ *          @ref LFG_CT_VERBOSITY_DEFAULT when none was given.
+ */
+lfg_ct_verbosity_t lfg_ct_verbosity(void);
+
 /** Query whether verbose-mode streaming is currently active.
- *  @return 1 if @c -v / @c --verbose was parsed, 0 otherwise.
+ *  Derived from @ref lfg_ct_verbosity; semantics are unchanged from
+ *  when verbosity was a single boolean.
+ *  @return 1 if the level is at least @ref LFG_CT_VERBOSITY_VERBOSE,
+ *          0 otherwise.
  */
 int lfg_ct_is_verbose(void);
 
