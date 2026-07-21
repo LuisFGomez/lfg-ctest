@@ -238,6 +238,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         list(APPEND TEST_TARGETS test-fork)
     endif()
 
+    # The quiet output contract can only be checked on real stdout bytes,
+    # which needs fork/waitpid/mkstemp to capture. Same honest guard as the
+    # shell-driven tests below: skipped only where no POSIX is assumed.
+    if(UNIX)
+        list(APPEND TEST_TARGETS test-quiet)
+    endif()
+
     # Build each test executable
     foreach(TEST_TARGET ${TEST_TARGETS})
         add_executable(${TEST_TARGET} ${TEST_TARGET}.c)
@@ -349,6 +356,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(LFG_CTEST_ENABLE_FORK)
         add_test(NAME test-fork
             COMMAND test-fork --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-fork.lfg-ctest-last)
+    endif()
+    if(UNIX)
+        add_test(NAME test-quiet
+            COMMAND test-quiet --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-quiet.lfg-ctest-last)
     endif()
     add_test(NAME test-fork-disabled
         COMMAND test-fork-disabled --state-file ${CMAKE_CURRENT_BINARY_DIR}/test-fork-disabled.lfg-ctest-last)
