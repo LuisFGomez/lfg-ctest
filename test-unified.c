@@ -2982,6 +2982,260 @@ static void suite_verbose_mode_tests(void)
 }
 
 /* ============================================================================
+ * Verbosity-level tests (#59)
+ *
+ * -q / -v / --verbosity <n> are three spellings of one integer axis, so
+ * these cover the axis itself (levels, aliases, last-flag-wins, reset)
+ * plus the two invariants quiet must not break: exit-code inputs and the
+ * reporter record stream are the same at every level.
+ * ============================================================================ */
+
+static void _quiet_body_skip(void) { lfg_ct_skip("quiet-mode probe"); }
+
+static void
+test_verbosity_defaults_to_default_level(void)
+{
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_DEFAULT, lfg_ct_verbosity());
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void
+test_quiet_short_flag_sets_quiet_level(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"-q"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+}
+
+static void
+test_quiet_long_flag_sets_quiet_level(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--quiet"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+}
+
+static void
+test_verbosity_explicit_levels_parse(void)
+{
+    char *argv_q[] = {(char *)"prog", (char *)"--verbosity", (char *)"0"};
+    char *argv_d[] = {(char *)"prog", (char *)"--verbosity", (char *)"1"};
+    char *argv_v[] = {(char *)"prog", (char *)"--verbosity", (char *)"2"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_q));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_d));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_DEFAULT, lfg_ct_verbosity());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_v));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_VERBOSE, lfg_ct_verbosity());
+}
+
+static void
+test_verbosity_aliases_agree_with_named_flags(void)
+{
+    /* -q / -v are documented as aliases, so the level they land on must
+     * be the same one --verbosity addresses by number. */
+    char *argv_q[] = {(char *)"prog", (char *)"-q"};
+    char *argv_v[] = {(char *)"prog", (char *)"-v"};
+    lfg_ct_verbosity_t from_alias;
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_q));
+    from_alias = lfg_ct_verbosity();
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, from_alias);
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_v));
+    from_alias = lfg_ct_verbosity();
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_VERBOSE, from_alias);
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+}
+
+static void
+test_is_verbose_is_derived_from_level(void)
+{
+    /* The existing boolean accessor keeps its semantics: true only at
+     * the verbose end, false at default and quiet. */
+    char *argv_q[] = {(char *)"prog", (char *)"--verbosity", (char *)"0"};
+    char *argv_d[] = {(char *)"prog", (char *)"--verbosity", (char *)"1"};
+    char *argv_v[] = {(char *)"prog", (char *)"--verbosity", (char *)"2"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_q));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_d));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv_v));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+}
+
+static void
+test_quiet_then_verbose_last_flag_wins(void)
+{
+    /* Not an error, and neither latches -- the later flag is simply the
+     * level left standing. */
+    char *argv[] = {(char *)"prog", (char *)"-q", (char *)"-v"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_VERBOSE, lfg_ct_verbosity());
+    ASSERT_INT_EQUAL(1, lfg_ct_is_verbose());
+}
+
+static void
+test_verbose_then_quiet_last_flag_wins(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"-v", (char *)"-q"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+    ASSERT_INT_EQUAL(0, lfg_ct_is_verbose());
+}
+
+static void
+test_verbosity_outranks_earlier_alias(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"-v", (char *)"--verbosity", (char *)"0"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(4, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+}
+
+static void
+test_verbosity_missing_arg_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--verbosity"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(2, argv));
+}
+
+static void
+test_verbosity_malformed_value_fails(void)
+{
+    /* Same rejections --seed makes: a bare digit run only, so leading
+     * signs and whitespace are refused rather than coerced. */
+    char *argv_alpha[] = {(char *)"prog", (char *)"--verbosity", (char *)"abc"};
+    char *argv_trailing[] = {(char *)"prog", (char *)"--verbosity", (char *)"1x"};
+    char *argv_negative[] = {(char *)"prog", (char *)"--verbosity", (char *)"-1"};
+    char *argv_empty[] = {(char *)"prog", (char *)"--verbosity", (char *)""};
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_alpha));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_trailing));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_negative));
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_empty));
+}
+
+static void
+test_verbosity_out_of_range_fails(void)
+{
+    char *argv[] = {(char *)"prog", (char *)"--verbosity", (char *)"3"};
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv));
+}
+
+static void
+test_verbosity_failed_parse_resets_to_default(void)
+{
+    /* The error path runs _filter_state_reset(), so a rejected value
+     * must not leave the previous run's level behind. */
+    char *argv_q[] = {(char *)"prog", (char *)"-q"};
+    char *argv_bad[] = {(char *)"prog", (char *)"--verbosity", (char *)"7"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_q));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+
+    ASSERT_INT_NOT_EQUAL(0, lfg_ct_parse_args(3, argv_bad));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_DEFAULT, lfg_ct_verbosity());
+}
+
+static void
+test_verbosity_resets_across_parse_calls(void)
+{
+    /* The reset contract: a second parse_args does not inherit the
+     * previous run's level. */
+    char *argv_on[] = {(char *)"prog", (char *)"-q"};
+    char *argv_off[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv_on));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_off));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_DEFAULT, lfg_ct_verbosity());
+}
+
+static void
+test_quiet_composes_with_list_mode(void)
+{
+    /* Quiet must not disturb --list: its name output is the entire
+     * purpose of the mode. */
+    char *argv[] = {(char *)"prog", (char *)"--list", (char *)"-q"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(3, argv));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_list_mode());
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_QUIET, lfg_ct_verbosity());
+}
+
+static void
+test_quiet_leaves_reporter_stream_intact(void)
+{
+    /* Quiet gates the runner's own printf sites, not the reporter
+     * chain. A skip prints nothing at quiet, but the installed reporter
+     * must still see the record -- otherwise a JUnit-XML consumer would
+     * silently lose entries at a presentation setting. */
+    char *argv[] = {(char *)"prog", (char *)"-q"};
+    lfg_ct_reporter_t r;
+
+    memset(&r, 0, sizeof(r));
+    r.on_record = _verbose_log_on_record;
+    r.userdata = &_vlog;
+
+    memset(&_vlog, 0, sizeof(_vlog));
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(2, argv));
+    lfg_ct_set_reporter(&r);
+
+    lfg_ct_test_impl(_quiet_body_skip, "quiet_skip_probe");
+
+    lfg_ct_set_reporter(NULL);
+
+    ASSERT_INT_EQUAL(1, _vlog.record_count);
+    ASSERT_INT_EQUAL(LFG_CT_SKIPPED, _vlog.record_outcomes[0]);
+    ASSERT_STR_EQUAL("quiet_skip_probe", _vlog.record_names[0]);
+}
+
+static void
+test_verbosity_reset_state_for_remaining_tests(void)
+{
+    char *argv[] = {(char *)"prog"};
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv));
+    ASSERT_INT_EQUAL(LFG_CT_VERBOSITY_DEFAULT, lfg_ct_verbosity());
+}
+
+static void suite_verbosity_tests(void)
+{
+    lfg_ct_test(test_verbosity_defaults_to_default_level);
+    lfg_ct_test(test_quiet_short_flag_sets_quiet_level);
+    lfg_ct_test(test_quiet_long_flag_sets_quiet_level);
+    lfg_ct_test(test_verbosity_explicit_levels_parse);
+    lfg_ct_test(test_verbosity_aliases_agree_with_named_flags);
+    lfg_ct_test(test_is_verbose_is_derived_from_level);
+    lfg_ct_test(test_quiet_then_verbose_last_flag_wins);
+    lfg_ct_test(test_verbose_then_quiet_last_flag_wins);
+    lfg_ct_test(test_verbosity_outranks_earlier_alias);
+    lfg_ct_test(test_verbosity_missing_arg_fails);
+    lfg_ct_test(test_verbosity_malformed_value_fails);
+    lfg_ct_test(test_verbosity_out_of_range_fails);
+    lfg_ct_test(test_verbosity_failed_parse_resets_to_default);
+    lfg_ct_test(test_verbosity_resets_across_parse_calls);
+    lfg_ct_test(test_quiet_composes_with_list_mode);
+    lfg_ct_test(test_quiet_leaves_reporter_stream_intact);
+
+    /* Unconditional reset before the verifying test runs -- mirrors
+     * the pattern at the tail of suite_verbose_mode_tests. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+        (void)lfg_ct_parse_args(1, reset_argv);
+    }
+    lfg_ct_test(test_verbosity_reset_state_for_remaining_tests);
+}
+
+/* ============================================================================
  * TEST SUITES
  * ============================================================================ */
 
@@ -3094,6 +3348,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
     printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
     lfg_ct_suite(suite_verbose_mode_tests);
+
+    printf("\n--- SUITE 7b: -q / --verbosity LEVEL TESTS ---\n");
+    printf("(Verifies the verbosity axis, aliases, last-flag-wins, and reset)\n");
+    lfg_ct_suite(suite_verbosity_tests);
 
     /* The arg-parsing self-tests above drive lfg_ct_parse_args with
      * synthetic argv and reset it afterwards, which leaves --state-file
