@@ -1220,12 +1220,15 @@ void lfg_ct_self_set_strict_xpass(int enabled);
  *
  *  Pair every call with @ref lfg_ct_self_fail_fast_disarm, which restores
  *  the tally saved here so a real failure recorded before the window is
- *  not swallowed.
+ *  not swallowed. Calling this while already armed is a no-op, so the
+ *  save slot always holds the pre-window tally.
  */
 void lfg_ct_self_fail_fast_arm(void);
 
 /** Self-test hook: restore the failed-test tally saved by the matching
- *  @ref lfg_ct_self_fail_fast_arm call.
+ *  @ref lfg_ct_self_fail_fast_arm call. A no-op when not armed, so a
+ *  shared teardown helper may call it unconditionally without clobbering
+ *  a live tally with a stale save slot.
  */
 void lfg_ct_self_fail_fast_disarm(void);
 

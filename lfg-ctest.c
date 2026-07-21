@@ -2965,18 +2965,36 @@ void lfg_ct_self_set_strict_xpass(int enabled)
  * Save/restore rather than a reset-to-zero so a real failure recorded
  * before the armed window survives it and the self-test binary's own exit
  * code stays honest. Nothing can be lost inside the window: with the gate
- * tripped no test classifies, so no test can bump the counter. */
+ * tripped no test classifies, so no test can bump the counter.
+ *
+ * The armed flag is what makes that guarantee hold for callers too. A
+ * disarm with no matching arm must not write anything back -- otherwise
+ * it restores a stale save slot over a live tally, which is the exact
+ * clobber the save/restore exists to prevent. Both entry points are
+ * therefore idempotent: disarm-without-arm and arm-while-armed are
+ * no-ops, so a shared reset helper can call disarm unconditionally. */
 static int _fail_fast_saved_tests_failed = 0;
+static int _fail_fast_armed = 0;
 
 void lfg_ct_self_fail_fast_arm(void)
 {
+    if (_fail_fast_armed)
+    {
+        return;
+    }
     _fail_fast_saved_tests_failed = _tests_failed;
+    _fail_fast_armed = 1;
     _tests_failed = 1;
 }
 
 void lfg_ct_self_fail_fast_disarm(void)
 {
+    if (!_fail_fast_armed)
+    {
+        return;
+    }
     _tests_failed = _fail_fast_saved_tests_failed;
+    _fail_fast_armed = 0;
 }
 
 int lfg_ct_self_return_code(void)
