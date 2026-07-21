@@ -185,7 +185,7 @@ Recognized flags:
 | `--state-file <path>` | Read and write the rerun state at `path` instead of `.lfg-ctest-last` in the current working directory. Repeating the flag keeps the last value. |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
 | `-q`, `--quiet` | Reduce output to failures plus the final summary. Alias for `--verbosity 0`. See [Quiet output](#quiet-output). |
-| `--verbosity <n>` | Set the level `-q` and `-v` alias, as an integer: `0` quiet, `1` default, `2` verbose. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. |
+| `--verbosity <n>` | Set the level that `-q` and `-v` alias, as an integer: `0` quiet, `1` default, `2` verbose. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. |
 
 A glob addresses **exactly as many trailing components as it spells out**: a
 glob with no `::` is matched against the test name alone, one with a single

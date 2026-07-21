@@ -41,6 +41,7 @@ cmake --build build --target run_all_tests    # verbose wrapper
 ./build/test-unified                          # direct, core self-tests
 ./build/test-mock                             # direct, mock self-tests
 ./build/test-amalg                            # amalgamated-header smoke
+./build/test-quiet                            # quiet output contract
 ```
 
 `test-unified` intentionally exercises assertion failure paths (wrapped in
@@ -50,6 +51,15 @@ internally triggered many failures.
 `test-amalg` builds against the generated `dist/lfg-ctest.h` and does not link
 against the `lfg-ctest` static library — it provides its own impl via
 `LFG_CTEST_IMPLEMENTATION`. CTest registers it alongside the other two.
+
+`test-quiet` covers what `-q` / `--verbosity 0` actually put on stdout, which
+the parse-level tests in `test-unified` cannot see. Each case runs a scenario in
+a forked child whose stdout is a regular file, then greps the captured bytes,
+and every "quiet suppresses X" assertion is paired with a default-verbosity
+control so a case cannot pass by capturing nothing. Registered under `if(UNIX)`:
+the capture needs `fork` / `waitpid` / `mkstemp`. The children drive genuinely
+unsuppressed failures and `_exit()` with a verdict code, so the outer binary
+stays green without expect-failures mode.
 
 `test-id-roundtrip` is not a C binary: it is `tools/check-id-roundtrip.sh`,
 which runs `--list | grep | xargs --filter` against `test-amalg` for real and

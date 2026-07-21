@@ -46,7 +46,7 @@ The flags it recognises:
 | `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
 | `-v`, `--verbose` | Stream a per-test progress line. |
 | `-q`, `--quiet` | Reduce output to failures plus the final summary (see [Quiet progress](#quiet-progress) below). |
-| `--verbosity <n>` | The level `-q` / `-v` alias: `0` quiet, `1` default, `2` verbose. |
+| `--verbosity <n>` | The level that `-q` / `-v` alias: `0` quiet, `1` default, `2` verbose. |
 
 ## Entry ids
 
