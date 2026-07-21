@@ -1466,7 +1466,7 @@ _filter_print_usage(const char *progname)
             "  --state-file <path>      Read/write the rerun state at <path> (default %s)\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "  -q, --quiet              Print only failures, the seed, and the final summary\r\n"
-            "  --verbosity <n>          Set the level -q / -v alias: 0 quiet, 1 default, 2 verbose\r\n"
+            "  --verbosity <n>          Set the level that -q / -v alias: 0 quiet, 1 default, 2 verbose\r\n"
             "-q and -v are one axis; the last of them on the command line wins.\r\n"
             "Verbosity is presentation only -- exit codes, --list output, and the\r\n"
             "records an installed reporter receives are identical at every level.\r\n"
@@ -2573,11 +2573,19 @@ void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t
                 }
             }
             break;
-        /* Quiet gates the non-failure mirrors here rather than at the
-         * lfg-ctest-fork.c call sites, so all of them are covered
-         * without touching their literal print_outcome_line arguments.
-         * The FAILED arm above is deliberately not gated: the assertion
-         * detail and its test FAILURE line are exactly what quiet keeps. */
+        /* The FAILED arm above is deliberately not gated. Every call site
+         * that passes print_outcome_line = 1 does so on an abnormal exit
+         * -- pipe/fork failure, signal, timeout, truncated payload -- where
+         * the child never got to report. That synthesized line is the only
+         * diagnostic a quiet run of a crashing test has, so quiet keeps it.
+         *
+         * The non-failure arms below carry the gate defensively only: a
+         * child that completes normally prints its own outcome line and is
+         * recorded here with print_outcome_line = 0, so fork-mode quiet
+         * suppression is really the child's inherited in-process gate
+         * doing the work. No current call site pairs a non-FAILED outcome
+         * with print_outcome_line = 1; the check is here so that adding
+         * one cannot leak an outcome line past quiet. */
         case LFG_CT_SKIPPED:
             _tests_skipped++;
             if (print_outcome_line && !_quiet_mode())
