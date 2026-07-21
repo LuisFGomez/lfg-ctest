@@ -773,8 +773,8 @@ _replay_clear(void)
  *  accumulator runs during a failing run, which is the worst possible
  *  moment to introduce an allocation-failure path. The ceiling is
  *  documented rather than silent -- an overrun is reported in the block
- *  itself. Footprint is LFG_CT_FAILGROUP_MAX * ~200 bytes of BSS; lower
- *  the cap if a target cannot spend it.
+ *  itself. Footprint is LFG_CT_FAILGROUP_MAX * ~324 bytes of BSS (~83 KB
+ *  at the default cap); lower the cap if a target cannot spend it.
  *==========================================================================*/
 
 /* Distinct failing test names the block can report. Beyond this the
@@ -784,9 +784,23 @@ _replay_clear(void)
 /* Per-group copies. Borrowing would be cheaper, but the test name is a
  * caller-supplied pointer with no lifetime guarantee and the origin is
  * carved out of the per-test message slot, which is cleared on the way
- * out of every dispatch level. */
-#define LFG_CT_FAILGROUP_NAME_MAX 64
-#define LFG_CT_FAILGROUP_ORIGIN_MAX 128
+ * out of every dispatch level.
+ *
+ * The name is the grouping *key* -- it is compared, not just printed --
+ * so its width is a correctness bound, not a cosmetic one: two tests
+ * agreeing within the copy would fold into one group with no way to see
+ * it had happened. 128 is sized against this repo's own convention
+ * (test_<area>_<behavior>_<detail> tops out in the low 60s, so long
+ * shared prefixes are the norm) with room for that to roughly double,
+ * and stays well under LFG_CT_ID_MAX's 320, which has to hold a whole
+ * <file>::<suite>::<test> id rather than a bare name.
+ *
+ * The origin is display-only -- nothing keys off it -- but 192 keeps a
+ * deeply-nested path plus a descriptive function name inside the
+ * documented "file:line: in fn()" shape, where 128 would cut the path
+ * and take the closing "()" with it. */
+#define LFG_CT_FAILGROUP_NAME_MAX 128
+#define LFG_CT_FAILGROUP_ORIGIN_MAX 192
 
 typedef struct
 {
