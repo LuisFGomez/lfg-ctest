@@ -45,6 +45,8 @@ The flags it recognises:
 | `--strict-xpass` | Make an otherwise-clean run exit non-zero if any test XPASSed (see [chapter 3](03-skip-xfail-xpass.md)). |
 | `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
 | `-v`, `--verbose` | Stream a per-test progress line. |
+| `-q`, `--quiet` | Reduce output to failures plus the final summary (see [Quiet progress](#quiet-progress) below). |
+| `--verbosity <n>` | The level `-q` / `-v` alias: `0` quiet, `1` default, `2` verbose. |
 
 ## Entry ids
 
@@ -224,6 +226,39 @@ the framework's first built-in *reporter*, so it coexists with a consumer
 reporter such as JUnit-XML — both fire in the same run without interfering
 (see [chapter 8](08-integration.md)). `lfg_ct_is_verbose()` exposes the bit if
 your own code wants to suppress redundant output when verbose mode is on.
+
+## Quiet progress
+
+`-q` / `--quiet` goes the other way: it strips the run down to failures plus
+the final summary. Reach for it when the suite is big enough that the progress
+lines bury the one thing you need — a few hundred tests emit enough
+`*** suite FAILURE:` repetitions to hide the assertion that actually broke.
+
+```
+$ ./test_indicators -q
+*** random seed is 3314123391
+*** test-ind-sma.c: 88: FAILURE in test_sma_roundtrip(): 12 should equal 10
+*** test FAILURE: test_sma_roundtrip
+*** Executed 1841 assertions in 655 tests. Failures: 1
+*** Failure summary: 1 failure in 1 distinct test
+***     1  test_sma_roundtrip               (first: test-ind-sma.c:88: in test_sma_roundtrip())
+*** Testing complete. Result: FAIL
+```
+
+What survives is the assertion detail, the failing test's name, the seed, and
+the summary. What goes is the `*** begin unit test` banner, the per-suite
+`*** suite FAILURE:` aggregate, and the `SKIP` / `XFAIL` / `XPASS` lines —
+those outcomes still show up in the summary counters.
+
+The seed line stays on purpose: a quiet failing run you cannot reproduce is
+worse than one extra line, and that seed is what you hand back to `--seed`
+(next section).
+
+`-q`, the default, and `-v` are three points on one axis, not three switches.
+`--verbosity <n>` addresses it by number (`0` / `1` / `2`), and mixing `-q`
+and `-v` is not an error — the last one on the command line wins. Verbosity is
+presentation only: exit codes, `--list` output, and what a consumer reporter
+receives do not change with it.
 
 ## Reproducing a randomized run
 

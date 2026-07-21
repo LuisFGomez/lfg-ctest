@@ -18,8 +18,8 @@ read/write actions, and a per-call callback hook.
   heap state can share that same single-call teardown.
 - `lfg_ct_parse_args(argc, argv)` handles `--list` / `--filter <glob>` /
   `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` /
-  `--rerun-failed` / `--state-file <path>` so one binary can back many
-  `ctest` entries.
+  `--rerun-failed` / `--state-file <path>` / `-v` / `-q` /
+  `--verbosity <n>` so one binary can back many `ctest` entries.
 - Every entry has an id — `<file>::<suite>::<test>` — that `--list` emits and
   `--filter` matches by addressing as many trailing `::`-components as the
   glob spells out, so a bare name still works unchanged and a fully-qualified

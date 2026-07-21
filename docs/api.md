@@ -63,8 +63,10 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
+| `lfg_ct_verbosity()` | Returns the `lfg_ct_verbosity_t` level in effect — `LFG_CT_VERBOSITY_QUIET` (0), `_DEFAULT` (1), or `_VERBOSE` (2). See [Quiet output](#quiet-output). |
+| `lfg_ct_is_verbose()` | Returns 1 if the level is at least `LFG_CT_VERBOSITY_VERBOSE`, 0 otherwise. Derived from `lfg_ct_verbosity()`; semantics unchanged from when verbosity was a single boolean. |
 | `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed **or** `--rerun-failed` restored a seed from the state file, 0 otherwise. Separate from the value because `0` is a legal seed. |
 | `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. Under `--rerun-failed` the persisted seed is loaded into this slot, so the predicate/value pair also reports a restored seed. An explicit `--seed` wins over the persisted one. |
 | `lfg_ct_is_rerun_failed()` | Returns 1 if `--rerun-failed` was parsed, 0 otherwise. |
@@ -182,6 +184,8 @@ Recognized flags:
 | `--rerun-failed` | Run only the entries the previous run recorded as failed, restoring that run's seed. Intersects with `--filter` — the replayed set is the candidate pool and the filter narrows it further. An explicit `--seed` outranks the persisted one. A missing, malformed, or wholly stale state file is an error, never a silent full-suite run. See [Rerunning just the failures](#rerunning-just-the-failures). |
 | `--state-file <path>` | Read and write the rerun state at `path` instead of `.lfg-ctest-last` in the current working directory. Repeating the flag keeps the last value. |
 | `-v`, `--verbose` | Stream a per-test `START` line before each test body is dispatched and an outcome line (`PASS` / `FAIL` / `SKIP` / `XFAIL` / `XPASS`) with elapsed milliseconds after the test classifies. Off by default; orthogonal to other flags. Coexists with a user-installed reporter (e.g. JUnit-XML). See [Verbose output](#verbose-output). |
+| `-q`, `--quiet` | Reduce output to failures plus the final summary. Alias for `--verbosity 0`. See [Quiet output](#quiet-output). |
+| `--verbosity <n>` | Set the level `-q` and `-v` alias, as an integer: `0` quiet, `1` default, `2` verbose. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. |
 
 A glob addresses **exactly as many trailing components as it spells out**: a
 glob with no `::` is matched against the test name alone, one with a single
@@ -408,6 +412,60 @@ payload arrives), so no verbose line interleaves with another test's
 stdout — and the child does not re-fire the start callback because
 its reporter slot is swapped to the fork TU's capture reporter for
 the duration of the child.
+
+### Quiet output
+
+`-q` / `--quiet` goes the other direction: it reduces the run to
+failures plus the final summary. It exists for suites large enough that
+the per-suite and per-test progress lines bury the assertion detail —
+a 655-test run that emits 1400 lines needs `grep` to find the one thing
+that went wrong.
+
+`-q`, the default, and `-v` are three points on one integer axis rather
+than independent switches. `--verbosity <n>` addresses that axis
+directly (`0` quiet, `1` default, `2` verbose) and the two letter flags
+are aliases for its ends, so `lfg_ct_verbosity()` reports the level and
+`lfg_ct_is_verbose()` remains a derived predicate (`level >= 2`) with
+its original meaning.
+
+At quiet level these lines are **suppressed**:
+
+| Line | Why |
+|------|-----|
+| `*** begin unit test` | Banner; carries no run-specific information. |
+| `*** suite FAILURE: <name>` | An aggregate that adds no localization over the per-test `FAILURE` line plus the assertion detail. A consumer registering many identically-named suites gets one repetition per invocation, which is the bulk of the noise the flag exists to remove. |
+| `*** test SKIP: ...` | Non-failure dispositions; still counted in the summary. |
+| `*** test XFAIL: ...` | ditto |
+| `*** test XPASS: ...` | ditto |
+
+And these are **retained**:
+
+| Line | Why |
+|------|-----|
+| `*** <file>:<line>: FAILURE in <fn>(): <msg>` | The assertion detail — the signal the progress lines were drowning. |
+| `*** random seed is <n>` | Deliberately kept despite being a banner: a quiet failing run whose failures cannot be reproduced is a worse artifact than one extra line. This is the handle [`--seed`](#reproducing-a-randomized-run) takes. |
+| `*** test FAILURE: <name>` | Names the failing test. |
+| Final summary counters, [grouped failure summary](#grouped-failure-summary), and `Result: PASS/FAIL` | The verdict. |
+| `--list` output | Unaffected; its name output is the entire purpose of that mode. |
+| stderr misuse warnings | Diagnostics for API misuse, not progress. |
+
+Mixing `-q` and `-v` is not an error — they are ends of one axis, so
+the last one on the command line wins, in either order.
+
+Quiet is a **presentation** flag only. It gates the runner's own
+`printf` sites, not the [reporter chain](#reporter-callback): exit
+codes, `--list` output, and the record stream a user-installed reporter
+receives are identical at every level, so a JUnit-XML report emits the
+same document whether or not `-q` was passed. The suppression also
+holds under `LFG_CT_ISOLATE_FORK` — a forked failing test still prints
+its `test FAILURE` line and assertion detail, and a forked
+skip/xfail/xpass prints nothing.
+
+> **Note.** The assertion-detail line is retained unconditionally, so an
+> `xfail` test's assertion text still prints at quiet level while its
+> `*** test XFAIL:` classification line does not. An expected failure
+> therefore reads as a bare failure detail unless you cross-reference
+> the summary counters.
 
 ### Skip, xfail, xpass
 
