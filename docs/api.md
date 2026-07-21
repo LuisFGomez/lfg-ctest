@@ -497,8 +497,21 @@ path. Failures beyond that many *distinct* names still count toward the
 header total and are reported explicitly rather than silently dropped:
 
 ```
-*** 44 further failures ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = 256) was reached
+*** Failure summary: 4213 failures in at least 256 distinct tests
+...
+*** 44 further failures ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = 256) was reached; their distinct-test count is unknown
 ```
+
+Once the cap is reached the header switches to **at least** N: the table
+keeps nothing that could tell the dropped failures apart, so their
+distinct-test count is genuinely unknown. Note the two figures cannot be
+added to recover it — the header counts *tests*, the overflow line counts
+*failures*.
+
+A test name longer than `LFG_CT_FAILGROUP_NAME_MAX` (128) is truncated in
+the stored key, so two names agreeing within that width would fold into a
+single group. The width is sized well past the naming conventions this is
+used with, but it is a bound on the key, not just on display.
 
 The two surrounding lines are unchanged in text, and the verdict stays
 last, so tooling that tails or greps the end of a log is unaffected.
