@@ -68,7 +68,10 @@ do
 
     # A self-test binary may exit non-zero by design (it verifies failure
     # detection); the summary line is the signal, not the exit code.
-    count=$("$BIN" --filter "$id" --state-file "$STATE" 2>/dev/null | sed -n 's/.*Executed [0-9]* assertions in \([0-9]*\) tests.*/\1/p' || true)
+    # </dev/null: the enclosing loop has $LIST on stdin, and a binary that
+    # read it would eat the remaining ids -- verifying only a prefix while
+    # the closing line still reports the full $TOTAL.
+    count=$("$BIN" --filter "$id" --state-file "$STATE" </dev/null 2>/dev/null | sed -n 's/.*Executed [0-9]* assertions in \([0-9]*\) tests.*/\1/p' || true)
 
     if [ "$count" != "1" ]
     then

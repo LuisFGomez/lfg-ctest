@@ -71,7 +71,7 @@ fi
 # --list must not write or truncate the state file.
 # ---------------------------------------------------------------------------
 
-ID=$("$BIN" --list | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$' | head -n 1 || true)
+ID=$("$BIN" --list --state-file "$STATE" | grep -E '^[^ ]+\.c::[^ :]+::[^ :]+$' | head -n 1 || true)
 
 if [ -z "$ID" ]
 then
