@@ -28,6 +28,11 @@
  *  Private Function Prototypes
  *==========================================================================*/
 
+/* --rerun-failed bookkeeping, defined below the id helpers they build on
+ * but needed by lfg_ct_end, which sits above them. */
+static void _fail_keys_clear(void);
+static void _replay_clear(void);
+
 /*============================================================================
  *  Variables
  *==========================================================================*/
@@ -196,6 +201,61 @@ static int _filter_inherited_depth = 0;
  * user may pass deliberately. When unset, lfg_ct_start() generates one. */
 static int _seed_set = 0;
 static unsigned _seed_value = 0;
+
+/* Seed this run actually handed to srand(). Distinct from _seed_value,
+ * which only carries a *supplied* seed: the state file has to persist the
+ * generated one too, or a --rerun-failed replay would restore a selection
+ * without the conditions it failed under. Set by lfg_ct_start. */
+static unsigned _effective_seed = 0;
+
+/* --rerun-failed (#56): replay exactly the previous run's failures.
+ *
+ * Every non-listing run persists a small line-oriented state file: a
+ * format marker, the seed the run used, and the id of every test that
+ * classified as FAILED. --rerun-failed reads it back, restores the seed,
+ * and admits only the persisted ids. Because the file is rewritten on
+ * every run -- including a --rerun-failed run -- successive invocations
+ * narrow toward the tests that still fail rather than replaying the
+ * original set forever.
+ *
+ * The persisted keys are the same <file>::<suite>::<test> ids --list
+ * emits and --filter matches (#55), so nothing here invents a second
+ * addressing scheme. They are recorded from the runner's own
+ * classification, never from stdout -- deriving them from output text
+ * would reproduce #50's empty-state-file failure in exactly the
+ * redirected/CI cases the feature exists for. */
+#define LFG_CT_STATE_PATH_DEFAULT ".lfg-ctest-last"
+#define LFG_CT_STATE_MAGIC "lfg-ctest-state"
+#define LFG_CT_STATE_VERSION 1
+
+/* Longest state-file line accepted. An id is capped at LFG_CT_ID_MAX, so
+ * this is generous; anything longer is a malformed file, not a line to
+ * silently split (splitting would fabricate keys). */
+#define LFG_CT_STATE_LINE_MAX 1024
+
+static int _rerun_failed = 0;
+static const char *_state_path = LFG_CT_STATE_PATH_DEFAULT;
+
+/* Ids this run classified as FAILED, in classification order. Owned
+ * heap copies: the id is rendered into a stack buffer at the
+ * classification site, so borrowing would dangle. */
+static char **_fail_keys = NULL;
+static int _fail_key_count = 0;
+static int _fail_key_cap = 0;
+
+/* Ids loaded from the state file under --rerun-failed, plus a parallel
+ * "did a registered test claim this key" flag. The flags are what let the
+ * end of the run tell a renamed/removed test (warn, keep going) from a
+ * wholly stale state file (diagnostic + non-zero exit). */
+static char **_replay_keys = NULL;
+static unsigned char *_replay_resolved = NULL;
+static int _replay_key_count = 0;
+static int _replay_key_cap = 0;
+
+/* Latched at summary time when a --rerun-failed run resolved none of its
+ * persisted keys. Latched rather than recomputed so lfg_ct_return keeps
+ * answering correctly after lfg_ct_end has released the replay set. */
+static int _rerun_unresolved_fatal = 0;
 
 /*============================================================================
  *  Self-Test Support (internal only)
@@ -460,6 +520,11 @@ _seed_generate(void)
 void lfg_ct_start(void)
 {
     unsigned rand_seed = _seed_set ? _seed_value : _seed_generate();
+
+    /* Remembered for the state file: a replay has to restore the
+     * conditions the tests failed under, generated seed included. */
+    _effective_seed = rand_seed;
+
     /* List mode wants stdout to be a clean newline-separated list of names;
      * skip the banner and the seed announcement. srand still runs so any
      * deterministic-by-seed test behavior stays consistent if the user
@@ -468,12 +533,23 @@ void lfg_ct_start(void)
     {
         printf("*** begin unit test\r\n");
         printf("*** random seed is %u\r\n", rand_seed);
+        if (_rerun_failed && 0 == _replay_key_count)
+        {
+            /* Say it plainly rather than running a silent empty suite --
+             * "nothing ran" and "nothing was left to run" look identical
+             * in the summary otherwise. Still a clean exit. */
+            printf("*** rerun-failed: %s records no failures; nothing to replay\r\n", _state_path);
+        }
     }
     srand(rand_seed);
 }
 
 void lfg_ct_end(void)
 {
+    /* Release the rerun bookkeeping. The fatal-replay verdict is already
+     * latched, so lfg_ct_return keeps answering correctly after this. */
+    _fail_keys_clear();
+    _replay_clear();
 }
 
 /* Number of "::"-delimited components in @p s (a glob or an id). */
@@ -628,6 +704,384 @@ _glob_list_matches_id(const char *id, const char *const *globs, int count)
     return 0;
 }
 
+/*============================================================================
+ *  --rerun-failed state file
+ *==========================================================================*/
+
+/* strdup(3) is not C99. */
+static char *
+_str_dup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *p = (char *)malloc(n);
+
+    if (NULL != p)
+    {
+        memcpy(p, s, n);
+    }
+    return p;
+}
+
+static void
+_fail_keys_clear(void)
+{
+    int i;
+
+    for (i = 0; i < _fail_key_count; i++)
+    {
+        free(_fail_keys[i]);
+    }
+    free(_fail_keys);
+    _fail_keys = NULL;
+    _fail_key_count = 0;
+    _fail_key_cap = 0;
+}
+
+static void
+_replay_clear(void)
+{
+    int i;
+
+    for (i = 0; i < _replay_key_count; i++)
+    {
+        free(_replay_keys[i]);
+    }
+    free(_replay_keys);
+    free(_replay_resolved);
+    _replay_keys = NULL;
+    _replay_resolved = NULL;
+    _replay_key_count = 0;
+    _replay_key_cap = 0;
+}
+
+/* Append @p id to this run's failure set, ignoring a repeat (a nested
+ * dispatch can classify the same id twice). An allocation failure is
+ * swallowed on purpose: the cost is one missing entry in the *next*
+ * run's selection, never the correctness or the verdict of this one. */
+static void
+_fail_record_id(const char *id)
+{
+    char *copy;
+    int i;
+
+    if (NULL == id || '\0' == id[0])
+    {
+        return;
+    }
+    for (i = 0; i < _fail_key_count; i++)
+    {
+        if (0 == strcmp(_fail_keys[i], id))
+        {
+            return;
+        }
+    }
+    if (_fail_key_count == _fail_key_cap)
+    {
+        int cap = (_fail_key_cap > 0) ? (_fail_key_cap * 2) : 16;
+        char **grown = (char **)realloc(_fail_keys, (size_t)cap * sizeof(*grown));
+
+        if (NULL == grown)
+        {
+            return;
+        }
+        _fail_keys = grown;
+        _fail_key_cap = cap;
+    }
+    copy = _str_dup(id);
+    if (NULL == copy)
+    {
+        return;
+    }
+    _fail_keys[_fail_key_count++] = copy;
+}
+
+/* Record the currently-dispatching test as failed. Rebuilds the id from
+ * the same batons the admission gate used, so the key persisted here is
+ * byte-identical to the one --rerun-failed will match against. */
+static void
+_fail_record_current(const char *name)
+{
+    char id[LFG_CT_ID_MAX];
+
+    _id_build(id, sizeof(id), _current_test_file, _current_suite_name, name);
+    _fail_record_id(id);
+}
+
+/* Returns 0 on success, -1 on allocation failure. */
+static int
+_replay_push(const char *key)
+{
+    char *copy;
+
+    if (_replay_key_count == _replay_key_cap)
+    {
+        int cap = (_replay_key_cap > 0) ? (_replay_key_cap * 2) : 16;
+        char **grown_keys = (char **)realloc(_replay_keys, (size_t)cap * sizeof(*grown_keys));
+        unsigned char *grown_flags;
+
+        if (NULL == grown_keys)
+        {
+            return -1;
+        }
+        _replay_keys = grown_keys;
+        grown_flags = (unsigned char *)realloc(_replay_resolved, (size_t)cap * sizeof(*grown_flags));
+        if (NULL == grown_flags)
+        {
+            return -1;
+        }
+        _replay_resolved = grown_flags;
+        _replay_key_cap = cap;
+    }
+    copy = _str_dup(key);
+    if (NULL == copy)
+    {
+        return -1;
+    }
+    _replay_resolved[_replay_key_count] = 0;
+    _replay_keys[_replay_key_count++] = copy;
+    return 0;
+}
+
+/* Does @p id name one of the persisted keys? Marks the key resolved on a
+ * hit, which is what separates "this test was renamed" from "this whole
+ * state file is stale" at the end of the run. */
+static int
+_rerun_admits_id(const char *id)
+{
+    int i;
+
+    if (NULL == id)
+    {
+        return 0;
+    }
+    for (i = 0; i < _replay_key_count; i++)
+    {
+        if (0 == strcmp(_replay_keys[i], id))
+        {
+            _replay_resolved[i] = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Read one newline-terminated line into @p buf, stripped of its
+ * terminator. Returns 1 on a line, 0 at end of file, -1 when the line
+ * did not fit (the caller treats that as a malformed file rather than
+ * splitting it into two fabricated records). A trailing CR is dropped so
+ * a state file that travelled through a Windows host still parses. */
+static int
+_state_read_line(FILE *fp, char *buf, size_t cap)
+{
+    size_t n = 0;
+    int c;
+
+    for (;;)
+    {
+        c = fgetc(fp);
+        if (EOF == c)
+        {
+            if (0 == n)
+            {
+                return 0;
+            }
+            break;
+        }
+        if ('\n' == c)
+        {
+            break;
+        }
+        if (n + 1 >= cap)
+        {
+            return -1;
+        }
+        buf[n++] = (char)c;
+    }
+    if (n > 0 && '\r' == buf[n - 1])
+    {
+        n--;
+    }
+    buf[n] = '\0';
+    return 1;
+}
+
+/* Same strictness as --seed's parser: a bare decimal digit run that fits
+ * an unsigned. Returns 0 on success, -1 otherwise. */
+static int
+_state_parse_seed(const char *val, unsigned *out)
+{
+    char *endptr = NULL;
+    unsigned long parsed;
+
+    if ('\0' == val[0] || val[0] < '0' || val[0] > '9')
+    {
+        return -1;
+    }
+    errno = 0;
+    parsed = strtoul(val, &endptr, 10);
+    if (NULL == endptr || '\0' != *endptr)
+    {
+        return -1;
+    }
+#if ULONG_MAX > UINT_MAX
+    if (ERANGE == errno || parsed > (unsigned long)UINT_MAX)
+#else
+    if (ERANGE == errno)
+#endif
+    {
+        return -1;
+    }
+    *out = (unsigned)parsed;
+    return 0;
+}
+
+/* Load @p path into the replay set and hand back the persisted seed.
+ *
+ * Returns 0 on success, -1 with a diagnostic already on stderr
+ * otherwise. On any error the replay set is emptied again: a half-parsed
+ * file must never narrow a run, because the user would believe they
+ * replayed their failures when they replayed some prefix of them. */
+static int
+_state_load(const char *progname, const char *path, unsigned *seed_out)
+{
+    char line[LFG_CT_STATE_LINE_MAX];
+    char expect[64];
+    FILE *fp;
+    int seen_seed = 0;
+    int lineno = 0;
+    int rc;
+
+    _replay_clear();
+
+    fp = fopen(path, "r");
+    if (NULL == fp)
+    {
+        fprintf(stderr, "%s: --rerun-failed: no state file at %s (run the suite once first)\r\n", progname, path);
+        return -1;
+    }
+
+    snprintf(expect, sizeof(expect), "%s %d", LFG_CT_STATE_MAGIC, LFG_CT_STATE_VERSION);
+    rc = _state_read_line(fp, line, sizeof(line));
+    if (1 != rc || 0 != strcmp(line, expect))
+    {
+        fprintf(stderr, "%s: --rerun-failed: %s is not a v%d state file (expected first line \"%s\")\r\n",
+                progname, path, LFG_CT_STATE_VERSION, expect);
+        fclose(fp);
+        _replay_clear();
+        return -1;
+    }
+
+    while (1 == (rc = _state_read_line(fp, line, sizeof(line))))
+    {
+        lineno++;
+        if ('\0' == line[0])
+        {
+            continue;
+        }
+        if (0 == strncmp(line, "seed ", 5))
+        {
+            if (0 != _state_parse_seed(line + 5, seed_out))
+            {
+                fprintf(stderr, "%s: --rerun-failed: %s has a malformed seed: %s\r\n", progname, path, line + 5);
+                fclose(fp);
+                _replay_clear();
+                return -1;
+            }
+            seen_seed = 1;
+            continue;
+        }
+        if (0 == strncmp(line, "fail ", 5) && '\0' != line[5])
+        {
+            if (0 != _replay_push(line + 5))
+            {
+                fprintf(stderr, "%s: --rerun-failed: out of memory reading %s\r\n", progname, path);
+                fclose(fp);
+                _replay_clear();
+                return -1;
+            }
+            continue;
+        }
+        fprintf(stderr, "%s: --rerun-failed: %s is malformed at record %d: %s\r\n", progname, path, lineno, line);
+        fclose(fp);
+        _replay_clear();
+        return -1;
+    }
+    fclose(fp);
+
+    if (-1 == rc)
+    {
+        fprintf(stderr, "%s: --rerun-failed: %s has an over-long line (max %d bytes)\r\n", progname, path,
+                LFG_CT_STATE_LINE_MAX - 1);
+        _replay_clear();
+        return -1;
+    }
+    if (!seen_seed)
+    {
+        fprintf(stderr, "%s: --rerun-failed: %s carries no seed record\r\n", progname, path);
+        _replay_clear();
+        return -1;
+    }
+    return 0;
+}
+
+/* Persist this run's seed and failure set to @p path. LF-only, like
+ * --list output and for the same reason: the file is machine input, and
+ * a stray CR would ride into the key and match nothing on replay.
+ * Returns 0 on success, -1 if the file could not be written. */
+static int
+_state_write(const char *path, unsigned seed)
+{
+    FILE *fp;
+    int i;
+
+    fp = fopen(path, "w");
+    if (NULL == fp)
+    {
+        return -1;
+    }
+    fprintf(fp, "%s %d\n", LFG_CT_STATE_MAGIC, LFG_CT_STATE_VERSION);
+    fprintf(fp, "seed %u\n", seed);
+    for (i = 0; i < _fail_key_count; i++)
+    {
+        fprintf(fp, "fail %s\n", _fail_keys[i]);
+    }
+    if (0 != ferror(fp))
+    {
+        fclose(fp);
+        return -1;
+    }
+    return (0 == fclose(fp)) ? 0 : -1;
+}
+
+/* End-of-run verdict on the persisted keys. A key nobody claimed means
+ * the test was renamed or removed since it failed -- warn and keep the
+ * rest of the replay. Every key unclaimed means the state file no longer
+ * describes this binary at all, which is latched as fatal: silently
+ * running nothing would read as "all fixed". */
+static void
+_rerun_report_unresolved(void)
+{
+    int resolved = 0;
+    int i;
+
+    for (i = 0; i < _replay_key_count; i++)
+    {
+        if (_replay_resolved[i])
+        {
+            resolved++;
+            continue;
+        }
+        fprintf(stderr, "*** WARNING: --rerun-failed: no registered test matches key: %s\r\n", _replay_keys[i]);
+    }
+    if (_replay_key_count > 0 && 0 == resolved)
+    {
+        fprintf(stderr, "*** ERROR: --rerun-failed: none of the %d persisted key(s) in %s match a registered "
+                        "test\r\n",
+                _replay_key_count, _state_path);
+        _rerun_unresolved_fatal = 1;
+    }
+}
+
 /* Recompute the active reporter slot from the verbose toggle and the
  * consumer-installed reporter. Called whenever either input changes
  * (parse_args toggling verbose, lfg_ct_set_reporter installing or
@@ -662,6 +1116,10 @@ _filter_state_reset(void)
     _verbose_mode = 0;
     _seed_set = 0;
     _seed_value = 0;
+    _rerun_failed = 0;
+    _state_path = LFG_CT_STATE_PATH_DEFAULT;
+    _rerun_unresolved_fatal = 0;
+    _replay_clear();
     _reporter_activate();
 }
 
@@ -675,13 +1133,17 @@ _filter_print_usage(const char *progname)
             "  --filter-exclude <glob>  Skip entries whose id matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
             "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
+            "  --rerun-failed           Run only the tests the previous run recorded as failed,\r\n"
+            "                           restoring that run's seed\r\n"
+            "  --state-file <path>      Read/write the rerun state at <path> (default %s)\r\n"
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "An entry id is <file>::<suite>::<test>; a glob addresses as many\r\n"
             "trailing ::-components as it spells out, so a bare test name still\r\n"
             "works and * never crosses a ::.\r\n"
-            "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n",
-            progname ? progname : "test");
+            "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n"
+            "--rerun-failed intersects with --filter: the filter narrows the replayed set.\r\n",
+            progname ? progname : "test", LFG_CT_STATE_PATH_DEFAULT);
 }
 
 int
@@ -714,6 +1176,24 @@ lfg_ct_parse_args(int argc, char *argv[])
         {
             _verbose_mode = 1;
             _reporter_activate();
+            continue;
+        }
+        if (0 == strcmp(a, "--rerun-failed"))
+        {
+            _rerun_failed = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "--state-file"))
+        {
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            /* Borrowed from argv, like the filter globs. Last flag wins. */
+            _state_path = argv[++i];
             continue;
         }
         if (0 == strcmp(a, "--seed"))
@@ -795,6 +1275,27 @@ lfg_ct_parse_args(int argc, char *argv[])
         }
         slot[(*count)++] = argv[++i];
     }
+
+    /* Load after the whole argv is consumed, not at the flag, so
+     * --state-file and --seed bind regardless of the order the user
+     * spelled them in. An explicit --seed outranks the persisted one:
+     * replaying the same selection under different conditions is a
+     * deliberate gesture, so the flag the user typed wins. */
+    if (_rerun_failed)
+    {
+        unsigned persisted = 0;
+
+        if (0 != _state_load(progname, _state_path, &persisted))
+        {
+            _filter_state_reset();
+            return -1;
+        }
+        if (!_seed_set)
+        {
+            _seed_value = persisted;
+            _seed_set = 1;
+        }
+    }
     return 0;
 }
 
@@ -822,11 +1323,32 @@ lfg_ct_get_seed(void)
     return _seed_value;
 }
 
+int
+lfg_ct_is_rerun_failed(void)
+{
+    return _rerun_failed ? 1 : 0;
+}
+
+const char *
+lfg_ct_state_path(void)
+{
+    return _state_path;
+}
+
 /* Pure id predicate -- ignores list mode (which suppresses execution
  * regardless of filter state). Exclude is decisive and is evaluated first. */
 static int
 _filter_admits_id(const char *id)
 {
+    /* --rerun-failed gates first and independently of the glob rules, so
+     * combining it with --filter intersects: the replay set is the
+     * candidate pool, the filter narrows it. Gating first also means a
+     * suite-level filter match (which sets _filter_inherited_depth) cannot
+     * drag an unpersisted test back into a replay. */
+    if (_rerun_failed && !_rerun_admits_id(id))
+    {
+        return 0;
+    }
     if (_exclude_glob_count > 0 && _glob_list_matches_id(id, _exclude_globs, _exclude_glob_count))
     {
         return 0;
@@ -1278,6 +1800,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
             printf("*** test FAILURE: %s\r\n", name);
             outcome = LFG_CT_FAILED;
             message = _lfg_ct_failure_msg();
+            _fail_record_current(name);
         }
         else
         {
@@ -1343,6 +1866,22 @@ void lfg_ct_print_summary(void)
     if (_reporter && _reporter->on_run_complete)
     {
         _reporter->on_run_complete(_reporter->userdata);
+    }
+
+    /* Persist last, once every test has classified. A --rerun-failed run
+     * rewrites the file with *its* failures, so repeating the flag
+     * narrows toward what still fails instead of replaying the original
+     * set forever. --list returned above, so a listing never truncates
+     * the file the last real run left behind. */
+    if (_rerun_failed)
+    {
+        _rerun_report_unresolved();
+    }
+    if (0 != _state_write(_state_path, _effective_seed))
+    {
+        /* Advisory: an unwritable state file costs the next run its
+         * replay, not this run its verdict. */
+        fprintf(stderr, "*** WARNING: could not write rerun state file: %s\r\n", _state_path);
     }
 }
 
@@ -1538,6 +2077,21 @@ void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t
     int suppress_failure = 0;
 #endif
 
+    /* Fork mode's record of the child's disposition. The parent is the
+     * one that persists it -- the child's own copy of the failure set dies
+     * with its address space -- and it does so from the projected outcome,
+     * never from the child's stdout.
+     *
+     * Recorded ahead of the expect-failures suppression below on purpose:
+     * the persisted set mirrors what the run *classified*, and that
+     * suppression is a self-test-only exit-code device, not a
+     * reclassification. The self-test binaries clear the set before their
+     * summary so their own state file stays honest. */
+    if (LFG_CT_FAILED == outcome)
+    {
+        _fail_record_current(name);
+    }
+
     _tests_executed++;
     _assertions_executed += assertions_executed_delta;
     _assertions_passed += assertions_passed_delta;
@@ -1618,6 +2172,13 @@ int lfg_ct_return(void)
     if (_tests_failed > 0)
     {
         return -_tests_failed;
+    }
+    /* A replay that resolved none of its keys ran nothing at all. Exiting
+     * 0 there would read as "everything is fixed", which is the one
+     * outcome the user must never be handed silently. */
+    if (_rerun_unresolved_fatal)
+    {
+        return -1;
     }
     if (_strict_xpass && _tests_xpassed > 0)
     {
@@ -1735,6 +2296,49 @@ int lfg_ct_self_return_code(void)
 const char *lfg_ct_self_last_xfail_reason(void)
 {
     return _last_classified_xfail_reason;
+}
+
+void lfg_ct_self_rerun_note_failure(const char *file, const char *suite, const char *test)
+{
+    char id[LFG_CT_ID_MAX];
+
+    _id_build(id, sizeof(id), file, suite, test);
+    _fail_record_id(id);
+}
+
+void lfg_ct_self_rerun_reset(void)
+{
+    _fail_keys_clear();
+}
+
+int lfg_ct_self_rerun_recorded_count(void)
+{
+    return _fail_key_count;
+}
+
+int lfg_ct_self_rerun_unresolved_count(void)
+{
+    int unresolved = 0;
+    int i;
+
+    for (i = 0; i < _replay_key_count; i++)
+    {
+        if (!_replay_resolved[i])
+        {
+            unresolved++;
+        }
+    }
+    return unresolved;
+}
+
+int lfg_ct_self_rerun_key_count(void)
+{
+    return _replay_key_count;
+}
+
+int lfg_ct_self_state_write(const char *path, unsigned seed)
+{
+    return _state_write(path, seed);
 }
 
 #endif /* LFG_CTEST_SELF_TEST */

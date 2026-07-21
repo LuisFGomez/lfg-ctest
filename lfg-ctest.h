@@ -433,6 +433,25 @@ void lfg_ct_end(void);
  *                                  sequence. @c n is decimal and must fit an
  *                                  @c unsigned; 0 is a legal seed. Repeating
  *                                  the flag keeps the last value.
+ *   - @c --rerun-failed          : run only the entries the previous run
+ *                                  recorded as failed, restoring that run's
+ *                                  seed. The set and the seed come from the
+ *                                  state file every non-listing run writes
+ *                                  (see @ref lfg_ct_state_path). Combines
+ *                                  with @c --filter by intersection: the
+ *                                  replayed set is the candidate pool and the
+ *                                  filter narrows it. An explicit @c --seed
+ *                                  outranks the persisted one. A missing,
+ *                                  unreadable or malformed state file, and a
+ *                                  state file none of whose keys still name a
+ *                                  registered test, each produce a stderr
+ *                                  diagnostic and a non-zero exit -- never a
+ *                                  silent full-suite run.
+ *   - @c --state-file \<path\>    : read and write the rerun state at
+ *                                  @c path instead of the default
+ *                                  @c .lfg-ctest-last in the current
+ *                                  working directory. Repeating the flag
+ *                                  keeps the last value.
  *   - @c -v / @c --verbose       : stream a per-test @c START line before
  *                                  each test body is dispatched and a
  *                                  per-test outcome line (@c PASS / @c FAIL /
@@ -481,6 +500,25 @@ int lfg_ct_is_seed_set(void);
  *          @ref lfg_ct_is_seed_set to tell the two apart).
  */
 unsigned lfg_ct_get_seed(void);
+
+/** Query whether @c --rerun-failed was parsed.
+ *  @return 1 if the run is replaying the previous run's failures, 0 otherwise.
+ */
+int lfg_ct_is_rerun_failed(void);
+
+/** Path of the rerun state file this run reads and writes.
+ *
+ *  Every non-listing run rewrites this file from @ref lfg_ct_print_summary
+ *  with a format marker, the seed the run used, and one
+ *  @c \<file\>::\<suite\>::\<test\> id per failed test -- the same ids
+ *  @c --list emits. The records come from the runner's own classification,
+ *  not from parsed output, so they are identical under fork isolation and
+ *  with stdout redirected. @c --list neither writes nor truncates it.
+ *
+ *  @return The @c --state-file value, or @c ".lfg-ctest-last" by default.
+ *          Borrowed from @c argv when overridden; never @c NULL.
+ */
+const char *lfg_ct_state_path(void);
 
 /** Query whether a hypothetical test/suite with @p name would be executed by
  *  the runner under the currently parsed filter/exclude rules.
@@ -1054,6 +1092,38 @@ int lfg_ct_self_return_code(void);
  *  the caller's responsibility.
  */
 const char *lfg_ct_self_last_xfail_reason(void);
+
+/** Self-test hook: record @p file / @p suite / @p test into this run's
+ *  rerun failure set exactly as the classifier does on a FAILED outcome.
+ *  Lets the framework's own tests build a failure set without a genuine
+ *  failure (which expect-failures mode would suppress).
+ */
+void lfg_ct_self_rerun_note_failure(const char *file, const char *suite, const char *test);
+
+/** Self-test hook: drop the accumulated rerun failure set. Also how the
+ *  self-test binaries keep their own end-of-run state file honest after
+ *  driving intentional failures.
+ */
+void lfg_ct_self_rerun_reset(void);
+
+/** Self-test accessor: number of ids in this run's rerun failure set. */
+int lfg_ct_self_rerun_recorded_count(void);
+
+/** Self-test accessor: number of keys loaded from the state file under
+ *  @c --rerun-failed.
+ */
+int lfg_ct_self_rerun_key_count(void);
+
+/** Self-test accessor: how many loaded keys no registered test has
+ *  claimed so far this run.
+ */
+int lfg_ct_self_rerun_unresolved_count(void);
+
+/** Self-test hook: write the current rerun failure set to @p path under
+ *  @p seed, bypassing @ref lfg_ct_print_summary.
+ *  @return 0 on success, -1 if the file could not be written.
+ */
+int lfg_ct_self_state_write(const char *path, unsigned seed);
 
 #endif /* LFG_CTEST_SELF_TEST */
 

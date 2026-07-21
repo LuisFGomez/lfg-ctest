@@ -1,3 +1,7 @@
 /build/
 /tags
 /dist/
+
+# Default --rerun-failed state file. Unanchored: it lands in whatever
+# directory the binary was invoked from, not just the repo root.
+.lfg-ctest-last
