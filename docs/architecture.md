@@ -46,12 +46,11 @@ boundary and classifies the outcome afterwards:
    `_current_xfail_reason`, and the
    failure-message slot — an inline buffer plus an optional heap block
    for over-long messages, *moved* rather than copied so a nested
-   lifecycle never frees the outer test's text), then zero this level's
-   copy; and the outer
-   `_skip_env` + `_skip_env_active`
-   (so a nested `lfg_ct_test_impl` — the self-test pattern that drives mock
-   tests through the real runner — can't strand the outer body with an
-   overwritten `jmp_buf`).
+   lifecycle never frees the outer test's text), then zero the live
+   state so this level starts clean. Also snapshot the outer
+   `_skip_env` + `_skip_env_active` (so a nested `lfg_ct_test_impl` — the
+   self-test pattern that drives mock tests through the real runner —
+   can't strand the outer body with an overwritten `jmp_buf`).
 2. Set `_skip_env_active = 1`, `setjmp(_skip_env)`, and call `body`. Setup and
    teardown are the body's own concern, so `lfg_ct_skip` from anywhere in the
    body's dynamic extent (including a setup helper it called) `longjmp`s

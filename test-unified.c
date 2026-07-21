@@ -2144,9 +2144,13 @@ static void _disp_body_outer_xfail_then_nested(void)
 }
 
 /* The mirror case: the outer never fails and the nested test does. The
- * nested level's failure count and xfail mark must not leak outward. */
+ * outer marks itself xfail *before* the dispatch and never fails, so it
+ * must read XPASS; if the nested level's failure count leaked outward the
+ * outer would read XFAIL instead. The xfail mark also has to survive the
+ * nested lifecycle -- erasing it buckets the outer PASSED. */
 static void _disp_body_outer_clean_with_failing_nested(void)
 {
+    lfg_ct_xfail("outer must not inherit the nested level's failure");
     lfg_ct_test_impl(_disp_body_xfail_with_failure, "mock_nested_fails_alone");
 }
 
@@ -2314,10 +2318,11 @@ static void test_disposition_nested_failure_does_not_bleed_into_outer(void)
 
     lfg_ct_test_impl(_disp_body_outer_clean_with_failing_nested, "mock_outer_clean_nested_fails");
 
-    /* Exactly one xfail -- the nested test's. The outer neither failed nor
-     * inherited the nested level's xfail mark, so it bucketed PASSED. */
+    /* One xfail (the nested test's) and one xpass (the outer's). The outer
+     * kept its own xfail mark across the dispatch and did not inherit the
+     * nested level's failure count, so it bucketed XPASS. */
     ASSERT_INT_EQUAL(before_xfail + 1, lfg_ct_self_xfailed_count());
-    ASSERT_INT_EQUAL(before_xpass, lfg_ct_self_xpassed_count());
+    ASSERT_INT_EQUAL(before_xpass + 1, lfg_ct_self_xpassed_count());
     ASSERT_INT_EQUAL(before_failed, lfg_ct_self_failed_count());
     ASSERT_INT_EQUAL(before_asserts_failed, lfg_ct_self_assertions_failed());
 }
