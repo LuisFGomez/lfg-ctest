@@ -4019,13 +4019,63 @@ test_durations_orders_by_time_descending(void)
     ASSERT_INT_EQUAL(1, _DUR_MS(lfg_ct_self_durations_time_at(2)));
 
     /* The suite name rides along for the qualified <suite>::<test>
-     * rendering, and is legitimately absent for a top-level test. */
+     * rendering, and is legitimately absent for a top-level test --
+     * normalised to empty on the way into the table, which is what the
+     * print path keys the bare-name rendering off. */
     ASSERT_STR_EQUAL("suite_a", lfg_ct_self_durations_suite_at(2));
-    ASSERT_NULL(lfg_ct_self_durations_suite_at(0));
+    ASSERT_STR_EQUAL("", lfg_ct_self_durations_suite_at(0));
 
     /* Out-of-range ranks report so rather than reading past the table. */
     ASSERT_NULL(lfg_ct_self_durations_name_at(3));
     ASSERT_NULL(lfg_ct_self_durations_name_at(-1));
+
+    lfg_ct_self_durations_reset();
+}
+
+/* The table has to own its names. lfg_ct_test_impl / lfg_ct_test_impl_at
+ * are public and impose no lifetime requirement on the name they are
+ * handed, so table-driven registration out of a reused buffer is legal --
+ * and the entries are not read until the block prints, long after such a
+ * buffer has been overwritten or gone out of scope. Scribbling over the
+ * source buffers here is what makes a regression to borrowed pointers show
+ * up as a failure rather than as luck about what the stack still holds. */
+static void
+test_durations_copy_names_out_of_transient_buffers(void)
+{
+    char suite[64];
+    char test[64];
+
+    lfg_ct_self_durations_reset();
+
+    snprintf(suite, sizeof(suite), "%s", "suite_transient");
+    snprintf(test, sizeof(test), "%s", "test_transient");
+    lfg_ct_self_durations_note(suite, test, 0.010);
+
+    memset(suite, 'X', sizeof(suite) - 1);
+    suite[sizeof(suite) - 1] = '\0';
+    memset(test, 'Y', sizeof(test) - 1);
+    test[sizeof(test) - 1] = '\0';
+
+    ASSERT_STR_EQUAL("suite_transient", lfg_ct_self_durations_suite_at(0));
+    ASSERT_STR_EQUAL("test_transient", lfg_ct_self_durations_name_at(0));
+
+    lfg_ct_self_durations_reset();
+}
+
+/* A name past the copy width is truncated, not overrun. Cosmetic here --
+ * nothing keys off these -- but it pins that the bound is enforced. */
+static void
+test_durations_truncate_overlong_name(void)
+{
+    char test[512];
+
+    lfg_ct_self_durations_reset();
+
+    memset(test, 'a', sizeof(test) - 1);
+    test[sizeof(test) - 1] = '\0';
+    lfg_ct_self_durations_note("suite_a", test, 0.010);
+
+    ASSERT_INT_EQUAL(127, (int)strlen(lfg_ct_self_durations_name_at(0)));
 
     lfg_ct_self_durations_reset();
 }
@@ -4243,6 +4293,8 @@ static void suite_durations_tests(void)
     lfg_ct_test(test_durations_rejects_bad_arguments);
     lfg_ct_test(test_durations_reset_by_a_later_parse);
     lfg_ct_test(test_durations_orders_by_time_descending);
+    lfg_ct_test(test_durations_copy_names_out_of_transient_buffers);
+    lfg_ct_test(test_durations_truncate_overlong_name);
     lfg_ct_test(test_durations_ties_break_by_record_order);
     lfg_ct_test(test_durations_limit_beyond_test_count_lists_all);
     lfg_ct_test(test_durations_limit_narrows_the_block);
