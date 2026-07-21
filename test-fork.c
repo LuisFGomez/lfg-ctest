@@ -936,6 +936,96 @@ _run_long_message_case(lfg_ct_isolation_t isolation, int nested)
     }
 }
 
+/* ============================================================================
+ *  --rerun-failed persistence under fork isolation (#56)
+ * ========================================================================== */
+
+static void
+test_fork_failure_persists_for_rerun_with_redirected_stdout(void)
+{
+    /* The two conditions the feature has to survive together: the child
+     * process owns the failure, and stdout is a regular file rather than
+     * a TTY (i.e. every CI run). The record is taken from the outcome
+     * the parent projects in _lfg_ct_record_external, never from parsed
+     * output, so neither condition can produce the empty/partial state
+     * file #50 saw -- this asserts that on the real bytes.
+     *
+     * Same capture-child shape as the flush regression above: a real
+     * freopen'd stdout is the only honest repro, and it cannot be
+     * imposed on the outer binary without disturbing the rest of the
+     * run. The capture child writes the state file; the parent reads it
+     * back.
+     *
+     * The inner body aborts, so the FAILED outcome is synthesized by the
+     * parent-side signal path -- which is exactly the fork-mode record
+     * site under test. */
+    char out_tmpl[] = "/tmp/lfg-ctest-rerun-outXXXXXX";
+    char state_tmpl[] = "/tmp/lfg-ctest-rerun-stateXXXXXX";
+    char state[2048];
+    size_t n;
+    FILE *fp;
+    int fd;
+    pid_t pid;
+    int status = 0;
+
+    fd = mkstemp(out_tmpl);
+    ASSERT_GT(fd, -1);
+    close(fd);
+    fd = mkstemp(state_tmpl);
+    ASSERT_GT(fd, -1);
+    close(fd);
+
+    fflush(NULL);
+
+    pid = fork();
+    ASSERT_GT((int)pid, -1);
+    if (0 == pid)
+    {
+        /* CAPTURE CHILD. */
+        if (NULL == freopen(out_tmpl, "w", stdout))
+        {
+            _exit(2);
+        }
+        lfg_ct_self_rerun_reset();
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+        lfg_ct_expect_failures_begin();
+        lfg_ct_test_impl(_body_abort_crash, "fork_rerun_inner");
+        (void)lfg_ct_expect_failures_end();
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+
+        if (1 != lfg_ct_self_rerun_recorded_count())
+        {
+            _exit(3);
+        }
+        _exit((0 == lfg_ct_self_state_write(state_tmpl, 777U)) ? 0 : 4);
+    }
+
+    ASSERT_GT((int)waitpid(pid, &status, 0), -1);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_INT_EQUAL(0, WEXITSTATUS(status));
+
+    state[0] = '\0';
+    fp = fopen(state_tmpl, "r");
+    ASSERT_NOT_NULL(fp);
+    if (fp)
+    {
+        n = fread(state, 1, sizeof(state) - 1, fp);
+        state[n] = '\0';
+        fclose(fp);
+    }
+
+    /* Bare-name registration leaves the file component as the
+     * placeholder; the suite baton is live, so the key spells the
+     * enclosing suite. */
+    ASSERT_TRUE(NULL != strstr(state, "lfg-ctest-state 1\n"));
+    ASSERT_TRUE(NULL != strstr(state, "seed 777\n"));
+    ASSERT_TRUE(NULL != strstr(state,
+            "fail " LFG_CT_ID_NO_SUITE "::suite_fork_isolation_tests::fork_rerun_inner\n"));
+
+    remove(out_tmpl);
+    remove(state_tmpl);
+}
+
 static void
 test_long_message_survives_in_process_path(void)
 {
@@ -982,6 +1072,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_fork_xfail_round_trip);
     lfg_ct_test(test_fork_verbose_start_fires_once_in_parent);
     lfg_ct_test(test_fork_child_output_survives_non_tty_stdout);
+    lfg_ct_test(test_fork_failure_persists_for_rerun_with_redirected_stdout);
     lfg_ct_test(test_long_message_survives_in_process_path);
     lfg_ct_test(test_long_message_survives_fork_transport);
     lfg_ct_test(test_long_message_nested_preserves_outer_capture);
@@ -997,6 +1088,13 @@ main(int argc, char *argv[])
     lfg_ct_start();
     printf("\n--- FORK-PER-TEST ISOLATION SELF-TESTS ---\n");
     lfg_ct_suite(suite_fork_isolation_tests);
+
+    /* This binary drives intentional fork-mode FAILED outcomes, and the
+     * rerun recorder mirrors the classified outcome ahead of the
+     * expect-failures suppression that keeps them off the tally. Clear
+     * the set so the state file written below describes a green run,
+     * which is what this binary actually is. */
+    lfg_ct_self_rerun_reset();
     lfg_ct_print_summary();
     return lfg_ct_return();
 }

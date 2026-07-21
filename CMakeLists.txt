@@ -350,6 +350,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(UNIX)
         add_test(NAME test-id-roundtrip
             COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/check-id-roundtrip.sh $<TARGET_FILE:test-amalg>)
+
+        # Whether the rerun state file survives a redirected stdout, and
+        # whether --list leaves it alone (#56), are properties of a whole
+        # process -- the in-process tests cannot observe either.
+        add_test(NAME test-rerun-failed
+            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/check-rerun-failed.sh $<TARGET_FILE:test-amalg>)
     endif()
 
     # Custom target to run all tests

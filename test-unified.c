@@ -1488,6 +1488,417 @@ static void suite_filter_args_tests(void)
 }
 
 /* ============================================================================
+ * --rerun-failed tests (#56)
+ *
+ * The runner persists every run's seed and failed-test ids to a state
+ * file, and --rerun-failed replays exactly that set under that seed.
+ * These drive the real parse/load/admit path with a temp state file, so
+ * nothing here touches the .lfg-ctest-last this binary writes for real.
+ *
+ * The failure set is built with lfg_ct_self_rerun_note_failure rather
+ * than by failing a nested test: expect-failures mode zeroes the
+ * per-test failure counter, so a nested "failure" classifies as PASSED
+ * and would never reach the recorder. The hook is the recorder, so the
+ * write-then-replay round trips below still exercise the real thing on
+ * both sides of the file.
+ *
+ * Each test restores default parse state before returning -- registration
+ * in the enclosing suite dispatches immediately, so a --rerun-failed left
+ * in place would silently skip every following lfg_ct_test.
+ * ============================================================================ */
+
+#define _RERUN_TMP "test-rerun-state.tmp"
+
+static void
+_rerun_reset_args(void)
+{
+    char *argv[] = {(char *)"prog"};
+
+    (void)lfg_ct_parse_args(1, argv);
+    lfg_ct_self_rerun_reset();
+    remove(_RERUN_TMP);
+}
+
+static void
+_rerun_write_state(const char *content)
+{
+    FILE *fp = fopen(_RERUN_TMP, "w");
+
+    if (NULL != fp)
+    {
+        fputs(content, fp);
+        fclose(fp);
+    }
+}
+
+/* Slurp the temp state file into @p buf; empty string if unreadable. */
+static void
+_rerun_read_state(char *buf, size_t cap)
+{
+    FILE *fp = fopen(_RERUN_TMP, "r");
+    size_t n = 0;
+
+    buf[0] = '\0';
+    if (NULL == fp)
+    {
+        return;
+    }
+    n = fread(buf, 1, cap - 1, fp);
+    buf[n] = '\0';
+    fclose(fp);
+}
+
+/* Parse "--rerun-failed --state-file <tmp>" plus any extra flags. */
+static int
+_rerun_parse(const char *extra1, const char *extra2)
+{
+    char *argv[6];
+    int argc = 0;
+
+    argv[argc++] = (char *)"prog";
+    argv[argc++] = (char *)"--rerun-failed";
+    argv[argc++] = (char *)"--state-file";
+    argv[argc++] = (char *)_RERUN_TMP;
+    if (NULL != extra1)
+    {
+        argv[argc++] = (char *)extra1;
+    }
+    if (NULL != extra2)
+    {
+        argv[argc++] = (char *)extra2;
+    }
+    return lfg_ct_parse_args(argc, argv);
+}
+
+static void test_rerun_state_path_defaults_and_overrides(void)
+{
+    char *argv_default[] = {(char *)"prog"};
+
+    ASSERT_INT_EQUAL(0, lfg_ct_parse_args(1, argv_default));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_rerun_failed());
+    ASSERT_STR_EQUAL(".lfg-ctest-last", lfg_ct_state_path());
+
+    _rerun_write_state("lfg-ctest-state 1\nseed 5\n");
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_rerun_failed());
+    ASSERT_STR_EQUAL(_RERUN_TMP, lfg_ct_state_path());
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_replays_exactly_the_persisted_set(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 11\n"
+                       "fail alpha.c::suite_one::test_x\n"
+                       "fail beta.c::suite_two::test_y\n");
+
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_key_count());
+
+    /* Exactly the persisted ids, and nothing else -- not a same-named
+     * test in another file, not a sibling in the same suite. */
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_two", "test_y"));
+    ASSERT_FALSE(lfg_ct_id_runs("gamma.c", "suite_one", "test_x"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_z"));
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_restores_persisted_seed(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\nseed 13579\nfail alpha.c::s::t\n");
+
+    /* Replaying the selection without the conditions it failed under is
+     * not a reproduction, so the seed rides in the same file. */
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(1, lfg_ct_is_seed_set());
+    ASSERT_UINT_EQUAL(13579U, lfg_ct_get_seed());
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_explicit_seed_overrides_persisted(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\nseed 13579\nfail alpha.c::s::t\n");
+
+    /* The flag the user typed wins, in either spelling order -- the state
+     * file is loaded after the whole argv is consumed. */
+    ASSERT_INT_EQUAL(0, _rerun_parse("--seed", "99"));
+    ASSERT_UINT_EQUAL(99U, lfg_ct_get_seed());
+
+    {
+        char *argv[] = {(char *)"prog", (char *)"--seed", (char *)"99", (char *)"--rerun-failed",
+                (char *)"--state-file", (char *)_RERUN_TMP};
+
+        ASSERT_INT_EQUAL(0, lfg_ct_parse_args(6, argv));
+        ASSERT_UINT_EQUAL(99U, lfg_ct_get_seed());
+    }
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_intersects_with_filter(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 3\n"
+                       "fail alpha.c::suite_one::test_x\n"
+                       "fail alpha.c::suite_one::test_y\n");
+
+    /* Preference (1) on the issue: compose rather than reject. The replay
+     * set is the candidate pool; the filter narrows it further. */
+    ASSERT_INT_EQUAL(0, _rerun_parse("--filter", "test_x"));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_y"));
+
+    /* The filter cannot widen the replay: a match outside the persisted
+     * set stays out. */
+    ASSERT_INT_EQUAL(0, _rerun_parse("--filter", "*"));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_never_failed"));
+
+    /* Exclude stays decisive on top of the intersection. */
+    ASSERT_INT_EQUAL(0, _rerun_parse("--filter-exclude", "test_x"));
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_y"));
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_empty_failure_set_selects_nothing(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\nseed 8\n");
+
+    /* Previous run was green: a clean parse, zero keys, nothing admitted,
+     * and no error -- the run says so and exits 0. */
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_key_count());
+    ASSERT_UINT_EQUAL(8U, lfg_ct_get_seed());
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_missing_state_file_fails(void)
+{
+    remove(_RERUN_TMP);
+
+    /* The worst outcome would be falling through to the whole suite while
+     * the user believes they narrowed the run, so this is an error. */
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_is_rerun_failed());
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_malformed_state_file_fails(void)
+{
+    /* Not a state file at all. */
+    _rerun_write_state("garbage\n");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* Right marker, wrong version. */
+    _rerun_write_state("lfg-ctest-state 99\nseed 1\n");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* Empty file -- no marker line to read. */
+    _rerun_write_state("");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* No seed record: a replay without the seed is not a reproduction. */
+    _rerun_write_state("lfg-ctest-state 1\nfail alpha.c::s::t\n");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* Unparseable seed. */
+    _rerun_write_state("lfg-ctest-state 1\nseed -4\n");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* Unknown record type. */
+    _rerun_write_state("lfg-ctest-state 1\nseed 1\nbogus alpha.c::s::t\n");
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_malformed_file_applies_nothing(void)
+{
+    /* A half-parsed file must not narrow the run: the good record ahead
+     * of the bad one is discarded along with it, rather than leaving a
+     * partial selection the user would read as their whole failure set. */
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 2\n"
+                       "fail alpha.c::suite_one::test_x\n"
+                       "bogus record\n");
+
+    ASSERT_INT_NOT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_self_rerun_key_count());
+    ASSERT_INT_EQUAL(0, lfg_ct_is_rerun_failed());
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_unknown_key_leaves_the_rest_runnable(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 4\n"
+                       "fail alpha.c::suite_one::test_still_here\n"
+                       "fail alpha.c::suite_one::test_was_renamed\n");
+
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_unresolved_count());
+
+    /* One key still names a registered test; probing it marks it
+     * resolved. The other never resolves -- the run warns about it at
+     * summary time and replays the remainder rather than aborting. */
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_still_here"));
+    ASSERT_INT_EQUAL(1, lfg_ct_self_rerun_unresolved_count());
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_state_write_carries_marker_seed_and_keys(void)
+{
+    char buf[512];
+
+    lfg_ct_self_rerun_reset();
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_x");
+    lfg_ct_self_rerun_note_failure("beta.c", NULL, "test_y");
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_recorded_count());
+
+    /* Repeats are folded: a nested dispatch can classify the same id
+     * twice, and the file is a set. */
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_x");
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_recorded_count());
+
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 24680U));
+    _rerun_read_state(buf, sizeof(buf));
+
+    ASSERT_STR_EQUAL("lfg-ctest-state 1\n"
+                     "seed 24680\n"
+                     "fail alpha.c::suite_one::test_x\n"
+                     "fail beta.c::" LFG_CT_ID_NO_SUITE "::test_y\n",
+            buf);
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_write_then_replay_round_trip(void)
+{
+    lfg_ct_self_rerun_reset();
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_x");
+    lfg_ct_self_rerun_note_failure("beta.c", "suite_two", "test_y");
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 31415U));
+    lfg_ct_self_rerun_reset();
+
+    /* The whole feature in one gesture: what the run recorded is what the
+     * next --rerun-failed replays, under the seed it recorded. */
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_UINT_EQUAL(31415U, lfg_ct_get_seed());
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_key_count());
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_TRUE(lfg_ct_id_runs("beta.c", "suite_two", "test_y"));
+    ASSERT_FALSE(lfg_ct_id_runs("gamma.c", "suite_three", "test_z"));
+
+    _rerun_reset_args();
+}
+
+static void test_rerun_successive_cycles_narrow(void)
+{
+    /* Cycle 1: two failures recorded and persisted. */
+    lfg_ct_self_rerun_reset();
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_x");
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_y");
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 1U));
+    lfg_ct_self_rerun_reset();
+
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_INT_EQUAL(2, lfg_ct_self_rerun_key_count());
+
+    /* Cycle 2: the replay fixed one of them, so the rerun run rewrites
+     * the file with only its own failure. Converging, not replaying the
+     * original set forever. */
+    lfg_ct_self_rerun_note_failure("alpha.c", "suite_one", "test_y");
+    ASSERT_INT_EQUAL(0, lfg_ct_self_state_write(_RERUN_TMP, 2U));
+    lfg_ct_self_rerun_reset();
+
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+    ASSERT_UINT_EQUAL(2U, lfg_ct_get_seed());
+    ASSERT_INT_EQUAL(1, lfg_ct_self_rerun_key_count());
+    ASSERT_FALSE(lfg_ct_id_runs("alpha.c", "suite_one", "test_x"));
+    ASSERT_TRUE(lfg_ct_id_runs("alpha.c", "suite_one", "test_y"));
+
+    _rerun_reset_args();
+}
+
+/* Inner bodies driven through the real runner by the test below; the
+ * counters are what prove the unpersisted body was never entered. */
+static int _rerun_ran_persisted = 0;
+static int _rerun_ran_other = 0;
+
+static void
+_rerun_body_persisted(void)
+{
+    _rerun_ran_persisted++;
+}
+
+static void
+_rerun_body_other(void)
+{
+    _rerun_ran_other++;
+}
+
+static void test_rerun_runner_skips_unpersisted_test_body(void)
+{
+    _rerun_write_state("lfg-ctest-state 1\n"
+                       "seed 6\n"
+                       "fail " LFG_CT_ID_NO_SUITE "::suite_rerun_failed_tests::rerun_inner_persisted\n");
+
+    _rerun_ran_persisted = 0;
+    _rerun_ran_other = 0;
+    ASSERT_INT_EQUAL(0, _rerun_parse(NULL, NULL));
+
+    /* Admission is one thing; not dispatching the body is what actually
+     * saves the two minutes. Bare-name registration leaves the file
+     * component as the placeholder; the suite baton is live, so the
+     * persisted key above spells the enclosing suite. */
+    lfg_ct_test_impl(_rerun_body_persisted, "rerun_inner_persisted");
+    lfg_ct_test_impl(_rerun_body_other, "rerun_inner_other");
+
+    _rerun_reset_args();
+
+    ASSERT_INT_EQUAL(1, _rerun_ran_persisted);
+    ASSERT_INT_EQUAL(0, _rerun_ran_other);
+}
+
+static void suite_rerun_failed_tests(void)
+{
+    lfg_ct_test(test_rerun_state_path_defaults_and_overrides);
+    lfg_ct_test(test_rerun_replays_exactly_the_persisted_set);
+    lfg_ct_test(test_rerun_restores_persisted_seed);
+    lfg_ct_test(test_rerun_explicit_seed_overrides_persisted);
+    lfg_ct_test(test_rerun_intersects_with_filter);
+    lfg_ct_test(test_rerun_empty_failure_set_selects_nothing);
+    lfg_ct_test(test_rerun_missing_state_file_fails);
+    lfg_ct_test(test_rerun_malformed_state_file_fails);
+    lfg_ct_test(test_rerun_malformed_file_applies_nothing);
+    lfg_ct_test(test_rerun_unknown_key_leaves_the_rest_runnable);
+    lfg_ct_test(test_rerun_state_write_carries_marker_seed_and_keys);
+    lfg_ct_test(test_rerun_write_then_replay_round_trip);
+    lfg_ct_test(test_rerun_successive_cycles_narrow);
+    lfg_ct_test(test_rerun_runner_skips_unpersisted_test_body);
+
+    /* Nothing above may leak a --rerun-failed into the remaining suites;
+     * each test resets, and this backstop covers an early return. */
+    {
+        char *reset_argv[] = {(char *)"prog"};
+
+        (void)lfg_ct_parse_args(1, reset_argv);
+        lfg_ct_self_rerun_reset();
+    }
+}
+
+/* ============================================================================
  * skip / xfail / xpass disposition tests
  *
  * These exercise lfg_ct_skip and lfg_ct_xfail by running a *nested*
@@ -2302,6 +2713,10 @@ int main(int argc, char *argv[])
     printf("\n--- SUITE 6: REPORTER CALLBACK CONTRACT TESTS ---\n");
     printf("(Verifies lfg_ct_set_reporter / on_record / on_run_complete wiring)\n");
     lfg_ct_suite(suite_reporter_tests);
+
+    printf("\n--- SUITE 4b: --rerun-failed / --state-file TESTS ---\n");
+    printf("(Verifies failure persistence, replay selection, and seed restore)\n");
+    lfg_ct_suite(suite_rerun_failed_tests);
 
     printf("\n--- SUITE 7: -v / --verbose MODE TESTS ---\n");
     printf("(Verifies verbose flag parsing + on_test_start chaining)\n");
