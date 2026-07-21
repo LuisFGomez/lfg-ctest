@@ -1024,6 +1024,114 @@ test_fork_failure_persists_for_rerun_with_redirected_stdout(void)
 }
 
 static void
+test_fork_failure_reaches_failgroup_identically_to_in_process(void)
+{
+    /* Covers the _lfg_ct_record_external feed site into the failure-summary
+     * accumulator, and #57's "fork mode produces the identical block"
+     * criterion, on the real bytes rather than by hand.
+     *
+     * The site sits *below* the expect-failures suppression (unlike the
+     * rerun recorder, which deliberately sits above it), so it cannot be
+     * reached from a driver that wraps the inner test the way the rest of
+     * this file does -- a suppressed FAILED outcome never gets there. The
+     * capture-child shape is what makes it reachable: the child drives a
+     * genuinely unsuppressed failure, so its own tallies go red, but it
+     * _exit()s with a verdict code and never reaches a summary, leaving
+     * the outer binary green.
+     *
+     * Running the *same body* twice, once per isolation mode, is what
+     * makes the comparison sharp: same assertion, same line, so the two
+     * origins must come out byte-identical or the parent's projected
+     * message has diverged from the in-process one. */
+    char out_tmpl[] = "/tmp/lfg-ctest-failgroup-outXXXXXX";
+    char inproc_origin[256];
+    const char *origin;
+    const char *name;
+    int fd;
+    pid_t pid;
+    int status = 0;
+
+    fd = mkstemp(out_tmpl);
+    ASSERT_GT(fd, -1);
+    close(fd);
+
+    fflush(NULL);
+
+    pid = fork();
+    ASSERT_GT((int)pid, -1);
+    if (0 == pid)
+    {
+        /* CAPTURE CHILD. Its stdout carries two real failure reports;
+         * redirect so they cannot be mistaken for the outer run's. */
+        if (NULL == freopen(out_tmpl, "w", stdout))
+        {
+            _exit(2);
+        }
+
+        /* Leg 1: in-process, the reference rendering. */
+        lfg_ct_self_failgroup_reset();
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+        lfg_ct_test_impl(_body_flush_detail_failure, "failgroup_inner");
+
+        if (1 != lfg_ct_self_failgroup_count() || 1 != lfg_ct_self_failgroup_total())
+        {
+            _exit(3);
+        }
+        origin = lfg_ct_self_failgroup_origin_at(0);
+        if (NULL == origin)
+        {
+            _exit(4);
+        }
+        /* Copy before the reset below: the accessor points into the table. */
+        snprintf(inproc_origin, sizeof(inproc_origin), "%s", origin);
+
+        /* The reference must itself be a real location, not the
+         * "(unknown)" fallback -- otherwise leg 2 could match it by both
+         * paths failing to parse. */
+        if (NULL == strstr(inproc_origin, "in _body_flush_detail_failure()"))
+        {
+            _exit(5);
+        }
+
+        /* Leg 2: the same body under fork isolation, so the outcome is
+         * synthesized by the parent from the piped message. */
+        lfg_ct_self_failgroup_reset();
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK);
+        lfg_ct_test_impl(_body_flush_detail_failure, "failgroup_inner");
+        lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+
+        if (1 != lfg_ct_self_failgroup_count() || 1 != lfg_ct_self_failgroup_total())
+        {
+            _exit(6);
+        }
+        if (0 != lfg_ct_self_failgroup_dropped())
+        {
+            _exit(7);
+        }
+
+        name = lfg_ct_self_failgroup_name_at(0);
+        if (NULL == name || 0 != strcmp(name, "failgroup_inner"))
+        {
+            _exit(8);
+        }
+
+        origin = lfg_ct_self_failgroup_origin_at(0);
+        if (NULL == origin || 0 != strcmp(origin, inproc_origin))
+        {
+            _exit(9);
+        }
+
+        _exit(0);
+    }
+
+    ASSERT_GT((int)waitpid(pid, &status, 0), -1);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_INT_EQUAL(0, WEXITSTATUS(status));
+
+    remove(out_tmpl);
+}
+
+static void
 test_long_message_survives_in_process_path(void)
 {
     /* Sites (1) and (2): the stdout failure line and the reporter
@@ -1070,6 +1178,7 @@ suite_fork_isolation_tests(void)
     lfg_ct_test(test_fork_verbose_start_fires_once_in_parent);
     lfg_ct_test(test_fork_child_output_survives_non_tty_stdout);
     lfg_ct_test(test_fork_failure_persists_for_rerun_with_redirected_stdout);
+    lfg_ct_test(test_fork_failure_reaches_failgroup_identically_to_in_process);
     lfg_ct_test(test_long_message_survives_in_process_path);
     lfg_ct_test(test_long_message_survives_fork_transport);
     lfg_ct_test(test_long_message_nested_preserves_outer_capture);
