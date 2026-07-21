@@ -43,6 +43,7 @@ The flags it recognises:
 | `--filter <glob>` | Run only entries whose id matches the `fnmatch(3)` glob (`*`, `?`, `[...]`), which addresses as many trailing `::`-components as it spells out. Repeat to OR-combine. |
 | `--filter-exclude <glob>` | Skip entries whose id matches, same rule. Repeat to OR-combine. **Exclude wins** if both match the same entry. |
 | `--strict-xpass` | Make an otherwise-clean run exit non-zero if any test XPASSed (see [chapter 3](03-skip-xfail-xpass.md)). |
+| `--durations <n>` | After the run, list the `n` slowest tests; `0` lists all (see [Finding the slow tests](#finding-the-slow-tests) below). |
 | `--seed <n>` | Seed `rand(3)` with `n` to replay a previous run's random scenarios (see [Reproducing a randomized run](#reproducing-a-randomized-run) below). |
 | `-v`, `--verbose` | Stream a per-test progress line. |
 | `-q`, `--quiet` | Reduce output to failures plus the final summary (see [Quiet progress](#quiet-progress) below). |
@@ -261,6 +262,37 @@ worse than one extra line, and that seed is what you hand back to `--seed`
 and `-v` is not an error — the last one on the command line wins. Verbosity is
 presentation only: exit codes, `--list` output, and what a consumer reporter
 receives do not change with it.
+
+## Finding the slow tests
+
+A suite that takes two minutes tells you nothing about *why*. `--durations
+<n>` ranks the run's tests by elapsed time and prints the slowest `n` after
+the summary, the way `pytest --durations` does:
+
+```
+$ ./test_indicators --durations 5
+*** Executed 1841 assertions in 655 tests. Failures: 0, Skipped: 0, XFail: 0, XPass: 0
+*** Testing complete. Result: PASS
+*** Slowest 5 of 655 tests:
+***  31240.118 ms  suite_e2e::test_e2e_full_pipeline
+***  28004.771 ms  suite_e2e::test_e2e_lagged
+***  27991.006 ms  suite_e2e::test_e2e_validation
+***     18.442 ms  suite_mtf::test_mtf_filter
+***      9.117 ms  test_top_level_smoke
+```
+
+That is the answer the tally alone cannot give: this suite is not slow
+because it has 655 tests, it is slow because three of them take half a
+minute each. Combine it with `--filter` to confirm — `--filter 'suite_e2e*'`
+and the two minutes are almost all still there.
+
+`--durations 0` lists every test that ran, which is what you want when you
+are about to diff two runs rather than eyeball a top-5. An `n` larger than
+the number of tests that ran simply lists all of them.
+
+The flag is opt-in; without it the output is exactly what it was. Times are
+wall-clock on both dispatch paths, so a test that sleeps or waits on I/O
+reports the time it actually took rather than the CPU it burned.
 
 ## Reproducing a randomized run
 

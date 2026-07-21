@@ -63,7 +63,7 @@ int main(void)
 |----------|-------------|
 | `lfg_ct_start()` | Initialize test framework (call before any tests) |
 | `lfg_ct_end()` | Finalize test framework |
-| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `-x` / `--fail-fast` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), [Isolation modes](#isolation-modes), [Stopping at the first failure](#stopping-at-the-first-failure), and [Skip, xfail, xpass](#skip-xfail-xpass). |
+| `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `-x` / `--fail-fast` / `--durations <n>` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), [Quiet output](#quiet-output), [Isolation modes](#isolation-modes), [Stopping at the first failure](#stopping-at-the-first-failure), [Slowest tests](#slowest-tests), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
 | `lfg_ct_verbosity()` | Returns the `lfg_ct_verbosity_t` level in effect — `LFG_CT_VERBOSITY_QUIET` (0), `_DEFAULT` (1), or `_VERBOSE` (2). See [Quiet output](#quiet-output). |
 | `lfg_ct_is_verbose()` | Returns 1 if the level is at least `LFG_CT_VERBOSITY_VERBOSE`, 0 otherwise. Derived from `lfg_ct_verbosity()`; semantics unchanged from when verbosity was a single boolean. |
@@ -189,6 +189,7 @@ Recognized flags:
 | `--filter-exclude <glob>` | Skip entries whose id matches the glob, same component-depth rule. Same repeat / OR semantics. **Exclude wins** when both `--filter` and `--filter-exclude` match the same entry. |
 | `--strict-xpass` | Flip an otherwise-clean run that contains one or more `xpass` outcomes to a non-zero exit code. Permissive (no exit-code effect) by default. See [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `-x`, `--fail-fast` | Stop the run at the first failing test. Scope is the **whole run**, not the enclosing suite. Off by default; the CLI face of `lfg_ct_set_fail_fast`. See [Stopping at the first failure](#stopping-at-the-first-failure). |
+| `--durations <n>` | After the run, print the `n` slowest tests with their elapsed times. `0` prints every retained test and is a legal value, so a missing, non-numeric, negative, or out-of-range value is an error rather than a silent coercion to it. Repeating the flag keeps the last value. Off by default; without it the run's output is unchanged. See [Slowest tests](#slowest-tests). |
 | `--seed <n>` | Seed `rand(3)` with `n` instead of a generated value, so a run that used `rand()` can be replayed exactly. Decimal, must fit an `unsigned`; `0` is a legal seed. Repeating the flag keeps the last value. A missing, non-numeric, or out-of-range value is an error. See [Reproducing a randomized run](#reproducing-a-randomized-run). |
 | `--rerun-failed` | Run only the entries the previous run recorded as failed, restoring that run's seed. Intersects with `--filter` — the replayed set is the candidate pool and the filter narrows it further. An explicit `--seed` outranks the persisted one. A missing, malformed, or wholly stale state file is an error, never a silent full-suite run. See [Rerunning just the failures](#rerunning-just-the-failures). |
 | `--state-file <path>` | Read and write the rerun state at `path` instead of `.lfg-ctest-last` in the current working directory. Repeating the flag keeps the last value. |
@@ -489,8 +490,9 @@ in the spirit of cmake's `ctest -V`. With the flag set:
 
 The disposition keywords match the labels used elsewhere in the
 runner. Elapsed time is wall-clock milliseconds with sub-millisecond
-precision; the source clock is the same `clock(3)`-based seconds
-counter that feeds the reporter's `time_sec` field.
+precision; the source is the same `clock_gettime(CLOCK_MONOTONIC)`
+seconds counter that feeds the reporter's `time_sec` field and the
+[`--durations`](#slowest-tests) ranking.
 
 Verbose output is built on top of the [reporter contract](#reporter-callback)
 as the framework's first built-in reporter: enabling `--verbose`
@@ -684,6 +686,74 @@ Use `lfg_ct_xfail` when a test is documented as broken but you want to
 keep exercising the code path; promote to a real failure later by
 deleting the `lfg_ct_xfail` call (or pass `--strict-xpass` in CI to
 catch the moment the bug fixes itself).
+
+### Slowest tests
+
+`--durations <n>` answers "what makes this suite slow?" without reading
+every `-v` line by eye. It prints a ranking after the summary:
+
+```
+$ ./test_indicators --durations 5
+*** Executed 1111 assertions in 655 tests. Failures: 0, Skipped: 0, XFail: 0, XPass: 0
+*** Testing complete. Result: PASS
+*** Slowest 5 of 655 tests:
+***  31240.118 ms  suite_e2e::test_e2e_full_pipeline
+***  28004.771 ms  suite_e2e::test_e2e_lagged
+***  27991.006 ms  suite_e2e::test_e2e_validation
+***     18.442 ms  suite_mtf::test_mtf_filter
+***      9.117 ms  test_top_level_smoke
+```
+
+That distinguishes "slow because 655 tests" from "slow because three
+tests each take 30 seconds", which the tally alone cannot.
+
+- **Order is elapsed time descending**, ties broken by classification
+  order so the block is byte-identical across runs of the same set.
+  Equal times are common at millisecond granularity for a suite of fast
+  tests, so the tie-break is what keeps the block diffable.
+- **`--durations 0` lists every retained test.** An `n` larger than the
+  number of tests that ran lists all of them — no padding, no error.
+- **Every outcome is ranked**, not just passes: a slow SKIP or XFAIL
+  answers the same question a slow PASS does.
+- **Times render as `%.3f ms`**, the same precision and unit as the
+  `-v` per-test banner, so the two renderings of one number agree.
+- Tests are named `<suite>::<test>`, or bare for a top-level test.
+- A run that executed nothing — `--list`, or a filter that admitted no
+  entry — emits no block rather than a bare header. Without the flag the
+  output is byte-identical to a build that predates the feature.
+- Fork mode (`LFG_CT_ISOLATE_FORK`) produces the identical block. Like
+  the failure summary, the ranking is accumulated in the parent, fed by
+  both the in-process classification path and the fork projection path.
+
+The block prints **after** the `*** Testing complete.` verdict, unlike
+the failure summary, which precedes it. The verdict-stays-last rule
+exists so tooling that tails or greps a default run's log still finds
+it; `--durations` is opt-in, so only a run that asked for the ranking
+sees anything after the verdict. It still lands ahead of the reporter's
+`on_run_complete`, so a buffering reporter's flush stays last.
+
+Entries are held in a fixed-size table (`LFG_CT_DURATIONS_MAX`, 1024),
+matching the runner's allocation-free style. Tests beyond that many still
+run and still classify — only their ranking is lost, and the block says
+so rather than silently truncating:
+
+```
+*** Slowest 5 of 1024 tests:
+...
+*** 37 further tests unranked: the durations cap (LFG_CT_DURATIONS_MAX = 1024) was reached
+```
+
+> **Clock semantics.** As of this feature the in-process dispatch path
+> measures wall time via `clock_gettime(CLOCK_MONOTONIC)`; it previously
+> used `clock()`, i.e. CPU time. Wall time is what `lfg_ct_record_t.time_sec`
+> has always been documented as, and what the fork path has always
+> measured — a test that sleeps or blocks on I/O for 30 seconds used to
+> report ~0 in-process, which would have put exactly the slow tests this
+> report exists to surface at the *bottom* of the ranking. The observable
+> effect for existing consumers: `-v` elapsed figures and the `time`
+> attribute the `contrib/junit-xml` reporter writes both move upward for
+> anything that blocks. No signature or struct layout changed. A target
+> without `CLOCK_MONOTONIC` falls back to `clock()`.
 
 ### Isolation modes
 

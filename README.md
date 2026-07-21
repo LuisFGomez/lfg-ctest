@@ -18,9 +18,9 @@ read/write actions, and a per-call callback hook.
   heap state can share that same single-call teardown.
 - `lfg_ct_parse_args(argc, argv)` handles `--list` / `--filter <glob>` /
   `--filter-exclude <glob>` / `--strict-xpass` / `-x` / `--fail-fast` /
-  `--seed <n>` / `--rerun-failed` / `--state-file <path>` / `-v` / `-q` /
-  `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` so one binary
-  can back many `ctest` entries.
+  `--durations <n>` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` /
+  `-v` / `-q` / `--verbosity <n>` / `--isolation <mode>` / `--timeout <ms>` so
+  one binary can back many `ctest` entries.
 - Every entry has an id — `<file>::<suite>::<test>` — that `--list` emits and
   `--filter` matches by addressing as many trailing `::`-components as the
   glob spells out, so a bare name still works unchanged and a fully-qualified
@@ -35,6 +35,10 @@ read/write actions, and a per-call callback hook.
   not just the enclosing suite — matching `pytest -x` and `go test -failfast`.
   The summary says the run stopped early, so a short tally is never mistaken
   for tests that vanished.
+- `--durations <n>` ranks the run's `n` slowest tests after the summary,
+  pytest-style (`0` lists all) — so a two-minute suite says whether it is
+  slow because of 655 tests or because of three that take 30 seconds each.
+  Elapsed time is wall-clock on both dispatch paths.
 - `lfg_ct_skip("reason")` and `lfg_ct_xfail("reason")` bucket tests as
   SKIP / XFAIL / XPASS without polluting the pass/fail tally.
 - CMake `add_subdirectory` integration, or single-header amalgamation

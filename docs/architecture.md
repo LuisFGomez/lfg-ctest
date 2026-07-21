@@ -503,6 +503,82 @@ path. The direct-set bridge is the minimum surface needed to keep
 the verbose chain quiet in the child; the rest of the fork TU is
 unchanged.
 
+## Slowest-test durations (`--durations`)
+
+### Why it is not a reporter
+
+The ranking observes exactly the events an `on_record` reporter would,
+so layering a third built-in reporter onto the chain was the obvious
+shape — and is not the one used. Two reasons:
+
+- The chain is two deep by construction (`_verbose_reporter` delegating
+  to `_user_reporter`), resolved by `_reporter_activate` from two
+  inputs. A third level means a third resolution case and a deeper
+  delegation to reason about for a feature that never prints during the
+  run.
+- `_user_reporter` is a public slot. A consumer calling
+  `lfg_ct_set_reporter` mid-run would silently unhook an internal
+  accumulator riding in that chain, and the failure mode — an empty
+  durations block on a run that looked entirely normal — gives no
+  indication of what happened.
+
+Instead `_durations_record` is called directly from the two record
+fan-out sites, which is where the failure summary's accumulator already
+feeds from.
+
+### The two feed sites
+
+Both must call in, and forgetting the second is the silent failure this
+design invites:
+
+1. `_lfg_ct_test_impl_inproc`'s classification block, for an in-process
+   test.
+2. `_lfg_ct_record_external`, for a fork-isolated one. The parent
+   projects the child's classification, so this is the only place a
+   forked test's elapsed time reaches the runner — miss it and a
+   `LFG_CT_ISOLATE_FORK` run reports nothing.
+
+Collection is unconditional; `--durations` gates only the report. Gating
+collection would make the block's contents depend on whether
+`lfg_ct_parse_args` ran before or after the first dispatch, and the cost
+avoided is three stores per test.
+
+### Storage
+
+`_durations[LFG_CT_DURATIONS_MAX]`, fixed-cap static, matching
+`LFG_CT_FILTER_MAX` and the failgroup table — the runner's run-scoped
+tables do not allocate. Unlike the failgroup table this one **borrows**
+its name pointers rather than copying: both names originate in the
+registration macros with program lifetime, and neither is a key here
+(entries are ranked by time and printed, never compared), so the
+width bound that forces the failgroup to copy its grouping key does not
+apply. `record->message` is deliberately not retained — the header
+documents it as valid for the callback's duration only.
+
+`_durations_order` is the same stable insertion sort `_failgroup_order`
+uses, which is what makes the tie-break (classification order) fall out
+of the table's build order rather than needing a second key.
+
+### Clock semantics
+
+The in-process path measured `clock()` — CPU time — until this feature,
+while the fork path has always measured `clock_gettime(CLOCK_MONOTONIC)`.
+Ranking across the two would have compared different quantities, and a
+CPU clock reports ~0 for a test that sleeps or blocks on I/O, sorting
+exactly the slow-because-blocking tests to the *bottom*. Both paths now
+go through `_monotonic_sec()`, which also brings the in-process path onto
+the "Elapsed wall-clock seconds" contract `lfg-ctest.h` already stated
+for `lfg_ct_record_t.time_sec`.
+
+`lfg-ctest.c` gained the same `#ifndef _POSIX_C_SOURCE` guard the fork TU
+carries, so a strict `-std=c99` consumer still sees `clock_gettime`. A
+target without `CLOCK_MONOTONIC` falls back to `clock()` at the old
+semantics.
+
+The observable consequence for existing consumers is that `-v` elapsed
+figures and the `time` attribute `contrib/junit-xml` writes both move
+upward for anything that blocks. No signature or struct layout changed.
+
 ## Mock system (`lfg-ctest-mock.[ch]`)
 
 ### Macro fanout
