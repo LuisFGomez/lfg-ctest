@@ -1467,6 +1467,8 @@ _filter_print_usage(const char *progname)
             "  -v, --verbose            Stream per-test START / outcome lines with elapsed ms\r\n"
             "  -q, --quiet              Print only failures, the seed, and the final summary\r\n"
             "  --verbosity <n>          Set the level that -q / -v alias: 0 quiet, 1 default, 2 verbose\r\n"
+            "  --isolation <mode>       Dispatch tests in-process (none) or fork-per-test (fork)\r\n"
+            "  --timeout <ms>           Per-test timeout under fork isolation; 0 disables it\r\n"
             "-q and -v are one axis; the last of them on the command line wins.\r\n"
             "Verbosity is presentation only -- exit codes, --list output, and the\r\n"
             "records an installed reporter receives are identical at every level.\r\n"
@@ -1475,7 +1477,10 @@ _filter_print_usage(const char *progname)
             "trailing ::-components as it spells out, so a bare test name still\r\n"
             "works and * never crosses a ::.\r\n"
             "--filter and --filter-exclude may be repeated; exclude wins on overlap.\r\n"
-            "--rerun-failed intersects with --filter: the filter narrows the replayed set.\r\n",
+            "--rerun-failed intersects with --filter: the filter narrows the replayed set.\r\n"
+            "--isolation and --timeout drive the same state the lfg_ct_set_isolation and\r\n"
+            "lfg_ct_set_fork_timeout_ms setters own, so a later setter call overrides the\r\n"
+            "command line; call lfg_ct_parse_args last for the CLI to win.\r\n",
             progname ? progname : "test", LFG_CT_STATE_PATH_DEFAULT);
 }
 
@@ -1484,6 +1489,15 @@ lfg_ct_parse_args(int argc, char *argv[])
 {
     const char *progname;
     int i;
+
+    /* Staged rather than applied at the flag: _isolation and
+     * _fork_timeout_ms are API-owned, so a parse that fails partway
+     * must leave the programmatic configuration exactly as it found
+     * it. Committed in one block once the whole argv reads clean. */
+    int isolation_set = 0;
+    lfg_ct_isolation_t isolation_value = LFG_CT_ISOLATE_NONE;
+    int timeout_set = 0;
+    unsigned timeout_value = 0;
 
     _filter_state_reset();
     progname = (argc > 0 && argv && argv[0]) ? argv[0] : "test";
@@ -1629,6 +1643,96 @@ lfg_ct_parse_args(int argc, char *argv[])
             _seed_set = 1;
             continue;
         }
+        if (0 == strcmp(a, "--isolation"))
+        {
+            /* Scalar taking a mode name, so it needs its own branch
+             * rather than the glob slot/count tail below. Last flag
+             * wins, as with every other scalar here. */
+            const char *val;
+
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            val = argv[++i];
+
+            if (0 == strcmp(val, "none"))
+            {
+                isolation_value = LFG_CT_ISOLATE_NONE;
+            }
+            else if (0 == strcmp(val, "fork"))
+            {
+                /* Refuse instead of falling back to in-process. The
+                 * setter already declines an unavailable mode without
+                 * changing state; a silent downgrade here would report
+                 * a fork run that never forked. */
+                if (!_lfg_ct_fork_available())
+                {
+                    fprintf(stderr, "%s: %s fork: built without fork isolation support\r\n", progname, a);
+                    _filter_print_usage(progname);
+                    _filter_state_reset();
+                    return -1;
+                }
+                isolation_value = LFG_CT_ISOLATE_FORK;
+            }
+            else
+            {
+                fprintf(stderr, "%s: %s requires one of none|fork, got: %s\r\n", progname, a, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+
+            isolation_set = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "--timeout"))
+        {
+            /* Same scalar shape and same bare-digit-run rule as --seed.
+             * 0 is a meaningful value (timeout disabled), so a bad
+             * value must fail the parse rather than coerce to it. */
+            const char *val;
+            char *endptr;
+            unsigned long parsed;
+
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            val = argv[++i];
+
+            errno = 0;
+            endptr = NULL;
+            parsed = strtoul(val, &endptr, 10);
+            if ('\0' == val[0] || val[0] < '0' || val[0] > '9' || NULL == endptr || '\0' != *endptr)
+            {
+                fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+#if ULONG_MAX > UINT_MAX
+            if (ERANGE == errno || parsed > (unsigned long)UINT_MAX)
+#else
+            if (ERANGE == errno)
+#endif
+            {
+                fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+
+            timeout_value = (unsigned)parsed;
+            timeout_set = 1;
+            continue;
+        }
         if (0 == strcmp(a, "--filter"))
         {
             slot = _filter_globs;
@@ -1682,6 +1786,19 @@ lfg_ct_parse_args(int argc, char *argv[])
             _seed_value = persisted;
             _seed_set = 1;
         }
+    }
+
+    /* Commit the API-owned settings only now that every error path is
+     * behind us. Deliberately absent from _filter_state_reset: a parse
+     * that never mentions these flags must leave a prior setter call
+     * standing, unlike the filter/verbosity state it does own. */
+    if (isolation_set)
+    {
+        (void)lfg_ct_set_isolation(isolation_value);
+    }
+    if (timeout_set)
+    {
+        lfg_ct_set_fork_timeout_ms(timeout_value);
     }
     return 0;
 }

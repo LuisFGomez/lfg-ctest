@@ -478,6 +478,25 @@ void lfg_ct_end(void);
  *                                  @ref lfg_ct_verbosity_t). A missing,
  *                                  non-numeric, or out-of-range value is an
  *                                  error.
+ *   - @c --isolation \<mode\>     : select the dispatch mode, @c none for
+ *                                  in-process or @c fork for fork-per-test
+ *                                  (see @ref lfg_ct_set_isolation). Requesting
+ *                                  @c fork on a build without fork support
+ *                                  fails the parse with a stderr diagnostic --
+ *                                  it never falls back to in-process silently.
+ *                                  Any other mode name, and a missing value,
+ *                                  are errors. Repeating the flag keeps the
+ *                                  last value.
+ *   - @c --timeout \<ms\>         : per-test timeout applied under
+ *                                  @ref LFG_CT_ISOLATE_FORK (see
+ *                                  @ref lfg_ct_set_fork_timeout_ms). @c 0
+ *                                  disables the timeout and is a legal value,
+ *                                  so a missing, non-numeric, negative, or
+ *                                  out-of-range value is an error rather than
+ *                                  a silent coercion to 0. Accepted on any
+ *                                  build; it is simply inert while the active
+ *                                  isolation is @ref LFG_CT_ISOLATE_NONE.
+ *                                  Repeating the flag keeps the last value.
  *
  *  @c -q and @c -v are points on one axis, so mixing them is not an error:
  *  the last one on the command line wins.
@@ -491,6 +510,13 @@ void lfg_ct_end(void);
  *  a non-zero return value; callers should propagate that to @c main.
  *
  *  Calling @c lfg_ct_parse_args again replaces any previously parsed state.
+ *  @c --isolation and @c --timeout are the exception: they drive state the
+ *  @ref lfg_ct_set_isolation and @ref lfg_ct_set_fork_timeout_ms setters own,
+ *  so a parse call that omits them leaves that configuration untouched rather
+ *  than resetting it, and a failed parse applies neither. The contract is
+ *  last-writer-wins across both surfaces -- a setter called after
+ *  @c lfg_ct_parse_args overrides the command line, so call @c parse_args
+ *  last if the CLI should win.
  *
  *  @param argc Standard @c main argc.
  *  @param argv Standard @c main argv (referenced for filter glob strings;
