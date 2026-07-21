@@ -1123,14 +1123,16 @@ _failgroup_print(void)
  * Unlike the failure summary's grouping key, these widths are cosmetic
  * rather than a correctness bound: nothing here is compared, only ranked
  * by time and printed, so a truncated name costs display fidelity and
- * nothing else. The test width still matches LFG_CT_FAILGROUP_NAME_MAX so
- * a name renders identically in both blocks; the suite is narrower
- * because it carries one component rather than a whole name.
+ * nothing else. The test width is defined as LFG_CT_FAILGROUP_NAME_MAX
+ * rather than repeating its value, so a name renders identically in both
+ * blocks by construction and the two cannot drift apart; the suite is
+ * narrower because it carries one component rather than a whole name,
+ * which is an independent bound and so stays an independent literal.
  *
  * The message is deliberately not retained: lfg-ctest.h documents it as
  * valid only for the duration of the reporter callback, and a durations
  * line has no use for it. */
-#define LFG_CT_DURATIONS_NAME_MAX 128
+#define LFG_CT_DURATIONS_NAME_MAX LFG_CT_FAILGROUP_NAME_MAX
 #define LFG_CT_DURATIONS_SUITE_MAX 64
 
 typedef struct
