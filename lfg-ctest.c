@@ -1168,10 +1168,16 @@ _state_read_line(FILE *fp, char *buf, size_t cap)
     return 1;
 }
 
-/* Same strictness as --seed's parser: a bare decimal digit run that fits
- * an unsigned. Returns 0 on success, -1 otherwise. */
+/* The one strictness rule shared by every unsigned scalar on this CLI
+ * (--seed, --timeout) and by the persisted seed in the state file: a bare
+ * decimal digit run that fits an unsigned. strtoul on its own accepts
+ * leading signs and whitespace and wraps a negative into a huge unsigned,
+ * so "-1" and " 7" must be rejected rather than coerced.
+ *
+ * Returns 0 on success, -1 if malformed, -2 if well-formed but out of
+ * range. Callers that distinguish the two emit different diagnostics. */
 static int
-_state_parse_seed(const char *val, unsigned *out)
+_parse_unsigned_arg(const char *val, unsigned *out)
 {
     char *endptr = NULL;
     unsigned long parsed;
@@ -1182,7 +1188,7 @@ _state_parse_seed(const char *val, unsigned *out)
     }
     errno = 0;
     parsed = strtoul(val, &endptr, 10);
-    if (NULL == endptr || '\0' != *endptr)
+    if ('\0' != *endptr)
     {
         return -1;
     }
@@ -1192,7 +1198,7 @@ _state_parse_seed(const char *val, unsigned *out)
     if (ERANGE == errno)
 #endif
     {
-        return -1;
+        return -2;
     }
     *out = (unsigned)parsed;
     return 0;
@@ -1260,7 +1266,7 @@ _state_load(const char *progname, const char *path, unsigned *seed_out)
         }
         if (0 == strncmp(line, "seed ", 5))
         {
-            if (0 != _state_parse_seed(line + 5, seed_out))
+            if (0 != _parse_unsigned_arg(line + 5, seed_out))
             {
                 fprintf(stderr, "%s: --rerun-failed: %s has a malformed seed: %s\r\n", progname, path, line + 5);
                 fclose(fp);
@@ -1602,8 +1608,8 @@ lfg_ct_parse_args(int argc, char *argv[])
             /* Scalar, not accumulating, so it gets its own bounds check
              * instead of riding the slot/count tail below. Last flag wins. */
             const char *val;
-            char *endptr;
-            unsigned long parsed;
+            unsigned parsed;
+            int rc;
 
             if (i + 1 >= argc)
             {
@@ -1614,32 +1620,23 @@ lfg_ct_parse_args(int argc, char *argv[])
             }
             val = argv[++i];
 
-            /* strtoul happily accepts leading signs and whitespace and
-             * wraps a negative into a huge unsigned; require a bare digit
-             * run so "-1" and " 7" are rejected rather than coerced. */
-            errno = 0;
-            endptr = NULL;
-            parsed = strtoul(val, &endptr, 10);
-            if ('\0' == val[0] || val[0] < '0' || val[0] > '9' || NULL == endptr || '\0' != *endptr)
+            rc = _parse_unsigned_arg(val, &parsed);
+            if (0 != rc)
             {
-                fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
-                _filter_print_usage(progname);
-                _filter_state_reset();
-                return -1;
-            }
-#if ULONG_MAX > UINT_MAX
-            if (ERANGE == errno || parsed > (unsigned long)UINT_MAX)
-#else
-            if (ERANGE == errno)
-#endif
-            {
-                fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                if (-2 == rc)
+                {
+                    fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                }
+                else
+                {
+                    fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
+                }
                 _filter_print_usage(progname);
                 _filter_state_reset();
                 return -1;
             }
 
-            _seed_value = (unsigned)parsed;
+            _seed_value = parsed;
             _seed_set = 1;
             continue;
         }
@@ -1691,12 +1688,13 @@ lfg_ct_parse_args(int argc, char *argv[])
         }
         if (0 == strcmp(a, "--timeout"))
         {
-            /* Same scalar shape and same bare-digit-run rule as --seed.
-             * 0 is a meaningful value (timeout disabled), so a bad
-             * value must fail the parse rather than coerce to it. */
+            /* Same scalar shape and same bare-digit-run rule as --seed, so
+             * it shares --seed's parser. 0 is a meaningful value (timeout
+             * disabled), so a bad value must fail the parse rather than
+             * coerce to it. */
             const char *val;
-            char *endptr;
-            unsigned long parsed;
+            unsigned parsed;
+            int rc;
 
             if (i + 1 >= argc)
             {
@@ -1707,29 +1705,23 @@ lfg_ct_parse_args(int argc, char *argv[])
             }
             val = argv[++i];
 
-            errno = 0;
-            endptr = NULL;
-            parsed = strtoul(val, &endptr, 10);
-            if ('\0' == val[0] || val[0] < '0' || val[0] > '9' || NULL == endptr || '\0' != *endptr)
+            rc = _parse_unsigned_arg(val, &parsed);
+            if (0 != rc)
             {
-                fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
-                _filter_print_usage(progname);
-                _filter_state_reset();
-                return -1;
-            }
-#if ULONG_MAX > UINT_MAX
-            if (ERANGE == errno || parsed > (unsigned long)UINT_MAX)
-#else
-            if (ERANGE == errno)
-#endif
-            {
-                fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                if (-2 == rc)
+                {
+                    fprintf(stderr, "%s: %s value out of range (max %u): %s\r\n", progname, a, UINT_MAX, val);
+                }
+                else
+                {
+                    fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
+                }
                 _filter_print_usage(progname);
                 _filter_state_reset();
                 return -1;
             }
 
-            timeout_value = (unsigned)parsed;
+            timeout_value = parsed;
             timeout_set = 1;
             continue;
         }
