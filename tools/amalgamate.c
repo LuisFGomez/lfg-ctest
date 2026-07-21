@@ -428,6 +428,16 @@ main(int argc, char **argv)
             " * this single-header back to clock(). */\n"
             "#ifndef _POSIX_C_SOURCE\n"
             "#define _POSIX_C_SOURCE 200809L\n"
+            "#endif\n\n"
+            "/* Naming any feature-test macro suppresses glibc's default _DEFAULT_SOURCE,\n"
+            " * which would drop __USE_MISC and with it M_PI, usleep, strsep and friends\n"
+            " * from a -std=gnu99 consumer that includes this header before its own\n"
+            " * system headers. Restore the default surface; it widens nothing the\n"
+            " * consumer did not already have, and does not weaken the POSIX one. This\n"
+            " * pairing belongs to the generated single-header only -- in lfg-ctest.c and\n"
+            " * lfg-ctest-fork.c the define stays confined to the framework's own TU. */\n"
+            "#ifndef _DEFAULT_SOURCE\n"
+            "#define _DEFAULT_SOURCE 1\n"
             "#endif\n\n");
 
     int i;
