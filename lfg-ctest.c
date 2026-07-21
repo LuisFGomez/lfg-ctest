@@ -1138,6 +1138,13 @@ _state_write(const char *path, unsigned seed)
         return -1;
     }
 
+#ifdef _WIN32
+    /* POSIX rename() replaces an existing destination atomically; the ISO C
+     * behaviour is implementation-defined and Windows fails outright. Drop the
+     * old file first there -- the window this opens is Windows-only and the
+     * alternative is that every run after the first fails to persist. */
+    remove(path);
+#endif
     if (0 != rename(tmp, path))
     {
         remove(tmp);

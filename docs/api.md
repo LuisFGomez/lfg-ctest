@@ -358,8 +358,8 @@ handed is a full-suite run they believe was narrowed:
 | Unreadable or malformed state file | stderr diagnostic, non-zero exit. Nothing is partially applied — a half-parsed file would narrow the run to some prefix of the failures. |
 | Previous run was green (no `fail` records) | Runs nothing, says so on stdout, exits 0. |
 | A persisted key no longer resolves (test renamed, removed, binary rebuilt) | Warns naming the key, runs the ones that do resolve. |
-| A persisted key sits under a suite `--filter-exclude` skipped | Accounted for by the exclusion, not warned about. The suite body never runs, so the test never registers — that is the user's instruction, not a stale record. |
-| The state file cannot be written (crash, signal, `ENOSPC`, unwritable path) | The **previous** file survives intact. The new one is staged as a `<path>.tmp` sibling and renamed into place, so `<path>` is only ever replaced by a complete file — a truncated one would still parse and silently narrow the next replay. |
+| A persisted key sits under a suite `--filter-exclude` skipped | Accounted for by the exclusion, not warned about. The suite body never runs, so the test never registers — that is the user's instruction, not a stale record. Ids are flat (`<file>::<suite>::<test>`), so a test in a suite *nested* inside the excluded one keeps the inner suite's name and is still reported as renamed-or-removed. |
+| The state file cannot be written (crash, signal, `ENOSPC`, unwritable path) | The **previous** file survives intact. The new one is staged as a `<path>.tmp` sibling and renamed into place, so `<path>` is only ever replaced by a complete file — a truncated one would still parse and silently narrow the next replay. On Windows the old file is removed just before the rename, since `rename()` there fails on an existing destination; the replacement is not atomic on that host. |
 | *No* persisted key resolves | stderr diagnostic, non-zero exit — running nothing silently would read as "all fixed". |
 | `--list` | Neither writes nor truncates the file, so listing between two reruns is safe. |
 
