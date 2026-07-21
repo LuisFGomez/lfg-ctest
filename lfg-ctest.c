@@ -83,6 +83,38 @@ static int _skip_env_active = 0;
  * outcomes to a non-zero exit code. */
 static int _strict_xpass = 0;
 
+/* -x / --fail-fast: stop executing once any test has failed.
+ *
+ * Whole-run scope, not suite-scoped -- the convention users arrive with
+ * from pytest -x and go test -failfast. A suppressed suite is not
+ * re-armed on the way out; once the run has a failure it is over.
+ *
+ * There is no run loop to break out of: lfg_ct_test() executes its body
+ * at the call site and a suite is an ordinary C function, so the whole
+ * nesting is the consumer's own main() calling down. This is therefore a
+ * suppression gate, not an abort -- the process still walks every
+ * remaining call site and does nothing at each one. The suite-level gate
+ * is what keeps that cheap: a suppressed suite body is never entered. */
+static int _fail_fast = 0;
+
+/* The gate predicate, in one place so both call sites and the summary
+ * marker agree on what "tripped" means.
+ *
+ * Keyed on _tests_failed rather than lfg_ct_failure_count(): that
+ * accessor returns the *assertion* tally, and both dispatch paths --
+ * the in-process classifier and the fork parent's _lfg_ct_record_external
+ * projection -- converge on _tests_failed. Reading that one global is
+ * what makes the gate isolation-agnostic with no fork-specific code.
+ *
+ * --strict-xpass deliberately does not feed this: an xpass is a verdict
+ * modifier, not a test failure, so a strict-xpass run still executes to
+ * completion and fails only at the end. */
+static int
+_fail_fast_tripped(void)
+{
+    return (_fail_fast && _tests_failed > 0) ? 1 : 0;
+}
+
 /* Per-test message capture: holds the first assertion-failure text
  * observed in the running test, formatted as "<file>:<line>: in
  * <function>(): <expr>". Reset at every lfg_ct_test_impl entry,
@@ -1447,6 +1479,7 @@ _filter_state_reset(void)
     _exclude_glob_count = 0;
     _filter_inherited_depth = 0;
     _strict_xpass = 0;
+    _fail_fast = 0;
     _verbosity = LFG_CT_VERBOSITY_DEFAULT;
     _seed_set = 0;
     _seed_value = 0;
@@ -1466,6 +1499,7 @@ _filter_print_usage(const char *progname)
             "  --filter <glob>          Run only entries whose id matches <glob>\r\n"
             "  --filter-exclude <glob>  Skip entries whose id matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
+            "  -x, --fail-fast          Stop the run at the first failing test\r\n"
             "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
             "  --rerun-failed           Run only the tests the previous run recorded as failed,\r\n"
             "                           restoring that run's seed\r\n"
@@ -1478,6 +1512,7 @@ _filter_print_usage(const char *progname)
             "-q and -v are one axis; the last of them on the command line wins.\r\n"
             "Verbosity is presentation only -- exit codes, --list output, and the\r\n"
             "records an installed reporter receives are identical at every level.\r\n"
+            "-x stops the whole run, not just the enclosing suite; the summary says so.\r\n"
             "Globs use shell-style syntax (*, ?, [...]) via fnmatch(3).\r\n"
             "An entry id is <file>::<suite>::<test>; a glob addresses as many\r\n"
             "trailing ::-components as it spells out, so a bare test name still\r\n"
@@ -1523,6 +1558,14 @@ lfg_ct_parse_args(int argc, char *argv[])
         if (0 == strcmp(a, "--strict-xpass"))
         {
             _strict_xpass = 1;
+            continue;
+        }
+        /* Short+long pair in the same strcmp chain, following -v /
+         * --verbose. No clustering: -x is matched whole, so -xv is an
+         * unknown flag rather than two flags. */
+        if (0 == strcmp(a, "-x") || 0 == strcmp(a, "--fail-fast"))
+        {
+            _fail_fast = 1;
             continue;
         }
         /* -v and -q are the two ends of one axis, so neither errors on
@@ -1837,6 +1880,21 @@ lfg_ct_state_path(void)
     return _state_path;
 }
 
+/* void return, following lfg_ct_set_fork_timeout_ms: a boolean mode has
+ * no way to fail. Contrast lfg_ct_set_isolation, which returns int only
+ * because fork can be unavailable at runtime. */
+void
+lfg_ct_set_fail_fast(int enabled)
+{
+    _fail_fast = enabled ? 1 : 0;
+}
+
+int
+lfg_ct_get_fail_fast(void)
+{
+    return _fail_fast;
+}
+
 /* Pure id predicate -- ignores list mode (which suppresses execution
  * regardless of filter state). Exclude is decisive and is evaluated first. */
 static int
@@ -1996,6 +2054,17 @@ void lfg_ct_suite_impl_at(void (*fn)(void), const char *name, const char *file)
         return;
     }
 
+    /* Fail-fast: skip the whole suite without entering its body. Sits
+     * below the list-mode block above, which returns first and so is
+     * never shadowed -- a listing executes no test and can never trip
+     * this. No "suite FAILURE" banner is reachable from here because the
+     * body never ran and the delta this suite would report against is
+     * never taken. */
+    if (_fail_fast_tripped())
+    {
+        return;
+    }
+
     /* Exclude is checked first and is decisive: a matched suite is skipped
      * entirely, no descent. Filter is checked second; a non-match still
      * descends so inner tests can be evaluated individually. A suite that
@@ -2114,6 +2183,20 @@ void lfg_ct_test_impl_at(void (*fn)(void), const char *name, const char *file)
     {
         /* LF-only: see the suite listing above. */
         printf("%s\n", id);
+        _current_test_file = saved_test_file;
+        return;
+    }
+
+    /* Fail-fast: suppress before the filter check, the reporter's
+     * on_test_start, and any dispatch. Placed above the isolation branch
+     * on purpose -- under fork isolation the child that produced the
+     * failure was already reaped by _lfg_ct_fork_run_test's synchronous
+     * waitpid before its outcome reached _tests_failed, so by the time
+     * this can observe the trip there is nothing left to tear down and no
+     * window for an orphan. The gate needs no knowledge of which path
+     * dispatched. */
+    if (_fail_fast_tripped())
+    {
         _current_test_file = saved_test_file;
         return;
     }
@@ -2403,6 +2486,23 @@ void lfg_ct_print_summary(void)
     printf("*** Executed %d assertions in %d tests. "
            "Failures: %d, Skipped: %d, XFail: %d, XPass: %d\r\n",
             _assertions_executed, _tests_executed, _tests_failed, _tests_skipped, _tests_xfailed, _tests_xpassed);
+
+    /* Suppressed tests are not executed, so they land in no bucket --
+     * _tests_executed simply ends up lower. Without this line a fail-fast
+     * run is indistinguishable from one where most tests silently
+     * vanished. Deliberately not reclassified as SKIP: that bucket is a
+     * per-test disposition set by the body via lfg_ct_skip, and borrowing
+     * it here would corrupt the tally semantics skip/xfail maintain.
+     *
+     * Printed at every verbosity, quiet included -- it qualifies the
+     * counts immediately above it, so hiding it would leave quiet's
+     * summary actively misleading rather than merely terse. */
+    if (_fail_fast_tripped())
+    {
+        printf("*** Stopped early: --fail-fast tripped at the first test failure; "
+               "remaining tests were not run.\r\n");
+    }
+
     _failgroup_print();
     printf("*** Testing complete. Result: %s\r\n", verdict);
 
@@ -2421,8 +2521,12 @@ void lfg_ct_print_summary(void)
      * narrows toward what still fails instead of replaying the original
      * set forever. --list returned above, so a listing never truncates
      * the file the last real run left behind. */
-    if (_rerun_failed)
+    if (_rerun_failed && !_fail_fast_tripped())
     {
+        /* A key the run never reached is not a key that stopped naming a
+         * registered test, so the unresolved warnings would all be false
+         * alarms here. Skipped wholesale rather than per-key: once the
+         * gate trips, "unclaimed" carries no information at all. */
         _rerun_report_unresolved();
     }
     if (0 != _state_write(_state_path, _effective_seed))
@@ -2851,6 +2955,28 @@ int lfg_ct_self_assertions_failed(void)
 void lfg_ct_self_set_strict_xpass(int enabled)
 {
     _strict_xpass = enabled ? 1 : 0;
+}
+
+/* Fail-fast trip injection. Same shape, and same reason, as the rerun and
+ * failgroup hooks below: expect-failures mode suppresses a genuine
+ * failure before it ever bumps _tests_failed, so the framework's own
+ * tests cannot trip the gate by failing a nested test on purpose.
+ *
+ * Save/restore rather than a reset-to-zero so a real failure recorded
+ * before the armed window survives it and the self-test binary's own exit
+ * code stays honest. Nothing can be lost inside the window: with the gate
+ * tripped no test classifies, so no test can bump the counter. */
+static int _fail_fast_saved_tests_failed = 0;
+
+void lfg_ct_self_fail_fast_arm(void)
+{
+    _fail_fast_saved_tests_failed = _tests_failed;
+    _tests_failed = 1;
+}
+
+void lfg_ct_self_fail_fast_disarm(void)
+{
+    _tests_failed = _fail_fast_saved_tests_failed;
 }
 
 int lfg_ct_self_return_code(void)

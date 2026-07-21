@@ -447,6 +447,18 @@ void lfg_ct_end(void);
  *                                  registered test, each produce a stderr
  *                                  diagnostic and a non-zero exit -- never a
  *                                  silent full-suite run.
+ *   - @c -x / @c --fail-fast      : stop the run at the first failing test
+ *                                  (see @ref lfg_ct_set_fail_fast). Scope is
+ *                                  the whole run, not the enclosing suite:
+ *                                  once any test has failed, no later test
+ *                                  body executes and no later suite body is
+ *                                  entered, and the run is never re-armed.
+ *                                  The summary states that the run stopped
+ *                                  early; suppressed tests are counted as
+ *                                  neither passed, failed, nor skipped.
+ *                                  Identical under both isolation modes. Has
+ *                                  no effect on @c --list, and an xpass under
+ *                                  @c --strict-xpass does not trip it.
  *   - @c --state-file \<path\>    : read and write the rerun state at
  *                                  @c path instead of the default
  *                                  @c .lfg-ctest-last in the current
@@ -577,6 +589,49 @@ unsigned lfg_ct_get_seed(void);
  *  @return 1 if the run is replaying the previous run's failures, 0 otherwise.
  */
 int lfg_ct_is_rerun_failed(void);
+
+/** Stop the run at the first failing test.
+ *
+ *  The programmatic equivalent of @c -x / @c --fail-fast, for consumers
+ *  configuring the runner without going through @c argv. Enabled state is
+ *  cleared by a subsequent @ref lfg_ct_parse_args call, like every other
+ *  parse-derived setting.
+ *
+ *  @par Semantics
+ *  Scope is the @e whole run, matching @c pytest @c -x and
+ *  @c go @c test @c -failfast -- not the enclosing suite. Once any test
+ *  has classified as failed, every subsequent @ref lfg_ct_test and
+ *  @ref lfg_ct_suite call site returns immediately without executing its
+ *  body, and the gate is never re-armed.
+ *
+ *  This is a suppression gate rather than an abort: @ref lfg_ct_test
+ *  executes its body at the call site and a suite is an ordinary C
+ *  function, so there is no run loop to break out of. The process still
+ *  reaches @ref lfg_ct_print_summary and @ref lfg_ct_return normally, and
+ *  exits non-zero through the existing @ref lfg_ct_return path -- this
+ *  adds no second exit mechanism.
+ *
+ *  @par Interactions
+ *  Suppressed tests execute no body, so they are counted as neither
+ *  passed, failed, nor skipped; @ref lfg_ct_print_summary emits an
+ *  explicit line saying the run stopped early so a short tally is not
+ *  mistaken for tests that silently vanished. @c --list is unaffected (a
+ *  listing executes nothing and so can never trip the gate). An xpass
+ *  under @c --strict-xpass is not a test failure and does not trip it
+ *  either, so such a run still executes to completion. Behaviour is
+ *  identical under @ref LFG_CT_ISOLATE_NONE and @ref LFG_CT_ISOLATE_FORK.
+ *  With no failures the run is byte-identical to one without the flag.
+ *
+ *  @param enabled Non-zero to enable, 0 to disable. Default is disabled.
+ */
+void lfg_ct_set_fail_fast(int enabled);
+
+/** Query whether fail-fast is currently enabled.
+ *  Reports the configured mode, not whether it has tripped.
+ *  @return 1 if @c -x / @c --fail-fast was parsed or
+ *          @ref lfg_ct_set_fail_fast enabled it, 0 otherwise.
+ */
+int lfg_ct_get_fail_fast(void);
 
 /** Path of the rerun state file this run reads and writes.
  *
@@ -915,8 +970,15 @@ int lfg_ct_return(void);
  *
  *  Every @c ASSERT_* is non-fatal (record-and-continue) and there is no
  *  @c REQUIRE-style fatal variant, so this accessor is the supported way
- *  to fail-fast out of a region of assertions: snapshot it at the top of
- *  the region and compare.
+ *  to bail out of a region of assertions @e inside one body: snapshot it
+ *  at the top of the region and compare.
+ *
+ *  @note For run-level fail-fast -- stop the whole run at the first
+ *        failing @e test -- use @c -x / @c --fail-fast or
+ *        @ref lfg_ct_set_fail_fast rather than this recipe. The two work
+ *        at different granularities: the flag gates test and suite call
+ *        sites, while the snapshot-and-compare below is the only tool for
+ *        cutting a loop short within a single test body.
  *
  *  @code
  *  void test_foo(void)
@@ -1150,6 +1212,22 @@ int lfg_ct_self_assertions_failed(void);
  *  would also reset filter state).
  */
 void lfg_ct_self_set_strict_xpass(int enabled);
+
+/** Self-test hook: make the fail-fast gate read as tripped by forcing the
+ *  failed-test tally to a non-zero value. Expect-failures mode suppresses
+ *  a genuine failure before it bumps that tally, so the framework's own
+ *  tests cannot arm the gate by failing a nested test on purpose.
+ *
+ *  Pair every call with @ref lfg_ct_self_fail_fast_disarm, which restores
+ *  the tally saved here so a real failure recorded before the window is
+ *  not swallowed.
+ */
+void lfg_ct_self_fail_fast_arm(void);
+
+/** Self-test hook: restore the failed-test tally saved by the matching
+ *  @ref lfg_ct_self_fail_fast_arm call.
+ */
+void lfg_ct_self_fail_fast_disarm(void);
 
 /** Self-test accessor: returns the exit code @ref lfg_ct_return would
  *  produce right now, without printing the summary.
