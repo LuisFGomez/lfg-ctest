@@ -936,8 +936,16 @@ _failgroup_print(void)
 
     _failgroup_order(order);
 
-    printf("*** Failure summary: %d failure%s in %d distinct test%s\r\n", _failgroup_total,
-            (1 == _failgroup_total) ? "" : "s", _failgroup_count, (1 == _failgroup_count) ? "" : "s");
+    /* Once the cap is hit the distinct-test count stops being knowable:
+     * the dropped failures span somewhere between one and
+     * _failgroup_dropped further tests, and the table kept nothing that
+     * could tell them apart. Say "at least" rather than print a number
+     * the reader would reasonably take as exact -- and note below that
+     * the two figures cannot be summed to recover the true one, since
+     * the dropped tally counts failures and this one counts tests. */
+    printf("*** Failure summary: %d failure%s in %s%d distinct test%s\r\n", _failgroup_total,
+            (1 == _failgroup_total) ? "" : "s", (_failgroup_dropped > 0) ? "at least " : "", _failgroup_count,
+            (1 == _failgroup_count) ? "" : "s");
     for (i = 0; i < _failgroup_count; i++)
     {
         printf("*** %5d  %-32s (first: %s)\r\n", _failgroups[order[i]].count, _failgroups[order[i]].name,
@@ -945,7 +953,8 @@ _failgroup_print(void)
     }
     if (_failgroup_dropped > 0)
     {
-        printf("*** %d further failure%s ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = %d) was reached\r\n",
+        printf("*** %d further failure%s ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = %d) was "
+               "reached; their distinct-test count is unknown\r\n",
                 _failgroup_dropped, (1 == _failgroup_dropped) ? "" : "s", LFG_CT_FAILGROUP_MAX);
     }
 }
