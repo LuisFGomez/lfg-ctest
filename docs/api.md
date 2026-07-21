@@ -717,7 +717,14 @@ tests each take 30 seconds", which the tally alone cannot.
   answers the same question a slow PASS does.
 - **Times render as `%.3f ms`**, the same precision and unit as the
   `-v` per-test banner, so the two renderings of one number agree.
-- Tests are named `<suite>::<test>`, or bare for a top-level test.
+- Tests are named `<suite>::<test>`, or bare for a top-level test. Each
+  half is stored in its own buffer — `LFG_CT_DURATIONS_NAME_MAX` (128)
+  and `LFG_CT_DURATIONS_SUITE_MAX` (64), terminator included — and a
+  longer one renders truncated, silently, with no counterpart to the
+  overflow line the entry cap below emits. Unlike the failure summary's
+  equivalent bound these widths are display-only: rows are keyed by
+  elapsed time, never by name, so two names agreeing within the width
+  still rank as two rows rather than folding into one.
 - A run that executed nothing — `--list`, or a filter that admitted no
   entry — emits no block rather than a bare header. Without the flag the
   output is byte-identical to a build that predates the feature.
