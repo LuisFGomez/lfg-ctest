@@ -65,8 +65,8 @@ int main(void)
 | `lfg_ct_end()` | Finalize test framework |
 | `lfg_ct_parse_args(argc, argv)` | Parse `--list` / `--filter <glob>` / `--filter-exclude <glob>` / `--strict-xpass` / `--seed <n>` / `--rerun-failed` / `--state-file <path>` from `main(argc, argv)`. Returns 0 on success, non-zero on a bad flag or an unusable rerun state file (diagnostic printed to stderr). See [Listing and filtering](#listing-and-filtering), [Reproducing a randomized run](#reproducing-a-randomized-run), [Rerunning just the failures](#rerunning-just-the-failures), and [Skip, xfail, xpass](#skip-xfail-xpass). |
 | `lfg_ct_is_list_mode()` | Returns 1 if `--list` was parsed, 0 otherwise. |
-| `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed, 0 otherwise. Separate from the value because `0` is a legal seed. |
-| `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. Under `--rerun-failed` the persisted seed is loaded into this slot, so the predicate/value pair also reports a restored seed. |
+| `lfg_ct_is_seed_set()` | Returns 1 if `--seed` was parsed **or** `--rerun-failed` restored a seed from the state file, 0 otherwise. Separate from the value because `0` is a legal seed. |
+| `lfg_ct_get_seed()` | Returns the seed parsed from `--seed`, or 0 when none was given. Under `--rerun-failed` the persisted seed is loaded into this slot, so the predicate/value pair also reports a restored seed. An explicit `--seed` wins over the persisted one. |
 | `lfg_ct_is_rerun_failed()` | Returns 1 if `--rerun-failed` was parsed, 0 otherwise. |
 | `lfg_ct_state_path()` | Returns the rerun state file this run reads and writes — the `--state-file` value, or `".lfg-ctest-last"`. Never `NULL`. |
 | `lfg_ct_name_runs(name)` | Returns 1 if a hypothetical test/suite named `name` would execute under the currently parsed filter state (0 if filtered, excluded, or in `--list` mode). Bare-name form, unchanged. **Cannot answer a qualified filter:** it builds the id from whatever file/suite batons are ambient, so called from `main()` (the documented usage) both are absent and the id is `(none)::(none)::name`. Under `--filter 'alpha.c::suite_one::test_db_roundtrip'` it returns 0 even though the test does run. Use `lfg_ct_id_runs` where that matters. |
@@ -338,6 +338,12 @@ two intersect, the replayed set being the candidate pool:
 $ ./test_indicators --rerun-failed --filter 'suite_sma::*'
 ```
 
+Note that such a run rewrites the state file from the **intersected**
+set: the records for failures the filter excluded are dropped, not held
+aside. Replaying 169 failures under `--filter 'suite_sma::*'` leaves a
+file describing only the `suite_sma` outcomes. Pass `--state-file` to
+work against a narrowed slice without spending the full record.
+
 The failure records come from the runner's own classification, never from
 parsed output, so the file is identical under `LFG_CT_ISOLATE_FORK` (the
 parent records the child's disposition) and with stdout redirected to a
@@ -352,6 +358,8 @@ handed is a full-suite run they believe was narrowed:
 | Unreadable or malformed state file | stderr diagnostic, non-zero exit. Nothing is partially applied — a half-parsed file would narrow the run to some prefix of the failures. |
 | Previous run was green (no `fail` records) | Runs nothing, says so on stdout, exits 0. |
 | A persisted key no longer resolves (test renamed, removed, binary rebuilt) | Warns naming the key, runs the ones that do resolve. |
+| A persisted key sits under a suite `--filter-exclude` skipped | Accounted for by the exclusion, not warned about. The suite body never runs, so the test never registers — that is the user's instruction, not a stale record. |
+| The state file cannot be written (crash, signal, `ENOSPC`, unwritable path) | The **previous** file survives intact. The new one is staged as a `<path>.tmp` sibling and renamed into place, so `<path>` is only ever replaced by a complete file — a truncated one would still parse and silently narrow the next replay. |
 | *No* persisted key resolves | stderr diagnostic, non-zero exit — running nothing silently would read as "all fixed". |
 | `--list` | Neither writes nor truncates the file, so listing between two reruns is safe. |
 

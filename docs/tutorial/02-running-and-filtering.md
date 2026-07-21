@@ -304,6 +304,11 @@ filter picks from the replayed set rather than from the whole suite:
 $ ./test_indicators --rerun-failed --filter 'suite_sma::*'
 ```
 
+One caveat: that run rewrites the state file with only the intersected
+subset's failures, so the 157 keys the filter excluded are gone from the
+record, not parked. If you want to chip at one suite without spending the
+other 157, give the narrowed run its own `--state-file`.
+
 The flag never guesses. If there is no state file, or it is malformed, or none
 of its keys still name a test in the binary, you get a diagnostic on stderr
 and a non-zero exit — never a quiet full-suite run that you would read as a

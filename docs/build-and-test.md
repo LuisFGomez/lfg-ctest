@@ -67,10 +67,19 @@ malformed, wholly stale state file) exits non-zero instead of running the whole
 suite. Parsing, selection, seed precedence and the narrowing cycle are covered
 in-process by `test-unified`; fork-mode persistence by `test-fork`.
 
-Both `test-unified` and `test-fork` write a state file of their own on every
-run; `.lfg-ctest-last` is gitignored. `test-fork` clears its recorded set
-before the summary, because the intentional fork-mode failures it drives are
-real classified outcomes and would otherwise describe a red run.
+Every self-test binary persists a rerun state file on exit, so `CMakeLists.txt`
+gives each `add_test` its own `--state-file` under the build directory:
+sharing the default `.lfg-ctest-last` would have them clobber one another
+under `ctest -j`. No test outcome reads the file — this just keeps the
+artifact honest, and dogfoods the flag the docs recommend for out-of-tree
+builds. `test-unified` and `test-fork` re-parse their real `argv` right before
+the final summary, because their arg-parsing self-tests reset the parsed state
+(including `--state-file`) as a side effect. Self-tests that drive a *nested*
+`lfg_ct_print_summary` aim it at their throwaway path for the same reason.
+
+`test-fork` also clears its recorded set before the summary, because the
+intentional fork-mode failures it drives are real classified outcomes and
+would otherwise describe a red run.
 
 ### Run one specific test
 
