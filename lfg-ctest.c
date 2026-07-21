@@ -228,6 +228,10 @@ static unsigned _effective_seed = 0;
 #define LFG_CT_STATE_MAGIC "lfg-ctest-state"
 #define LFG_CT_STATE_VERSION 1
 
+/* Suffix of the sibling temporary _state_write renames into place. Kept
+ * next to the real file so the rename stays within one directory. */
+#define LFG_CT_STATE_TMP_SUFFIX ".tmp"
+
 /* Longest state-file line accepted. An id is capped at LFG_CT_ID_MAX, so
  * this is generous; anything longer is a malformed file, not a line to
  * silently split (splitting would fabricate keys). */
@@ -865,6 +869,39 @@ _rerun_admits_id(const char *id)
     return 0;
 }
 
+/* Account for the persisted keys belonging to a suite this run never
+ * descended into.
+ *
+ * A suite-level --filter-exclude match is decisive and skips the suite
+ * body outright, so the contained lfg_ct_test registrations never happen
+ * and their keys never reach _rerun_admits_id. Without this those keys
+ * would be reported as renamed-or-removed, and an exclusion covering the
+ * whole replay set would latch the run fatal over tests the user
+ * deliberately excluded. They are accounted for, not orphaned.
+ *
+ * @p suite_id is a 2-component <file>::<suite> id; a test key belongs to
+ * it exactly when it starts with "<suite_id>::". */
+static void
+_rerun_mark_suite_seen(const char *suite_id)
+{
+    size_t len;
+    int i;
+
+    if (NULL == suite_id)
+    {
+        return;
+    }
+    len = strlen(suite_id);
+    for (i = 0; i < _replay_key_count; i++)
+    {
+        if (0 == strncmp(_replay_keys[i], suite_id, len)
+                && 0 == strncmp(_replay_keys[i] + len, LFG_CT_ID_SEPARATOR, sizeof(LFG_CT_ID_SEPARATOR) - 1))
+        {
+            _replay_resolved[i] = 1;
+        }
+    }
+}
+
 /* Read one newline-terminated line into @p buf, stripped of its
  * terminator. Returns 1 on a line, 0 at end of file, -1 when the line
  * did not fit (the caller treats that as a malformed file rather than
@@ -935,6 +972,16 @@ _state_parse_seed(const char *val, unsigned *out)
     return 0;
 }
 
+/* The over-long-line diagnostic, shared by the header read and the record
+ * loop so a first line that does not fit reports why it did not fit
+ * rather than being folded into "is not a v1 state file". */
+static void
+_state_report_overlong(const char *progname, const char *path)
+{
+    fprintf(stderr, "%s: --rerun-failed: %s has an over-long line (max %d bytes)\r\n", progname, path,
+            LFG_CT_STATE_LINE_MAX - 1);
+}
+
 /* Load @p path into the replay set and hand back the persisted seed.
  *
  * Returns 0 on success, -1 with a diagnostic already on stderr
@@ -962,6 +1009,13 @@ _state_load(const char *progname, const char *path, unsigned *seed_out)
 
     snprintf(expect, sizeof(expect), "%s %d", LFG_CT_STATE_MAGIC, LFG_CT_STATE_VERSION);
     rc = _state_read_line(fp, line, sizeof(line));
+    if (-1 == rc)
+    {
+        _state_report_overlong(progname, path);
+        fclose(fp);
+        _replay_clear();
+        return -1;
+    }
     if (1 != rc || 0 != strcmp(line, expect))
     {
         fprintf(stderr, "%s: --rerun-failed: %s is not a v%d state file (expected first line \"%s\")\r\n",
@@ -1010,8 +1064,7 @@ _state_load(const char *progname, const char *path, unsigned *seed_out)
 
     if (-1 == rc)
     {
-        fprintf(stderr, "%s: --rerun-failed: %s has an over-long line (max %d bytes)\r\n", progname, path,
-                LFG_CT_STATE_LINE_MAX - 1);
+        _state_report_overlong(progname, path);
         _replay_clear();
         return -1;
     }
@@ -1027,16 +1080,42 @@ _state_load(const char *progname, const char *path, unsigned *seed_out)
 /* Persist this run's seed and failure set to @p path. LF-only, like
  * --list output and for the same reason: the file is machine input, and
  * a stray CR would ride into the key and match nothing on replay.
+ *
+ * Written to a sibling temporary and renamed into place, so @p path is
+ * only ever replaced by a complete file. Truncating in place would leave
+ * a crash, a signal or ENOSPC mid-write behind a file that is still
+ * well-formed -- magic, seed, and a prefix of the fail records -- which
+ * the loader would accept and silently replay as a narrowed failure set.
+ * That is exactly the outcome _state_load refuses on the read side. A
+ * stale-but-complete record beats a fresh-but-truncated one, so every
+ * failure path here leaves the previous run's file untouched.
+ *
+ * rename(3) and remove(3) are C89 <stdio.h>, so this adds no platform
+ * surface beyond what the runner already uses.
+ *
  * Returns 0 on success, -1 if the file could not be written. */
 static int
 _state_write(const char *path, unsigned seed)
 {
+    /* --state-file is arbitrary-length argv, so the temporary path is
+     * sized from the real path rather than a fixed buffer. */
+    size_t path_len = strlen(path);
+    char *tmp = (char *)malloc(path_len + sizeof(LFG_CT_STATE_TMP_SUFFIX));
     FILE *fp;
+    int write_failed;
     int i;
 
-    fp = fopen(path, "w");
+    if (NULL == tmp)
+    {
+        return -1;
+    }
+    memcpy(tmp, path, path_len);
+    memcpy(tmp + path_len, LFG_CT_STATE_TMP_SUFFIX, sizeof(LFG_CT_STATE_TMP_SUFFIX));
+
+    fp = fopen(tmp, "w");
     if (NULL == fp)
     {
+        free(tmp);
         return -1;
     }
     fprintf(fp, "%s %d\n", LFG_CT_STATE_MAGIC, LFG_CT_STATE_VERSION);
@@ -1045,12 +1124,28 @@ _state_write(const char *path, unsigned seed)
     {
         fprintf(fp, "fail %s\n", _fail_keys[i]);
     }
-    if (0 != ferror(fp))
+    /* Both halves must run: || would short-circuit past the fclose and
+     * leak the stream on a write error. */
+    write_failed = (0 != ferror(fp));
+    if (0 != fclose(fp))
     {
-        fclose(fp);
+        write_failed = 1;
+    }
+    if (write_failed)
+    {
+        remove(tmp);
+        free(tmp);
         return -1;
     }
-    return (0 == fclose(fp)) ? 0 : -1;
+
+    if (0 != rename(tmp, path))
+    {
+        remove(tmp);
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
+    return 0;
 }
 
 /* End-of-run verdict on the persisted keys. A key nobody claimed means
@@ -1500,6 +1595,13 @@ void lfg_ct_suite_impl_at(void (*fn)(void), const char *name, const char *file)
      * matches the filter propagates the pass to every descendant. */
     if (_exclude_glob_count > 0 && _glob_list_matches_id(id, _exclude_globs, _exclude_glob_count))
     {
+        /* No descent means the contained tests never register, so claim
+         * their persisted keys here or the replay would mistake an
+         * exclusion for a stale state file. */
+        if (_rerun_failed)
+        {
+            _rerun_mark_suite_seen(id);
+        }
         return;
     }
     if (_filter_glob_count > 0 && 0 == _filter_inherited_depth

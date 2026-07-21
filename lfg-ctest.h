@@ -489,15 +489,18 @@ int lfg_ct_is_list_mode(void);
  */
 int lfg_ct_is_verbose(void);
 
-/** Query whether a seed was supplied via @c --seed.
+/** Query whether a seed is in effect.
  *  Distinct from the seed value because 0 is a legal seed.
- *  @return 1 if @c --seed was parsed, 0 otherwise.
+ *  @return 1 if @c --seed was parsed, or @c --rerun-failed restored a
+ *          seed from the state file; 0 otherwise.
  */
 int lfg_ct_is_seed_set(void);
 
-/** Query the seed supplied via @c --seed.
- *  @return The parsed seed, or 0 when no @c --seed was given (check
- *          @ref lfg_ct_is_seed_set to tell the two apart).
+/** Query the seed in effect.
+ *  @return The seed parsed from @c --seed, or the one @c --rerun-failed
+ *          restored from the state file; 0 when neither applies (check
+ *          @ref lfg_ct_is_seed_set to tell the two apart). An explicit
+ *          @c --seed wins over a persisted one.
  */
 unsigned lfg_ct_get_seed(void);
 
