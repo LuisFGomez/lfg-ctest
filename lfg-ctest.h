@@ -1330,6 +1330,78 @@ const char *lfg_ct_self_failgroup_origin_at(int rank);
  */
 int lfg_ct_self_failgroup_count_at(int rank);
 
+/** Self-test hook: retain one classified test's elapsed time in the
+ *  `--durations` accumulator exactly as both record fan-out sites do.
+ *  Lets the framework's own tests build a known ranking (and reach the
+ *  retention cap) without registering that many real tests.
+ *  @param suite    Suite name, or NULL / "" for a top-level test.
+ *  @param test     Registered test name.
+ *  @param time_sec Elapsed wall-clock seconds.
+ *
+ *  Both names are retained as borrowed pointers, matching the accumulator's
+ *  own contract -- pass string literals or otherwise program-lifetime
+ *  storage.
+ */
+void lfg_ct_self_durations_note(const char *suite, const char *test, double time_sec);
+
+/** Self-test hook: drop the retained durations. The runner's own tests
+ *  keep feeding this table as they classify, so a test that inspects the
+ *  ranking must reset first.
+ */
+void lfg_ct_self_durations_reset(void);
+
+/** Self-test hook: set the parsed `--durations` state directly, without
+ *  going through @ref lfg_ct_parse_args (which would also reset filter
+ *  state).
+ *  @param enabled Non-zero if the flag was given.
+ *  @param limit   The requested count; 0 means every retained test.
+ */
+void lfg_ct_self_durations_set(int enabled, int limit);
+
+/** Self-test accessor: 1 if `--durations` was parsed, 0 otherwise. */
+int lfg_ct_self_durations_enabled(void);
+
+/** Self-test accessor: the count `--durations` was given, 0 for "all". */
+int lfg_ct_self_durations_limit(void);
+
+/** Self-test accessor: tests retained by the durations accumulator. */
+int lfg_ct_self_durations_count(void);
+
+/** Self-test accessor: tests that classified after the retention table
+ *  filled. Non-zero is what makes the block report its cap rather than
+ *  silently truncate.
+ */
+int lfg_ct_self_durations_dropped(void);
+
+/** Self-test accessor: the compile-time retention ceiling
+ *  (@c LFG_CT_DURATIONS_MAX), so a cap test need not hardcode it.
+ */
+int lfg_ct_self_durations_cap(void);
+
+/** Self-test accessor: how many entries the block would list right now,
+ *  given the parsed limit and the retained count. 0 when the flag is
+ *  absent or nothing was retained -- the two cases that print no block.
+ */
+int lfg_ct_self_durations_shown(void);
+
+/** Self-test accessor: test name of the entry at @p rank in the block's
+ *  display order (elapsed time descending, ties in classification order).
+ *  @return Borrowed pointer, or NULL when @p rank is out of range.
+ */
+const char *lfg_ct_self_durations_name_at(int rank);
+
+/** Self-test accessor: suite name of the entry at @p rank in display
+ *  order. May itself be NULL for a top-level test.
+ *  @return Borrowed pointer, or NULL when @p rank is out of range.
+ */
+const char *lfg_ct_self_durations_suite_at(int rank);
+
+/** Self-test accessor: elapsed seconds of the entry at @p rank in display
+ *  order.
+ *  @return The elapsed time, or -1.0 when @p rank is out of range.
+ */
+double lfg_ct_self_durations_time_at(int rank);
+
 #endif /* LFG_CTEST_SELF_TEST */
 
 #endif /* LFG_CTEST_H_ */

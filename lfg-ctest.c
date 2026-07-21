@@ -3,6 +3,16 @@
  * @brief       lfg-ctest unit testing API.
  */
 
+/* POSIX.1-2008 surface (clock_gettime, CLOCK_MONOTONIC, struct timespec)
+ * must be visible even when the consumer builds with strict -std=c99
+ * (i.e. without _DEFAULT_SOURCE / _GNU_SOURCE). Same #ifndef guard, and
+ * for the same reason, as lfg-ctest-fork.c: it avoids a redefinition
+ * warning when the consumer already set the macro at a different level
+ * via -D or a previously-included header. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 /*============================================================================
  *  Includes
  *==========================================================================*/
@@ -24,6 +34,13 @@
  *  Defines/Typedefs
  *==========================================================================*/
 
+/* CLOCK_MONOTONIC is a <time.h> macro on any POSIX.1-2001 target, so the
+ * probe has to sit below the includes. Absent it (a freestanding or
+ * pre-POSIX target), the timing site falls back to clock(). */
+#if defined(CLOCK_MONOTONIC)
+#define LFG_CT_HAVE_MONOTONIC 1
+#endif
+
 /*============================================================================
  *  Private Function Prototypes
  *==========================================================================*/
@@ -33,6 +50,44 @@
 static void _fail_keys_clear(void);
 static void _replay_clear(void);
 static void _failgroup_clear(void);
+
+/* Durations bookkeeping, same placement reason as the block above. */
+static void _durations_clear(void);
+
+/*============================================================================
+ *  Timing
+ *==========================================================================*/
+
+/* Seconds off a monotonic wall clock, for differencing only -- the epoch
+ * is unspecified, so an absolute value here is meaningless.
+ *
+ * Wall time rather than CPU time is the contract lfg-ctest.h states for
+ * lfg_ct_record_t.time_sec ("Elapsed wall-clock seconds"), and it is what
+ * the fork path has always measured (lfg-ctest-fork.c). The in-process
+ * path used clock() until #62, which reported ~0 for a test that slept or
+ * blocked on I/O -- i.e. it under-reported exactly the slow tests a
+ * durations ranking exists to surface, and left the two dispatch paths
+ * reporting different quantities.
+ *
+ * CLOCK_MONOTONIC counts from boot on every target that has it, so the
+ * seconds value stays small enough that a double keeps sub-microsecond
+ * resolution; the fork TU's integer-domain differencing is only needed
+ * there because it also drives a millisecond timeout deadline.
+ *
+ * The clock() fallback keeps a target without CLOCK_MONOTONIC building
+ * and reporting *something*, at the old CPU-time semantics. */
+static double
+_monotonic_sec(void)
+{
+#ifdef LFG_CT_HAVE_MONOTONIC
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#else
+    return (double)clock() / (double)CLOCKS_PER_SEC;
+#endif
+}
 
 /*============================================================================
  *  Variables
@@ -247,6 +302,14 @@ static int _exclude_glob_count = 0;
  * a suite inherit the filter-pass (so "--filter suite_foo*" runs every test
  * the suite holds without each test having to match individually). */
 static int _filter_inherited_depth = 0;
+
+/* --durations <n>: print the n slowest tests after the run. "Was the flag
+ * given" is its own predicate rather than a sentinel because 0 is a
+ * meaningful value the user types deliberately -- it means "every retained
+ * test", not "none". The accumulator itself lives further down, next to
+ * the report it feeds. */
+static int _durations_set = 0;
+static int _durations_limit = 0;
 
 /* --seed <n>: user-supplied srand() seed. The "was it supplied" answer is
  * its own flag rather than a sentinel value, because 0 is a legal seed the
@@ -613,6 +676,7 @@ void lfg_ct_end(void)
     _fail_keys_clear();
     _replay_clear();
     _failgroup_clear();
+    _durations_clear();
 }
 
 /* Number of "::"-delimited components in @p s (a glob or an id). */
@@ -1013,6 +1077,167 @@ _failgroup_print(void)
         printf("*** %d further failure%s ungrouped: the distinct-test cap (LFG_CT_FAILGROUP_MAX = %d) was "
                "reached; their distinct-test count is unknown\r\n",
                 _failgroup_dropped, (1 == _failgroup_dropped) ? "" : "s", LFG_CT_FAILGROUP_MAX);
+    }
+}
+
+/*============================================================================
+ *  Slowest-test durations report
+ *
+ *  Per-test elapsed time has always reached an installed reporter via
+ *  lfg_ct_record_t.time_sec, but nothing aggregated it: answering "what
+ *  makes this suite slow?" meant reading every -v line by eye. --durations
+ *  <n> ranks the run's tests by elapsed time and prints the slowest n
+ *  after the summary, pytest-style.
+ *
+ *  Fed by a direct call from both record fan-out sites -- the in-process
+ *  classification and the fork parent's _lfg_ct_record_external -- rather
+ *  than by a third reporter layered onto the chain. The chain is two deep
+ *  by design (_verbose_reporter delegating to _user_reporter) and an
+ *  internal accumulator has no business in the public reporter slot, where
+ *  a consumer replacing the reporter mid-run would silently unhook it.
+ *
+ *  Collection is unconditional, not gated on the flag: it is three stores
+ *  per test, and gating it would make the report depend on whether
+ *  lfg_ct_parse_args ran before or after the first dispatch.
+ *
+ *  Fixed-cap static storage, matching LFG_CT_FILTER_MAX and the failure
+ *  summary's table -- the core runner's run-scoped tables do not allocate.
+ *  An overrun is reported in the block rather than silently truncating.
+ *==========================================================================*/
+
+/* Tests the report can rank. Sized past the ~650-test suite that motivated
+ * the feature so a real run does not routinely trip the cap; footprint is
+ * LFG_CT_DURATIONS_MAX * sizeof(_duration_t) of BSS (~24 KB at the default
+ * cap on a 64-bit target). Beyond the cap tests still run and still
+ * classify -- only their ranking is lost, and the block says so. */
+#define LFG_CT_DURATIONS_MAX 1024
+
+/* Borrowed pointers, unlike the failure summary's copies. Both names
+ * originate in the test-registration macros as string literals with
+ * program lifetime, and neither is a key here -- the entries are ranked by
+ * time and printed, never compared -- so the width bound that forces the
+ * failure summary to copy its grouping key does not apply. The message is
+ * deliberately not retained: lfg-ctest.h documents it as valid only for
+ * the duration of the reporter callback, and a durations line has no use
+ * for it. */
+typedef struct
+{
+    const char *suite_name;
+    const char *test_name;
+    double time_sec;
+} _duration_t;
+
+static _duration_t _durations[LFG_CT_DURATIONS_MAX];
+static int _duration_count = 0;
+
+/* Tests that classified after the table filled. Non-zero is what turns
+ * the cap from a silent truncation into a reported one. */
+static int _duration_dropped = 0;
+
+/* Retain one classified test's elapsed time. Called from both fan-out
+ * sites for every outcome, not just PASS: a slow SKIP or XFAIL is exactly
+ * as interesting to a "why is this suite slow" question. */
+static void
+_durations_record(const char *suite_name, const char *test_name, double time_sec)
+{
+    if (_duration_count == LFG_CT_DURATIONS_MAX)
+    {
+        _duration_dropped++;
+        return;
+    }
+
+    _durations[_duration_count].suite_name = suite_name;
+    _durations[_duration_count].test_name = test_name;
+    _durations[_duration_count].time_sec = time_sec;
+    _duration_count++;
+}
+
+static void
+_durations_clear(void)
+{
+    _duration_count = 0;
+    _duration_dropped = 0;
+}
+
+/* Fill @p order with entry indices in display order: elapsed time
+ * descending, ties broken by the order the tests classified in.
+ *
+ * The tie-break is a correctness requirement, not a nicety: tests whose
+ * times land on the same value (trivially common at millisecond
+ * granularity for a suite of fast tests) must not reshuffle between runs
+ * of the same binary, or the block stops being diffable. Insertion sort,
+ * and stable, which is what makes the tie-break fall out of the table's
+ * own build order -- the same shape _failgroup_order uses. */
+static void
+_durations_order(int *order)
+{
+    int i;
+    int j;
+
+    for (i = 0; i < _duration_count; i++)
+    {
+        for (j = i; j > 0 && _durations[order[j - 1]].time_sec < _durations[i].time_sec; j--)
+        {
+            order[j] = order[j - 1];
+        }
+        order[j] = i;
+    }
+}
+
+/* Entries the block would list given the parsed limit: every retained
+ * test when --durations 0 or when n outruns the test count, n otherwise.
+ * Split out so the self-tests observe the same arithmetic the print path
+ * uses rather than a re-derivation of it. */
+static int
+_durations_shown(void)
+{
+    if (_durations_limit > 0 && _durations_limit < _duration_count)
+    {
+        return _durations_limit;
+    }
+    return _duration_count;
+}
+
+/* Emit the block. Silent unless --durations was given, and silent on a run
+ * that executed nothing (--list, or a filter that admitted no test), so
+ * output without the flag is byte-identical to what it was before this
+ * existed and the flag never produces a bare header over an empty body. */
+static void
+_durations_print(void)
+{
+    int order[LFG_CT_DURATIONS_MAX];
+    int shown;
+    int i;
+
+    if (!_durations_set || 0 == _duration_count)
+    {
+        return;
+    }
+
+    _durations_order(order);
+    shown = _durations_shown();
+
+    printf("*** Slowest %d of %d test%s:\r\n", shown, _duration_count, (1 == _duration_count) ? "" : "s");
+    for (i = 0; i < shown; i++)
+    {
+        const _duration_t *d = &_durations[order[i]];
+
+        /* Milliseconds at the same %.3f precision as the verbose
+         * per-test banner, so the two renderings of one number agree. */
+        printf("*** %10.3f ms  ", d->time_sec * 1000.0);
+        if (d->suite_name && d->suite_name[0])
+        {
+            printf("%s::%s\r\n", d->suite_name, d->test_name ? d->test_name : "(unnamed)");
+        }
+        else
+        {
+            printf("%s\r\n", d->test_name ? d->test_name : "(unnamed)");
+        }
+    }
+    if (_duration_dropped > 0)
+    {
+        printf("*** %d further test%s unranked: the durations cap (LFG_CT_DURATIONS_MAX = %d) was reached\r\n",
+                _duration_dropped, (1 == _duration_dropped) ? "" : "s", LFG_CT_DURATIONS_MAX);
     }
 }
 
@@ -1483,6 +1708,8 @@ _filter_state_reset(void)
     _verbosity = LFG_CT_VERBOSITY_DEFAULT;
     _seed_set = 0;
     _seed_value = 0;
+    _durations_set = 0;
+    _durations_limit = 0;
     _rerun_failed = 0;
     _state_path = LFG_CT_STATE_PATH_DEFAULT;
     _rerun_unresolved_fatal = 0;
@@ -1500,6 +1727,7 @@ _filter_print_usage(const char *progname)
             "  --filter-exclude <glob>  Skip entries whose id matches <glob>\r\n"
             "  --strict-xpass           Treat any xpass outcome as a failure (exit non-zero)\r\n"
             "  -x, --fail-fast          Stop the run at the first failing test\r\n"
+            "  --durations <n>          After the run, list the <n> slowest tests; 0 lists all\r\n"
             "  --seed <n>               Seed rand() with <n> to replay a prior run\r\n"
             "  --rerun-failed           Run only the tests the previous run recorded as failed,\r\n"
             "                           restoring that run's seed\r\n"
@@ -1681,6 +1909,47 @@ lfg_ct_parse_args(int argc, char *argv[])
 
             _seed_value = parsed;
             _seed_set = 1;
+            continue;
+        }
+        if (0 == strcmp(a, "--durations"))
+        {
+            /* Scalar with a value, sharing --seed's parser: the bare
+             * digit-run rule is what rejects "-1" here rather than
+             * letting strtoul wrap it into a huge unsigned that then
+             * reads as a legal count. Last flag wins. */
+            const char *val;
+            unsigned parsed;
+            int rc;
+
+            if (i + 1 >= argc)
+            {
+                fprintf(stderr, "%s: %s requires an argument\r\n", progname, a);
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+            val = argv[++i];
+
+            rc = _parse_unsigned_arg(val, &parsed);
+            /* Capped at INT_MAX rather than UINT_MAX because the limit is
+             * only ever compared against a test count, which is an int. */
+            if (0 != rc || parsed > (unsigned)INT_MAX)
+            {
+                if (-2 == rc || (0 == rc && parsed > (unsigned)INT_MAX))
+                {
+                    fprintf(stderr, "%s: %s value out of range (max %d): %s\r\n", progname, a, INT_MAX, val);
+                }
+                else
+                {
+                    fprintf(stderr, "%s: %s requires a non-negative integer, got: %s\r\n", progname, a, val);
+                }
+                _filter_print_usage(progname);
+                _filter_state_reset();
+                return -1;
+            }
+
+            _durations_limit = (int)parsed;
+            _durations_set = 1;
             continue;
         }
         if (0 == strcmp(a, "--isolation"))
@@ -2256,7 +2525,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     const char *saved_skip_reason;
     int saved_xfail_set;
     const char *saved_xfail_reason;
-    clock_t time_start;
+    double time_start;
     double elapsed;
 
     if (_list_mode)
@@ -2304,7 +2573,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     saved_failure_heap = _failure_msg_heap;
     _failure_msg_inline[0] = '\0';
     _failure_msg_heap = NULL;
-    time_start = clock();
+    time_start = _monotonic_sec();
 
     memcpy(saved_env, _skip_env, sizeof(jmp_buf));
     saved_active = _skip_env_active;
@@ -2356,7 +2625,7 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
     memcpy(_skip_env, saved_env, sizeof(jmp_buf));
     _skip_env_active = saved_active;
 
-    elapsed = (double)(clock() - time_start) / (double)CLOCKS_PER_SEC;
+    elapsed = _monotonic_sec() - time_start;
     if (elapsed < 0.0)
     {
         elapsed = 0.0;
@@ -2435,6 +2704,11 @@ void _lfg_ct_test_impl_inproc(void (*fn)(void), const char *name)
             message = NULL;
         }
 
+        /* First of the two durations feed sites. Ahead of the reporter
+         * fire so the accumulator sees every classified test whether or
+         * not a reporter is installed. */
+        _durations_record(_current_suite_name, name, elapsed);
+
         if (_reporter && _reporter->on_record)
         {
             lfg_ct_record_t rec;
@@ -2505,6 +2779,15 @@ void lfg_ct_print_summary(void)
 
     _failgroup_print();
     printf("*** Testing complete. Result: %s\r\n", verdict);
+
+    /* Deliberately *after* the verdict, unlike the failure summary above.
+     * The verdict-stays-last rule exists so a tail or a grep of a default
+     * run's log still finds it; --durations is opt-in, so a run that asks
+     * for the block has already accepted trailing output, and putting the
+     * ranking last keeps it adjacent to the prompt where the reader is
+     * looking. Still ahead of on_run_complete, so a buffering reporter's
+     * flush stays the last thing the run emits. */
+    _durations_print();
 
     /* Reporter's run-complete hook. A buffering reporter (e.g. the
      * contrib JUnit emitter) flushes its accumulated state here. A
@@ -2822,6 +3105,12 @@ void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t
             break;
     }
 
+    /* Second of the two durations feed sites. Missing this one would
+     * leave a fork-isolated run reporting an empty durations block --
+     * the parent projects the child's classification, so this is the
+     * only place a forked test's elapsed time reaches the runner. */
+    _durations_record(_current_suite_name, name, time_sec);
+
     if (_reporter && _reporter->on_record)
     {
         lfg_ct_record_t rec;
@@ -3091,6 +3380,100 @@ int lfg_ct_self_failgroup_count_at(int rank)
     int i = _failgroup_at(rank);
 
     return (i < 0) ? -1 : _failgroups[i].count;
+}
+
+/* Durations hooks. The accumulator is fed by real dispatches, so unlike
+ * the two blocks above these exist less to bypass expect-failures mode
+ * than to make the *ranking* observable without parsing stdout -- and to
+ * let a cap test seed LFG_CT_DURATIONS_MAX + 1 entries without
+ * registering that many tests. Note that the runner's own tests keep
+ * appending to this table as they classify, so a self-test that inspects
+ * it must reset first. */
+void lfg_ct_self_durations_note(const char *suite, const char *test, double time_sec)
+{
+    _durations_record(suite, test, time_sec);
+}
+
+void lfg_ct_self_durations_reset(void)
+{
+    _durations_clear();
+}
+
+void lfg_ct_self_durations_set(int enabled, int limit)
+{
+    _durations_set = enabled ? 1 : 0;
+    _durations_limit = limit;
+}
+
+int lfg_ct_self_durations_enabled(void)
+{
+    return _durations_set;
+}
+
+int lfg_ct_self_durations_limit(void)
+{
+    return _durations_limit;
+}
+
+int lfg_ct_self_durations_count(void)
+{
+    return _duration_count;
+}
+
+int lfg_ct_self_durations_dropped(void)
+{
+    return _duration_dropped;
+}
+
+int lfg_ct_self_durations_cap(void)
+{
+    return LFG_CT_DURATIONS_MAX;
+}
+
+int lfg_ct_self_durations_shown(void)
+{
+    if (!_durations_set || 0 == _duration_count)
+    {
+        return 0;
+    }
+    return _durations_shown();
+}
+
+/* Rank-indexed accessors, same contract as the failure summary's: @p rank
+ * walks the block's display order (time descending, ties in
+ * classification order), so the ordering itself is what is observed. */
+static int
+_durations_at(int rank)
+{
+    int order[LFG_CT_DURATIONS_MAX];
+
+    if (rank < 0 || rank >= _duration_count)
+    {
+        return -1;
+    }
+    _durations_order(order);
+    return order[rank];
+}
+
+const char *lfg_ct_self_durations_name_at(int rank)
+{
+    int i = _durations_at(rank);
+
+    return (i < 0) ? NULL : _durations[i].test_name;
+}
+
+const char *lfg_ct_self_durations_suite_at(int rank)
+{
+    int i = _durations_at(rank);
+
+    return (i < 0) ? NULL : _durations[i].suite_name;
+}
+
+double lfg_ct_self_durations_time_at(int rank)
+{
+    int i = _durations_at(rank);
+
+    return (i < 0) ? -1.0 : _durations[i].time_sec;
 }
 
 int lfg_ct_self_rerun_recorded_count(void)
