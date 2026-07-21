@@ -1134,6 +1134,12 @@ static int _duration_count = 0;
  * the cap from a silent truncation into a reported one. */
 static int _duration_dropped = 0;
 
+/* Scratch for _durations_order's result. File-static rather than a local in
+ * each caller: at the current cap that is a ~4 KB stack frame per call, and
+ * neither caller is reentrant, so raising LFG_CT_DURATIONS_MAX stays a BSS
+ * cost instead of quietly becoming a stack-overflow one. */
+static int _duration_order[LFG_CT_DURATIONS_MAX];
+
 /* Retain one classified test's elapsed time. Called from both fan-out
  * sites for every outcome, not just PASS: a slow SKIP or XFAIL is exactly
  * as interesting to a "why is this suite slow" question. */
@@ -1159,7 +1165,7 @@ _durations_clear(void)
     _duration_dropped = 0;
 }
 
-/* Fill @p order with entry indices in display order: elapsed time
+/* Fill _duration_order with entry indices in display order: elapsed time
  * descending, ties broken by the order the tests classified in.
  *
  * The tie-break is a correctness requirement, not a nicety: tests whose
@@ -1169,18 +1175,18 @@ _durations_clear(void)
  * and stable, which is what makes the tie-break fall out of the table's
  * own build order -- the same shape _failgroup_order uses. */
 static void
-_durations_order(int *order)
+_durations_order(void)
 {
     int i;
     int j;
 
     for (i = 0; i < _duration_count; i++)
     {
-        for (j = i; j > 0 && _durations[order[j - 1]].time_sec < _durations[i].time_sec; j--)
+        for (j = i; j > 0 && _durations[_duration_order[j - 1]].time_sec < _durations[i].time_sec; j--)
         {
-            order[j] = order[j - 1];
+            _duration_order[j] = _duration_order[j - 1];
         }
-        order[j] = i;
+        _duration_order[j] = i;
     }
 }
 
@@ -1205,7 +1211,6 @@ _durations_shown(void)
 static void
 _durations_print(void)
 {
-    int order[LFG_CT_DURATIONS_MAX];
     int shown;
     int i;
 
@@ -1214,13 +1219,17 @@ _durations_print(void)
         return;
     }
 
-    _durations_order(order);
+    _durations_order();
     shown = _durations_shown();
 
-    printf("*** Slowest %d of %d test%s:\r\n", shown, _duration_count, (1 == _duration_count) ? "" : "s");
+    /* "ranked", not just "tests": once the cap trips _duration_count is the
+     * retained count, not the run's, so the bare wording would claim "of 1024
+     * tests" for a run of 1061. The follow-up line carries the remainder, but
+     * the header should not need it to be read honestly. */
+    printf("*** Slowest %d of %d ranked test%s:\r\n", shown, _duration_count, (1 == _duration_count) ? "" : "s");
     for (i = 0; i < shown; i++)
     {
-        const _duration_t *d = &_durations[order[i]];
+        const _duration_t *d = &_durations[_duration_order[i]];
 
         /* Milliseconds at the same %.3f precision as the verbose
          * per-test banner, so the two renderings of one number agree. */
@@ -3445,14 +3454,12 @@ int lfg_ct_self_durations_shown(void)
 static int
 _durations_at(int rank)
 {
-    int order[LFG_CT_DURATIONS_MAX];
-
     if (rank < 0 || rank >= _duration_count)
     {
         return -1;
     }
-    _durations_order(order);
-    return order[rank];
+    _durations_order();
+    return _duration_order[rank];
 }
 
 const char *lfg_ct_self_durations_name_at(int rank)

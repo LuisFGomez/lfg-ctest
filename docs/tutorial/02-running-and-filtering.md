@@ -273,7 +273,7 @@ the summary, the way `pytest --durations` does:
 $ ./test_indicators --durations 5
 *** Executed 1841 assertions in 655 tests. Failures: 0, Skipped: 0, XFail: 0, XPass: 0
 *** Testing complete. Result: PASS
-*** Slowest 5 of 655 tests:
+*** Slowest 5 of 655 ranked tests:
 ***  31240.118 ms  suite_e2e::test_e2e_full_pipeline
 ***  28004.771 ms  suite_e2e::test_e2e_lagged
 ***  27991.006 ms  suite_e2e::test_e2e_validation

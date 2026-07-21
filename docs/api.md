@@ -696,7 +696,7 @@ every `-v` line by eye. It prints a ranking after the summary:
 $ ./test_indicators --durations 5
 *** Executed 1111 assertions in 655 tests. Failures: 0, Skipped: 0, XFail: 0, XPass: 0
 *** Testing complete. Result: PASS
-*** Slowest 5 of 655 tests:
+*** Slowest 5 of 655 ranked tests:
 ***  31240.118 ms  suite_e2e::test_e2e_full_pipeline
 ***  28004.771 ms  suite_e2e::test_e2e_lagged
 ***  27991.006 ms  suite_e2e::test_e2e_validation
@@ -738,7 +738,7 @@ run and still classify — only their ranking is lost, and the block says
 so rather than silently truncating:
 
 ```
-*** Slowest 5 of 1024 tests:
+*** Slowest 5 of 1024 ranked tests:
 ...
 *** 37 further tests unranked: the durations cap (LFG_CT_DURATIONS_MAX = 1024) was reached
 ```

@@ -571,9 +571,17 @@ the "Elapsed wall-clock seconds" contract `lfg-ctest.h` already stated
 for `lfg_ct_record_t.time_sec`.
 
 `lfg-ctest.c` gained the same `#ifndef _POSIX_C_SOURCE` guard the fork TU
-carries, so a strict `-std=c99` consumer still sees `clock_gettime`. A
-target without `CLOCK_MONOTONIC` falls back to `clock()` at the old
-semantics.
+carries, so a strict `-std=c99` consumer of the multi-file build still sees
+`clock_gettime`. A target without `CLOCK_MONOTONIC` falls back to `clock()`
+at the old semantics.
+
+That per-TU guard does **not** carry the amalgamated build: `amalgamate.c`
+emits the header section — including `lfg-ctest.h`'s `<stdio.h>` — ahead of
+the implementation, and glibc fixes its feature-test state at the first
+system include, so a define below that point is inert. `amalgamate.c` therefore
+emits the same `#ifndef _POSIX_C_SOURCE` block into the generated preamble,
+above every include. Both TU-level guards stay where they are; they are what
+the multi-file build uses, and the `#ifndef` makes the duplication harmless.
 
 The observable consequence for existing consumers is that `-v` elapsed
 figures and the `time` attribute `contrib/junit-xml` writes both move

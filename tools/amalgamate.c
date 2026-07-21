@@ -418,7 +418,17 @@ main(int argc, char **argv)
             " *                             deprecation #warning. Removed next release.\n"
             " */\n\n"
             "#ifndef LFG_CTEST_SINGLE_H_\n"
-            "#define LFG_CTEST_SINGLE_H_\n\n");
+            "#define LFG_CTEST_SINGLE_H_\n\n"
+            "/* POSIX.1-2008 surface (clock_gettime, CLOCK_MONOTONIC), needed by the\n"
+            " * implementation section. It is hoisted here rather than left in the\n"
+            " * per-TU guards it also carries: this file emits the header section --\n"
+            " * and its <stdio.h> -- ahead of the implementation, and the first system\n"
+            " * include is what fixes glibc's feature-test state. Defining it below\n"
+            " * that point is a no-op, which would drop a strict -std=c99 consumer of\n"
+            " * this single-header back to clock(). */\n"
+            "#ifndef _POSIX_C_SOURCE\n"
+            "#define _POSIX_C_SOURCE 200809L\n"
+            "#endif\n\n");
 
     int i;
     for (i = 0; i < m.header_count; i++)
