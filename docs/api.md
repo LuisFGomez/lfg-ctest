@@ -865,6 +865,73 @@ Platform + opt-out:
   unconditionally — consumer code that references it still compiles
   in both builds.
 
+Child-exit hooks (fork mode + runtime that writes at `atexit`):
+
+- Forked children leave through `_exit()`, which skips `atexit`
+  handlers. Runtimes that write results from an exit handler (gcov,
+  LLVM source-based coverage, LeakSanitizer) lose the child's data.
+- `int lfg_ct_register_child_exit_hook(void (*hook)(void));` queues a
+  hook to run in each forked child after the child's `fflush(NULL)` and
+  before `_exit()`. Returns `0` on success, `0` (no-op) if the same
+  pointer is already registered, and `-1` if `hook` is `NULL` or 8
+  distinct hooks are already registered.
+- Hooks run once per forked test, in registration order. They never run
+  in the parent, under `LFG_CT_ISOLATE_NONE`, or in a child that
+  crashed. Hook time is not budgeted separately: it
+  draws down the same `lfg_ct_set_fork_timeout_ms` deadline as the test
+  body, so a slow hook can get the child killed mid-hook, reported as a
+  timeout rather than a hook failure. With no hook registered the child exit
+  sequence is unchanged.
+- Under `LFG_CTEST_ENABLE_FORK=OFF` registration returns the same
+  values, but no child exists, so hooks never fire.
+- Registrations made inside a test body affect only that child.
+
+Recipes (compile the consumer with the runtime's flags, then register
+before running tests):
+
+```c
+/* gcov: build with --coverage -DMY_COVERAGE */
+#ifdef MY_COVERAGE
+extern void __gcov_dump(void);
+#endif
+
+/* LLVM source-based coverage: build with -fprofile-instr-generate */
+#ifdef MY_LLVM_PROFILE
+extern int __llvm_profile_write_file(void);
+static void llvm_profile_dump(void) { (void)__llvm_profile_write_file(); }
+#endif
+
+/* LeakSanitizer: build with -fsanitize=address (or =leak) */
+#ifdef MY_LSAN
+extern void __lsan_do_leak_check(void);
+#endif
+
+int main(int argc, char *argv[])
+{
+#ifdef MY_COVERAGE
+    lfg_ct_register_child_exit_hook(__gcov_dump);
+#endif
+#ifdef MY_LLVM_PROFILE
+    lfg_ct_register_child_exit_hook(llvm_profile_dump);
+#endif
+#ifdef MY_LSAN
+    lfg_ct_register_child_exit_hook(__lsan_do_leak_check);
+#endif
+    /* ... run tests ... */
+}
+```
+
+The library never references these symbols. The consumer's own `extern`
+is what links them in, so a build without the runtime flags has no new
+link requirement.
+
+Choosing between the two:
+
+- No fork isolation needed: build with `-DLFG_CTEST_ENABLE_FORK=OFF`.
+  No hook, no child, nothing to flush.
+- Fork isolation plus coverage or LSan in one build: keep fork mode and
+  register the matching hook.
+
 Out of scope:
 
 - **Nested forks inside a test.** Test code that calls `fork(2)`

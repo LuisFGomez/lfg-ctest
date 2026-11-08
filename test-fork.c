@@ -1209,12 +1209,141 @@ test_fork_durations_collected_like_in_process(void)
 }
 
 /* ============================================================================
+ *  Child-exit hook registry
+ * ========================================================================== */
+
+/* Internal bridge from lfg-ctest.c, not in lfg-ctest.h. */
+extern void _lfg_ct_run_child_exit_hooks(void);
+
+/* The registry has no reset, so hooks registered here persist for the
+ * rest of the run. The marker hook is a no-op unless _marker_fd is open. */
+static int _marker_fd = -1;
+
+static void
+_marker_hook(void)
+{
+    char byte = 'x';
+
+    if (_marker_fd < 0)
+    {
+        return;
+    }
+    (void)write(_marker_fd, &byte, 1);
+}
+
+#define _NOOP_HOOK(n) \
+    static void _noop_hook_##n(void) {}
+_NOOP_HOOK(1)
+_NOOP_HOOK(2)
+_NOOP_HOOK(3)
+_NOOP_HOOK(4)
+_NOOP_HOOK(5)
+_NOOP_HOOK(6)
+_NOOP_HOOK(7)
+#undef _NOOP_HOOK
+
+static void
+_extra_hook(void)
+{
+}
+
+/* Returns the number of marker bytes the body's forked child wrote. */
+static int
+_run_marker_case(lfg_ct_isolation_t mode)
+{
+    int fds[2];
+    char buf[8];
+    int total = 0;
+    ssize_t n;
+
+    ASSERT_INT_EQUAL(0, pipe(fds));
+    _marker_fd = fds[1];
+
+    lfg_ct_set_isolation(mode);
+    lfg_ct_test_impl(_body_pass, "child_exit_hook_marker");
+    lfg_ct_set_isolation(LFG_CT_ISOLATE_NONE);
+
+    _marker_fd = -1;
+    close(fds[1]);
+    while (0 < (n = read(fds[0], buf, sizeof(buf))))
+    {
+        total += (int)n;
+    }
+    close(fds[0]);
+    return total;
+}
+
+static void
+test_child_exit_hook_zero_registered_is_noop(void)
+{
+    /* Must not crash or write anything when called directly in the parent.
+     * Only holds while the registry is empty: there is no reset, so this
+     * must stay listed before the hook-registering tests in
+     * suite_fork_isolation_tests. */
+    _lfg_ct_run_child_exit_hooks();
+}
+
+static void
+test_child_exit_hook_rejects_null(void)
+{
+    ASSERT_INT_EQUAL(-1, lfg_ct_register_child_exit_hook(NULL));
+}
+
+static void
+test_child_exit_hook_fires_once_per_forked_test(void)
+{
+    /* Registering the same pointer twice must succeed both times and
+     * must not add a second invocation: the child still writes exactly
+     * one byte. The parent never runs the hook, so a parent-side call
+     * would show up as a second byte. */
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_marker_hook));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_marker_hook));
+
+    ASSERT_INT_EQUAL(1, _run_marker_case(LFG_CT_ISOLATE_FORK));
+}
+
+static void
+test_child_exit_hook_silent_under_isolation_none(void)
+{
+    /* The hook is still registered from the test above. In-process
+     * dispatch runs the body in the parent with no child exit path,
+     * so nothing is written. */
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_marker_hook));
+
+    ASSERT_INT_EQUAL(0, _run_marker_case(LFG_CT_ISOLATE_NONE));
+}
+
+static void
+test_child_exit_hook_capacity(void)
+{
+    /* Marker plus seven no-ops fills the eight slots. Re-registering the
+     * marker is a dedup hit, so it doesn't use a slot. A ninth distinct
+     * pointer must fail. */
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_marker_hook));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_1));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_2));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_3));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_4));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_5));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_6));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_hook_7));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_marker_hook));
+
+    ASSERT_INT_EQUAL(-1, lfg_ct_register_child_exit_hook(_extra_hook));
+}
+
+/* ============================================================================
  *  Suite + main
  * ========================================================================== */
 
 static void
 suite_fork_isolation_tests(void)
 {
+    lfg_ct_test(test_child_exit_hook_zero_registered_is_noop);
+    lfg_ct_test(test_child_exit_hook_rejects_null);
+    lfg_ct_test(test_child_exit_hook_fires_once_per_forked_test);
+    lfg_ct_test(test_child_exit_hook_silent_under_isolation_none);
+    lfg_ct_test(test_child_exit_hook_capacity);
     lfg_ct_test(test_set_isolation_round_trip);
     lfg_ct_test(test_set_fork_timeout_round_trip);
     lfg_ct_test(test_fork_pass_case);

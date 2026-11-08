@@ -341,7 +341,9 @@ The fork runner:
    increments live in its own address space and don't survive `_exit`.
    Length-prefixing is what lets an assertion message of any size
    cross; a *complete header* remains the "payload present" signal, so
-   the "no payload means the child crashed" test is unchanged.
+   the "no payload means the child crashed" test is unchanged. Then
+   flushes stdio, runs the child-exit hooks, flushes again, and `_exit`s
+   (see "Child-exit hooks" below).
 3. **Parent**: drains the pipe *while* waiting, never after — a message
    larger than the pipe buffer blocks the child in `write(2)`, so
    reaping first would deadlock the pair. With a timeout configured
@@ -368,8 +370,9 @@ print landed.
 
 That inheritance is on the *descriptor*, not on the stdio buffer, so
 it depends on a two-sided `fflush(NULL)`: the parent flushes before
-`fork(2)`, the child flushes before `_exit`. Both halves are load
-bearing. Without the child's, everything it buffered is discarded --
+`fork(2)`, the child flushes, runs the child-exit hooks, then flushes
+again before `_exit`. Both halves are load bearing. Without the child's,
+everything it buffered is discarded --
 `_exit` deliberately skips stdio cleanup, so on a fully-buffered
 stdout (any pipe or file, i.e. every CI run) the per-test detail
 output vanishes while the same run on a TTY is complete, because line
@@ -384,7 +387,7 @@ crashing, not something the two-sided flush can close.
 
 ### Bridge surface (lfg-ctest.c <-> lfg-ctest-fork.c)
 
-Three internal symbols (extern-declared in the fork TU, not in any
+Seven internal symbols (extern-declared in the fork TU, not in any
 public header):
 
 | Symbol | Direction | Role |
@@ -395,6 +398,7 @@ public header):
 | `_lfg_ct_record_external` | `lfg-ctest.c` exports | Project a child's classified outcome onto parent-side counters + reporter. Mirrors the post-classification block of the in-process path. |
 | `_lfg_ct_fork_available` | `lfg-ctest-fork.c` exports | `lfg_ct_set_isolation` calls this to decide whether to accept `LFG_CT_ISOLATE_FORK`. The disabled-build / non-Unix stub returns 0. |
 | `_lfg_ct_fork_run_test` | `lfg-ctest-fork.c` exports | The dispatcher itself. Disabled-build / non-Unix stub returns -1 with no fork-related code linked. |
+| `_lfg_ct_run_child_exit_hooks` | `lfg-ctest.c` exports | Calls each registered child-exit hook in registration order. Compiled in every build; the disabled-build stub runner never calls it. |
 
 ### Compile-time opt-out (`LFG_CT_DISABLE_FORK`)
 
@@ -409,6 +413,74 @@ consumer code that references it still compiles.
 `LFG_CT_DISABLE_FORK=1` to exercise the opt-out path -- mirrors the
 self-contained pattern that `test-amalg` uses. `nm -u` on the
 resulting binary shows zero fork-family imports.
+
+### Child-exit hooks (`lfg_ct_register_child_exit_hook`)
+
+Runtimes that write results from an `atexit` handler (gcov, LLVM
+source-based coverage, LeakSanitizer) lose them in a forked child: the
+child leaves through `_exit`, which skips `atexit`. A consumer registers
+the runtime's dump function, and the child runs it on the way out:
+
+```
+child, after the pipe write
+    fflush(NULL)
+    _lfg_ct_run_child_exit_hooks()   /* registration order */
+    fflush(NULL)                     /* hook output reaches the shared fd */
+    _exit(status)
+```
+
+Registry mechanics (file-static in `lfg-ctest.c`):
+
+- Fixed array of 8 function pointers plus a count.
+- `lfg_ct_register_child_exit_hook()` returns -1 for `NULL` or when 8
+  distinct hooks are already held; otherwise 0.
+- Dedup is by pointer identity. Registering a pointer already present
+  returns 0 and changes nothing, so each hook runs once per child exit.
+- No API removes an entry.
+- The walker is compiled in every build. In `LFG_CT_DISABLE_FORK`
+  builds registration behaves the same, but the stub runner never calls
+  the walker, so nothing fires.
+
+When hooks run:
+
+- Only in a forked child that reaches the exit path.
+- Never in the parent, never under `LFG_CT_ISOLATE_NONE` (plain `exit()`
+  already runs the runtime handlers there), never in a child killed by
+  a signal before it reaches the exit path.
+- Hook execution is not a separate budget: it counts against the same
+  timeout deadline as the test body, measured from before `fork()`. A
+  hook that runs long enough to push the child past that deadline gets
+  killed mid-hook and the test is reported as timed out, not as a hook
+  failure.
+- A crash inside a hook marks the test `FAILED` with "killed by signal N",
+  even when the body passed.
+- A registration made inside a test body exists only in that child.
+
+Hook per runtime. The consumer declares the symbol under its own
+coverage or sanitizer guard; the library never names these symbols:
+
+| Runtime | Compile flag | Hook |
+|---------|--------------|------|
+| gcov | `--coverage` | `__gcov_dump` (`void (void)`) |
+| LLVM source-based coverage | `-fprofile-instr-generate` | `__llvm_profile_write_file` via a `static void` wrapper (returns `int`) |
+| LeakSanitizer | `-fsanitize=leak` or `address` | `__lsan_do_leak_check` |
+
+```c
+#ifdef MY_COVERAGE
+extern void __gcov_dump(void);
+#endif
+
+/* before running tests */
+#ifdef MY_COVERAGE
+lfg_ct_register_child_exit_hook(__gcov_dump);
+#endif
+```
+
+Relation to `LFG_CT_DISABLE_FORK`: the opt-out removes the child, so
+there is no `_exit` to guard and no hook to register. Use it when fork
+isolation is not needed. When a build keeps fork isolation and also
+needs coverage or LSan, register the matching hook. The call compiles
+and returns in both configurations, so one consumer source serves both.
 
 ### Self-test interaction (`_expect_failures_mode`)
 

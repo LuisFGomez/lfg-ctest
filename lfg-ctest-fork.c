@@ -39,6 +39,11 @@
  *      child buffered is discarded. Only visible when stdout is not a
  *      TTY: line buffering hides the bug by flushing at each newline,
  *      while a pipe or file buffers 4-8KB and loses the lot.
+ *    - Child runs its registered exit hooks, then flushes again, before
+ *      @c _exit(). Hooks cover runtimes that dump state from an
+ *      @c atexit() handler (gcov counters, LLVM profiles, LSan), which
+ *      @c _exit() also skips. The flush after them carries any output
+ *      a hook printed.
  */
 
 /* POSIX.1-2008 surface (clock_gettime, CLOCK_MONOTONIC, struct timespec,
@@ -292,6 +297,7 @@ extern void _lfg_ct_set_active_reporter_direct(const lfg_ct_reporter_t *reporter
 extern void _lfg_ct_record_external(const char *name, double time_sec, lfg_ct_outcome_t outcome, const char *message,
         int assertions_executed_delta, int assertions_passed_delta, int assertions_failed_delta,
         int print_outcome_line);
+extern void _lfg_ct_run_child_exit_hooks(void);
 
 /* Capture reporter installed in the child. Records the in-process
  * classification's outcome+message into the payload that will be
@@ -469,8 +475,13 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
 
         /* _exit() skips stdio cleanup, so push the test's own output
          * (assertion-failure lines, anything the body printed) to the
-         * shared descriptor first. Sole child exit point, so one flush
-         * covers every path through the branch. */
+         * shared descriptor first. Sole child exit point. */
+        fflush(NULL);
+
+        /* _exit() skips atexit() handlers, where gcov, LLVM profile and
+         * LSan write their data, so hooks run first. The flush carries
+         * whatever they printed. */
+        _lfg_ct_run_child_exit_hooks();
         fflush(NULL);
 
         _exit(LFG_CT_FAILED == (lfg_ct_outcome_t)out.hdr.outcome ? 1 : 0);
@@ -495,8 +506,8 @@ _lfg_ct_fork_run_test(void (*fn)(void), const char *name, unsigned timeout_ms)
          * as one that stalls.
          *
          * EOF is not the same event as child exit: the child closes
-         * the write end before its final fflush(NULL), so a child
-         * wedged in that flush has already produced EOF. Hence the
+         * the write end before its exit-path flushes and hooks, so a
+         * child wedged in one of them has already produced EOF. Hence the
          * reap below polls under the deadline too, instead of blocking
          * -- a blocking wait there would let such a child escape the
          * timeout entirely. */

@@ -860,6 +860,25 @@ void lfg_ct_set_fork_timeout_ms(unsigned timeout_ms);
 /** Query the current fork-mode per-test timeout (milliseconds). */
 unsigned lfg_ct_get_fork_timeout_ms(void);
 
+/** Register @p hook to run in a forked test child just before it exits.
+ *
+ *  Hooks run after the child's stdio flush and before @c _exit(), in
+ *  registration order, once per child. Use this for runtimes that write
+ *  results from an @c atexit handler, which @c _exit() skips:
+ *  @c __gcov_dump for gcov, @c __llvm_profile_write_file for LLVM
+ *  source-based coverage, @c __lsan_do_leak_check for LeakSanitizer.
+ *  Hooks never run in the parent, under @ref LFG_CT_ISOLATE_NONE, or in a
+ *  child that crashed. Hooks cannot be de-registered.
+ *
+ *  Returns 0 on success. Registering a pointer that is already registered
+ *  is a no-op that returns 0. Returns -1 if @p hook is @c NULL or the
+ *  registry (8 distinct entries) is full.
+ *
+ *  In @c LFG_CT_DISABLE_FORK builds the call still returns 0 or -1 by the
+ *  same rules, but no hook ever fires.
+ */
+int lfg_ct_register_child_exit_hook(void (*hook)(void));
+
 /*============================================================================
  *  Reporter callback contract
  *

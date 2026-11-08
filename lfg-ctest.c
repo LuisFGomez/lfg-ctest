@@ -264,6 +264,12 @@ _quiet_mode(void)
 static lfg_ct_isolation_t _isolation = LFG_CT_ISOLATE_NONE;
 static unsigned _fork_timeout_ms = 0;
 
+/* Child-exit hooks run in a forked child before _exit(). Fixed capacity
+ * so registration never allocates in a coverage/sanitizer build. */
+#define _LFG_CT_CHILD_EXIT_HOOK_MAX 8
+static void (*_lfg_ct_child_exit_hooks[_LFG_CT_CHILD_EXIT_HOOK_MAX])(void);
+static size_t _lfg_ct_child_exit_hook_count = 0;
+
 /* Provided by lfg-ctest-fork.c. The fork TU always defines both --
  * the compile-time opt-out / unsupported-platform path provides a
  * stub returning 0 / -1 with no fork-related code linked in. */
@@ -3000,6 +3006,32 @@ unsigned lfg_ct_get_fork_timeout_ms(void)
     return _fork_timeout_ms;
 }
 
+int lfg_ct_register_child_exit_hook(void (*hook)(void))
+{
+    size_t i;
+
+    if (NULL == hook)
+    {
+        return -1;
+    }
+
+    for (i = 0; i < _lfg_ct_child_exit_hook_count; i++)
+    {
+        if (_lfg_ct_child_exit_hooks[i] == hook)
+        {
+            return 0;
+        }
+    }
+
+    if (_lfg_ct_child_exit_hook_count >= _LFG_CT_CHILD_EXIT_HOOK_MAX)
+    {
+        return -1;
+    }
+
+    _lfg_ct_child_exit_hooks[_lfg_ct_child_exit_hook_count++] = hook;
+    return 0;
+}
+
 /* Internal bridges consumed by lfg-ctest-fork.c. Not part of the
  * public API; kept out of lfg-ctest.h on purpose. Declared here so
  * the fork TU sees the prototypes via extern declarations local to
@@ -3036,6 +3068,16 @@ void _lfg_ct_counter_snapshot(int *executed, int *passed, int *failed)
     if (failed)
     {
         *failed = _assertions_failed;
+    }
+}
+
+void _lfg_ct_run_child_exit_hooks(void)
+{
+    size_t i;
+
+    for (i = 0; i < _lfg_ct_child_exit_hook_count; i++)
+    {
+        _lfg_ct_child_exit_hooks[i]();
     }
 }
 

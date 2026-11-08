@@ -47,6 +47,19 @@ test_fork_isolate_set_returns_error(void)
 }
 
 static void
+_noop_child_exit_hook(void)
+{
+}
+
+static void
+test_child_exit_hook_register_contract(void)
+{
+    /* Same return rules as the forking build; no hook ever fires here. */
+    ASSERT_INT_EQUAL(-1, lfg_ct_register_child_exit_hook(NULL));
+    ASSERT_INT_EQUAL(0, lfg_ct_register_child_exit_hook(_noop_child_exit_hook));
+}
+
+static void
 test_isolate_none_still_works(void)
 {
     /* The in-process path is unaffected by the opt-out. */
@@ -103,6 +116,7 @@ suite_fork_disabled_tests(void)
 {
     lfg_ct_test(test_fork_isolate_enum_is_unconditionally_visible);
     lfg_ct_test(test_fork_isolate_set_returns_error);
+    lfg_ct_test(test_child_exit_hook_register_contract);
     lfg_ct_test(test_isolate_none_still_works);
     lfg_ct_test(test_fork_cli_isolation_fork_is_refused);
     lfg_ct_test(test_fork_cli_isolation_none_is_accepted);

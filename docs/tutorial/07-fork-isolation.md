@@ -157,6 +157,78 @@ That is why the graceful-fallback `if` above is the right shape: write the
 code once, and it does the right thing whether or not the runtime support is
 present.
 
+### Fork isolation with coverage or LSan
+
+`-DLFG_CTEST_ENABLE_FORK=OFF` is the right choice when you don't need fork
+isolation: there is no child and no `_exit()`, so gcov, LLVM-profile and LSan
+results come out of the normal `exit()` path with nothing to lose. Keep fork
+on and register a child-exit hook when you need both fork isolation and a
+runtime that writes its results from an `atexit` handler:
+
+```c
+int lfg_ct_register_child_exit_hook(void (*hook)(void));
+```
+
+Registration returns 0 on success, and 0 again when the same pointer is already
+registered (no-op). It returns -1 for `NULL` or once 8 distinct hooks are
+registered. Register before running tests.
+
+Hooks run only in a forked child, once per test, in registration order. The
+sequence in the child is: stdio flush, hooks, stdio flush, `_exit()`. A hook
+never runs in the parent, under `--isolation none`, or in a child that crashed.
+Hook time is not a separate budget: it draws down
+the same `--timeout` deadline as the test body, so a hook slow enough to push
+total elapsed past that deadline gets the child killed mid-hook and the test
+reported as a timeout, not a hook failure -- size the timeout to cover the
+hook's own cost. A crash inside a hook marks the test `FAILED`
+with "killed by signal N", even when the body passed. A registration made
+inside a test body affects only that child. In a `LFG_CT_DISABLE_FORK` build the call returns the same
+values and no hook fires, so the same consumer code builds in both.
+
+Register the dump function for the runtime you build with. Guard the `extern`
+and the call with your own coverage or sanitizer macro: the symbol exists only
+when the TU is built with that runtime, and an unguarded reference fails the
+link everywhere else.
+
+```c
+/* gcov: build with --coverage -DMY_COVERAGE */
+#ifdef MY_COVERAGE
+extern void __gcov_dump(void);
+#endif
+
+/* LLVM source-based coverage: build with -fprofile-instr-generate */
+#ifdef MY_LLVM_PROFILE
+extern int __llvm_profile_write_file(void);
+static void llvm_profile_dump(void) { (void)__llvm_profile_write_file(); }
+#endif
+
+/* LeakSanitizer: build with -fsanitize=address (or =leak) */
+#ifdef MY_LSAN
+extern void __lsan_do_leak_check(void);
+#endif
+
+int main(void)
+{
+#ifdef MY_COVERAGE
+    lfg_ct_register_child_exit_hook(__gcov_dump);
+#endif
+#ifdef MY_LLVM_PROFILE
+    lfg_ct_register_child_exit_hook(llvm_profile_dump);
+#endif
+#ifdef MY_LSAN
+    lfg_ct_register_child_exit_hook(__lsan_do_leak_check);
+#endif
+    /* ... run tests ... */
+}
+```
+
+In a consumer binary built with `--coverage` and the gcov hook registered, a
+run followed by `gcov` on the consumer's own object directory reports hits on
+the lines that run only in the child, matching an `--isolation none` run. The
+run must use fork mode: either the program pins it with
+`lfg_ct_set_isolation(LFG_CT_ISOLATE_FORK)` or the command line passes
+`--isolation fork`. The default is `none`, so a bare run never forks.
+
 A couple of things stay out of scope: a test that itself calls `fork(2)` is on
 its own (the parent only waits on its direct child), and Windows isolation is
 a separate follow-up.
